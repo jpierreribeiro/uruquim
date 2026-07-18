@@ -784,25 +784,158 @@ transport.
 The adapter isolates the core from socket/event-loop, HTTP parser, body
 streaming, and server runtime concerns.
 
+### Conceptual contract, not a frozen ABI
+
+The internal transport shape SHALL NOT be frozen before the first real
+adapter is implemented. The future official `core:net/http` may expose a
+blocking server, an explicit event loop, per-connection or per-request
+callbacks, its own lifecycle objects, multiple loops per thread, or internal
+workers — `core:nbio` today runs per-thread event loops with tick-driven
+callbacks executed on the loop's thread. The internal contract therefore
+expresses **what the framework needs**, not the anticipated shape of a
+library that does not exist yet:
+
+```text
+transport accepts HTTP work
+transport invokes framework dispatch
+transport commits framework response
+transport supports shutdown when available
+```
+
+A minimal private shape is sufficient until a real adapter forces decisions:
+
 ```odin
-Dispatch_Proc :: proc(req: ^Request, res: ^Response)
-
 Transport :: struct {
-	user_data: rawptr,
+	data: rawptr,
 
-	init:             proc(t: ^Transport) -> Transport_Error,
-	listen_and_serve: proc(t: ^Transport, endpoint: Endpoint, dispatch: Dispatch_Proc) -> Transport_Error,
-	shutdown:         proc(t: ^Transport),
-	destroy:          proc(t: ^Transport),
+	serve: Serve_Proc,
+	stop:  Stop_Proc,
 }
 ```
 
-The framework defines its own transport-agnostic `Request` and `Response`
-types. Phase 1 assumes buffered request bodies; streaming is a later,
-specialized API.
+This type is private. Its fields and procedures may change freely until the
+first Implementation Gate that exercises two transports.
+
+### Execution model (normative)
+
+```markdown
+The canonical handler API is synchronous from the application perspective.
+
+The transport implementation MAY execute handlers on an I/O thread, worker
+thread, or transport-managed execution context.
+
+No guarantee SHALL be made about the execution thread until the official
+transport adapter is prototyped and specified.
+```
+
+Because `core:nbio`-style loops execute callbacks on the loop's thread, a
+slow synchronous handler could stall other work on that loop. Whether the
+answer is transport-managed workers, an adapter-side thread pool, or a
+documented "don't block the I/O thread" rule is **an open question that
+cannot be closed until the official package exists**. The spec deliberately
+does not choose.
+
+### Request/Response ownership (normative)
+
+```markdown
+Public request types SHALL be framework-owned abstractions.
+
+Their underlying storage MAY be transport-owned for the duration of request
+dispatch.
+
+Applications SHALL NOT retain request-derived slices, strings, headers, or
+body views beyond the request lifecycle without making an explicit copy.
+```
+
+"Framework-owned types" means the *abstraction* is ours — it does not mean
+copying every header, path, and body into independent storage. Views over
+transport buffers are the expected implementation:
+
+```odin
+Request :: struct {
+	method:  Method,
+	path:    string,
+	query:   string,
+	headers: Header_View,
+	body:    []u8,
+}
+```
+
+Valid only during the request; anything persistent is copied with an
+explicit allocator.
+
+Phase 1 assumes buffered request bodies; streaming is a later, specialized
+API.
+
+### Test transport
 
 A **test transport** (in-memory, no sockets) is required from Phase 1 so that
 `web.test_request` works without binding ports.
+
+### Three test suites (normative)
+
+Transport correctness is verified by three separate suites — not by running
+the whole application suite against every backend:
+
+```text
+Contract suite         — runs on the test transport
+    router, extractors, middleware, responses, error envelopes, JSON,
+    404/405 — the public behavior of the framework
+
+Transport conformance suite — runs against EVERY real adapter
+    request conversion, body lifetime, header normalization, response
+    commit, connection close, timeouts, shutdown, malformed HTTP,
+    concurrency
+
+End-to-end suite       — a few complete flows over real sockets
+```
+
+The conformance suite exists **from Phase 1** as a factory-parameterized
+harness, so the bootstrap adapter is held to the same contract a future
+adapter must meet, and the first backend cannot silently shape the design:
+
+```odin
+transport_contract_test :: proc(t: ^testing.T, factory: Transport_Factory)
+```
+
+## Future Migration to `core:net/http`
+
+Migration to the future official Odin HTTP package is expected to be
+localized to the transport boundary, provided the framework preserves the
+following constraints:
+
+1. No transport-specific type is exposed through the public application API.
+2. Router, middleware, extractors, request context, response rendering, and
+   error behavior remain framework-owned.
+3. Request-derived data is valid only for the request lifecycle unless copied
+   explicitly.
+4. Buffered request bodies remain the canonical MVP contract.
+5. Every real transport must pass the transport conformance suite.
+
+The official `core:net/http` API is not yet known — official communication
+says only that it will be built on `core:nbio`, with no published API or
+timeline. Therefore, the framework SHALL NOT assume its threading model,
+callback model, ownership rules, shutdown semantics, or server lifecycle.
+Documentation SHALL refer to it as the "future official `core:net/http`
+package", never with an assumed release date.
+
+The canonical application handler API SHALL remain synchronous from the
+application developer's perspective. A transport adapter MAY invoke handlers
+directly, dispatch them to worker threads, or use transport-managed
+execution, provided public behavior remains equivalent.
+
+Migration SHALL be considered successful when:
+
+- the public application examples compile unchanged;
+- the framework contract suite remains green;
+- the new adapter passes the transport conformance suite;
+- request lifetime, response commit, concurrency, shutdown, and timeout
+  semantics are documented and tested.
+
+The architecture aims to make migration **controlled and
+application-transparent**. It does not guarantee that implementing the future
+adapter will be trivial, because the official package API and execution model
+are not yet defined.
 
 ## Lifecycle
 

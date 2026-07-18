@@ -298,6 +298,14 @@ semantics; integration tests via the in-memory test transport; negative tests
 for route conflicts; allocator/lifetime tests where possible; **compile tests
 for every documented example**.
 
+Transport testing is split into three suites (see architecture spec): the
+**contract suite** (public framework behavior, runs on the test transport),
+the **transport conformance suite** (factory-parameterized
+`transport_contract_test`, runs against every real adapter — body lifetime,
+header normalization, response commit, shutdown, malformed HTTP,
+concurrency), and a small **end-to-end suite** over real sockets. Do not
+duplicate application-level rules into per-backend tests.
+
 Must-test invariants:
 
 - Router: static beats param; param beats wildcard; duplicates rejected;

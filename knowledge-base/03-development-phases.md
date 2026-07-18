@@ -18,6 +18,9 @@ Cross-phase invariants, enforced from Phase 1 onward:
 - every documented example compiles in CI
 - `docs/ai-context.md` matches the public API at every merge
 - no code generator, no mandatory CLI, no heavy metaprogramming
+- every real transport adapter passes the factory-parameterized transport
+  conformance suite (`transport_contract_test`), which exists from Phase 1
+  so the first backend cannot silently shape the design
 
 **Note on `web.app()` defaults:** the architecture spec defines the full
 default-policy contract (recovery, limits, timeouts, 404/405, graceful
@@ -49,8 +52,13 @@ public API alone.
   `forbidden`, `not_found`, `internal_error`
 - consistent 404 behavior
 - server: `web.serve(&app, port)` with clean stop
-- internal transport boundary (`Transport` struct) prepared for
-  `core:net/http`; functional bootstrap adapter over `odin-http`
+- internal transport boundary as a **conceptual contract** (accepts HTTP
+  work → invokes dispatch → commits response → supports shutdown); the
+  private `Transport` shape is NOT frozen before the first real adapter
+- functional bootstrap adapter over `odin-http`
+- transport conformance suite skeleton:
+  `transport_contract_test(t, factory)`, run against the test transport and
+  the bootstrap adapter from day one
 - in-memory test transport + `web.test_request` (required by the tests-first
   process itself)
 
@@ -73,8 +81,15 @@ public API alone.
 - [ ] freeze `query_int_or` semantics (default only on absence; malformed
       value is a 400)
 - [ ] freeze the error envelope and initial code list
-- [ ] define `Request`/`Response` minimum fields and commit semantics
-- [ ] define the `Transport` boundary and test-transport contract
+- [ ] define `Request`/`Response` minimum fields, commit semantics, and the
+      request-lifetime view rule (no retention without explicit copy)
+- [ ] define the conceptual transport contract and the conformance suite
+      scope (request conversion, body lifetime, header normalization,
+      response commit, connection close, shutdown, malformed HTTP) —
+      WITHOUT freezing the internal `Transport` ABI
+- [ ] record the execution-model non-guarantee: handlers are synchronous
+      from the application perspective; execution thread is unspecified
+      until the official adapter is prototyped
 - [ ] define clean-stop behavior
 
 ### Test Gate checklist
@@ -88,6 +103,8 @@ public API alone.
 - [ ] unknown route returns standardized 404
 - [ ] `web.ok`/`web.created` byte-identical to equivalent `web.json` calls
 - [ ] `test_request` round-trips without sockets
+- [ ] `transport_contract_test` passes on the test transport AND the
+      bootstrap adapter
 - [ ] adapter starts and stops cleanly; response cannot be committed twice
 
 ### Implementation Gate checklist
@@ -225,10 +242,16 @@ API.
 
 ### Scope (candidates, each spec-gated individually)
 
-- **official `core:net/http` adapter** when the package ships — parity tests
-  against the bootstrap adapter; migration verified to require zero
-  application changes; bootstrap adapter then demoted or removed. (If
-  `core:net/http` ships earlier, this item may be pulled forward between
+- **official `core:net/http` adapter** when the package ships (no assumed
+  date — "coming soon" is not a schedule). Migration is successful when:
+  public application examples compile unchanged; the contract suite stays
+  green; the new adapter passes the transport conformance suite; and request
+  lifetime, response commit, concurrency, shutdown, and timeout semantics
+  are documented and tested. The bootstrap adapter is then demoted or
+  removed. The adapter's difficulty depends on the execution and ownership
+  model the official package adopts — the architecture guarantees a
+  *controlled, application-transparent* migration, not a trivial adapter.
+  (If the package ships earlier, this item may be pulled forward between
   phases.)
 - OpenAPI as an optional layer over the existing API (`web.Route_Info`
   direction); no handler rewrites required

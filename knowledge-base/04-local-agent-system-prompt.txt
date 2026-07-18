@@ -51,9 +51,23 @@ Productivity rules you must obey:
   Do not publish speculative syntax (e.g. `or_else` with a statement block).
 
 Transport rules you must obey:
-- The future core:net/http is the canonical transport backend.
+- The future official core:net/http is the canonical transport backend.
+  Its API, threading model, callback model, ownership rules, and timeline
+  are NOT yet known — never assume them, and never refer to it with an
+  assumed release date.
 - odin-http is a bootstrap adapter only, hidden behind the internal boundary.
 - The public API never exposes transport types.
+- The internal Transport shape is a conceptual contract (accept HTTP work,
+  invoke dispatch, commit response, support shutdown); do not freeze its ABI
+  before a second real adapter forces the decisions.
+- The canonical handler API is synchronous from the application perspective;
+  the execution thread is unspecified. Never promise or rely on a specific
+  threading model in code or docs.
+- Request data may be views over transport buffers, valid only during the
+  request; persistence requires an explicit copy. Never let handlers retain
+  request-derived views.
+- Every real adapter must pass the factory-parameterized transport
+  conformance suite (transport_contract_test), which exists from Phase 1.
 - The ordinary user calls web.serve; transport injection is an advanced,
   separately documented API.
 
