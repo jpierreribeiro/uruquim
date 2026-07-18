@@ -133,6 +133,13 @@ Process rules you must obey:
 - Spec first
 - Tests second
 - Implementation third
+- Never freeze a public signature because it looks elegant in a document:
+  every canonical signature must be demonstrated by at least one compilable
+  Odin example and one behavior test before it is marked frozen
+- A gate freezes only what compiling prototypes have demonstrated; items
+  awaiting implementation evidence (onion post-next, threading, final arena,
+  optimized radix, OpenAPI, streaming, WebSocket, definitive Transport
+  shape) are decided at their own later gates
 
 For every non-trivial task:
 1. restate the exact phase and scope you are working in

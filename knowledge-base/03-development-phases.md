@@ -73,8 +73,36 @@ public API alone.
   typed state)
 - OpenAPI
 
+### Freeze discipline (normative for this gate)
+
+```markdown
+No public signature SHALL be frozen merely because it looks elegant in the
+document. Every canonical signature SHALL be demonstrated by at least one
+compilable Odin example and one behavior test before it is frozen.
+```
+
+The gate freezes **only what compilable prototypes have demonstrated**:
+
+```text
+FROZEN AT THIS GATE          DELIBERATELY NOT FROZEN
+minimal public API           post-next onion semantics
+Context and lifetimes        guaranteed threading model
+extractors                   final request arena design
+responses                    optimized radix tree
+conceptual transport         OpenAPI
+  contract                   streaming
+dispatch                     WebSocket
+test transport               definitive Transport shape
+minimal conformance suite
+```
+
+Everything in the right column still depends on implementation evidence and
+is decided at its own later gate.
+
 ### Spec Gate checklist
 
+- [ ] every signature below is backed by a compiling example AND a behavior
+      test before being marked frozen
 - [ ] freeze the canonical vocabulary (app/routes/extractors/responses/serve)
 - [ ] freeze the extractor control flow: `(value, ok)` + `#optional_ok` for
       value-producing; `^$T` destination + `bool` for `web.body`

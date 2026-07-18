@@ -990,6 +990,22 @@ allocators internally; the Advanced API exposes them.
   agent context window; it is updated in the same commit as any public API
   change.
 
+## Freeze Discipline (normative)
+
+```markdown
+No public signature SHALL be frozen merely because it looks elegant in the
+document. Every canonical signature SHALL be demonstrated by at least one
+compilable Odin example and one behavior test before it is frozen.
+```
+
+Specification text proposes; compiling prototypes ratify. A gate freezes
+only what has been demonstrated in real Odin — everything else (onion
+post-`next` semantics, threading guarantees, final arena design, optimized
+radix internals, OpenAPI, streaming, WebSocket, the definitive `Transport`
+shape) waits for implementation evidence at its own later gate. This keeps
+the spec coherent with the actual language, not just internally coherent as
+a text.
+
 ## Validation (deferred, prototype-gated)
 
 Tag-driven validation (`validate:"required,min=2"`) and a
