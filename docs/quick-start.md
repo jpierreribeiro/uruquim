@@ -10,4 +10,4 @@ Will cover, using only canonical forms from `canonical-patterns.md`:
 - one GET with `path_int`, one POST with `body`
 - running and testing with `web.test_request`
 
-The Quick Start never mentions allocators, transports, or the Systems API.
+The Quick Start never mentions allocators, transports, or the Advanced API.

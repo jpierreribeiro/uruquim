@@ -25,9 +25,28 @@ This document is normative.
 > Internally data-oriented and allocator-aware; externally simple, productive,
 > and predictable.
 
+**Simple by default, explicit when needed, data-oriented underneath.**
+
 The framework SHALL hide allocator, router, transport, and response machinery
 from ordinary handlers. A user must be able to implement a typed JSON API using
 only `app`, route registration, extractors, response helpers, and `serve`.
+
+The overall structure is deliberately small:
+
+```text
+Application
+   ↓
+Canonical API
+   ↓
+Router + Context + Middleware
+   ↓
+core:net/http (via internal boundary)
+```
+
+There is no code generator, no mandatory CLI, and no heavy metaprogramming.
+Ergonomics come from extractors and canonical helpers, not from tooling.
+
+Tagline: *a web framework for the Joy of Programming.*
 
 ## Three Equal Commitments
 
@@ -59,7 +78,7 @@ separate explicit API.
 The framework SHALL provide two usage levels:
 
 1. **Productive API** — default and documented first.
-2. **Systems API** — explicit control over allocators, transport, state, and
+2. **Advanced API** — explicit control over allocators, transport, state, and
    lifecycle.
 
 The acceptance metric for the public API is:
@@ -212,31 +231,104 @@ boxing/codegen decisions and SHALL NOT block the first release.)
 ### Extractors
 
 Extractors read typed values from the request. **On failure, the extractor
-writes the standardized error response itself and returns `ok = false`; the
+writes the standardized error response itself and returns `false`; the
 handler only returns.** This is the single most important productivity
-mechanism in the framework.
+mechanism in the framework. Ergonomics come from extractors, not from code
+generation.
+
+There are exactly two extractor shapes:
 
 ```odin
+// 1. Value-producing extractor
 id, ok := web.path_int(ctx, "id")
 if !ok {
 	return
 }
 
-input, ok := web.body(ctx, Create_User)
+// 2. Destination-filling extractor
+input: Create_User
+if !web.body(ctx, &input) {
+	return
+}
+```
+
+#### Canonical Extractor Control Flow (normative)
+
+Fallible HTTP extractors SHALL return `(value, ok: bool)` and SHALL use
+`#optional_ok` where applicable:
+
+```odin
+path_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool) #optional_ok
+```
+
+When extraction fails, the extractor SHALL write the complete HTTP error
+response before returning `false`.
+
+Handlers SHALL use the following canonical form:
+
+```odin
+value, ok := web.extractor(ctx, ...)
 if !ok {
 	return
 }
-
-page  := web.query_or(ctx, "page", int, 1)
-name  := web.path_string(ctx, "name")
-state := web.state(ctx, App_State)
 ```
 
-> Note on syntax: `value := f() or_else { ... }` with a statement block is not
-> valid Odin (`or_else` takes an expression). The canonical pattern is
-> `(value, ok)` + `if !ok { return }`. If prototyping finds a strictly better
-> compiling form (e.g. `or_return` against a `web.Result`), the canonical
-> pattern may be amended **once**, before Phase 1 freezes.
+Destination-filling extractors — those that populate a caller-owned value,
+such as `web.body` — SHALL take a destination pointer and return only `bool`:
+
+```odin
+body :: proc(ctx: ^Context, dst: ^$T) -> bool
+```
+
+```odin
+input: Create_User
+if !web.body(ctx, &input) {
+	return
+}
+```
+
+The destination form keeps ownership and storage explicit, avoids a
+parametric-return API, lets the caller choose where the value lives, and
+matches traditional parsing/decoding style.
+
+The framework documentation SHALL NOT use statement blocks with `or_else`,
+because `or_else` accepts a replacement expression, not a statement block.
+This pattern may be amended once, through a spec-first change, only if a
+compiling prototype demonstrates a meaningfully clearer and equally
+predictable Odin-native alternative.
+
+#### Canonical query extractor family (normative)
+
+```markdown
+The canonical query extractor family SHALL be:
+
+- `web.query(ctx, name) -> (string, found)`     — plain lookup, no auto-response
+- `web.query_int(ctx, name) -> (int, ok)`       — required; responds on failure
+- `web.query_int_or(ctx, name, default) -> (int, ok)` — optional with default
+
+Typed query extractors SHALL use explicit type-specific procedure names.
+The MVP SHALL NOT expose a generic `web.query_or(ctx, name, type, default)`
+procedure.
+```
+
+`query_int_or` semantics: the default applies **only when the parameter is
+absent**. A present-but-malformed value is a 400 error, never silently
+replaced by the default:
+
+```text
+GET /users              → page = 1
+GET /users?page=2       → page = 2
+GET /users?page=banana  → 400 invalid_query_parameter
+```
+
+Future typed variants follow the same naming pattern (`query_bool`,
+`query_bool_or`, `query_float`, `query_float_or`): `query_<type>` /
+`query_<type>_or`. A weak LLM can infer the family without inventing
+`typeid` parameters.
+
+Path extractors follow the same style: `web.path(ctx, name) -> string`
+(present whenever the route matched) and `web.path_int(ctx, name) ->
+(int, ok)`.
 
 ### Response helpers
 
@@ -261,8 +353,29 @@ web.conflict(ctx, "email already registered")
 web.internal_error(ctx)
 ```
 
-`ok`/`created` are defined as exact shorthands of `json` with fixed status;
-they are the canonical form for those statuses.
+`ok`/`created` are the canonical form for their statuses, defined as exact,
+tiny shorthands:
+
+```odin
+ok :: proc(ctx: ^Context, value: $T) {
+	json(ctx, .OK, value)
+}
+
+created :: proc(ctx: ^Context, value: $T) {
+	json(ctx, .Created, value)
+}
+```
+
+```markdown
+`web.ok` SHALL be exactly equivalent to `web.json(ctx, .OK, value)`.
+
+`web.created` SHALL be exactly equivalent to
+`web.json(ctx, .Created, value)`.
+
+Convenience response procedures SHALL NOT introduce behavior that differs
+from the underlying renderer — no extra serialization, headers, or error
+handling.
+```
 
 ### Serving
 
@@ -274,6 +387,35 @@ web.serve_with(&app, web.Serve_Config{             // explicit configuration
 })
 web.serve_transport(&app, &transport, config)      // advanced: inject transport
 ```
+
+### Canonical vocabulary (provisionally frozen)
+
+The teaching vocabulary — the only API shown in introductory documentation:
+
+```text
+Application   web.app        web.destroy
+Server        web.serve
+
+Routes        web.get  web.post  web.put  web.patch  web.delete
+
+Middleware    web.use  web.next
+
+Input         web.path       web.path_int
+              web.query      web.query_int      web.query_int_or
+              web.header     web.bearer_token
+              web.body
+              web.state
+
+Response      web.json       web.text
+              web.ok         web.created        web.no_content
+              web.bad_request  web.unauthorized  web.forbidden
+              web.not_found    web.internal_error
+```
+
+Additional helpers (`bytes`, `redirect`, `conflict`, group/router/mount,
+built-in middleware constructors) exist in the full reference but are not
+part of the first-contact vocabulary. Frozen definitively at the Phase 1
+Spec Gate.
 
 ## Standardized Error Responses
 
@@ -376,19 +518,32 @@ A single `rawptr` isolated behind a typed, asserted accessor is acceptable; a
 `map[string]any` bag spread through the request is not. This distinction is
 normative.
 
-### Typed request state — opt-in (Systems API)
+### Typed request state — opt-in (Advanced API)
 
-Fully typed app + request state remains available for advanced users:
+The Advanced API gives explicit control over allocators, transport, limits,
+and typed state:
+
+```odin
+web.app_init(&app, web.Advanced_Config{
+	allocator         = allocator,
+	request_allocator = request_allocator,
+	transport         = transport,
+	max_body_size     = 4 * mem.Megabyte,
+})
+```
+
+Fully typed app + request state remains available here as well:
 
 ```odin
 app: web.Typed_App(App_State, Request_State)
 
-web.app_init(&app, &state, web.App_Config{
-	allocator         = allocator,
-	request_allocator = request_allocator,
-	transport         = transport,
-})
+web.app_init(&app, &state, web.Advanced_Config{...})
 ```
+
+An application-defined `Request_State` is the future home for
+middleware-produced request data (e.g. an `Auth_State` populated once and
+consulted by extractors). It belongs to the advanced typed context, never to
+the canonical `Context`.
 
 Or, if compiler ergonomics make full parametrization too costly, via
 composition:
@@ -404,7 +559,7 @@ App_Context :: struct {
 
 The rule: **typed state is an advanced capability, not a tax charged to every
 application.** The exact mechanism (parametric specialization vs. composed
-context) SHALL be validated with real Odin prototypes before the Systems API
+context) SHALL be validated with real Odin prototypes before the Advanced API
 freezes; the Productive API freezes first and independently.
 
 ### Dependencies / extraction procedures
@@ -441,6 +596,53 @@ profile :: proc(ctx: ^web.Context) {
 
 Extraction procedures follow the extractor contract: respond on failure,
 return `(value, ok)`.
+
+### Middleware-Produced Request Data (normative)
+
+The canonical `web.Context` SHALL NOT expose an untyped `user_data`,
+`locals`, `values`, or `map[string]any` field.
+
+Application-specific request values SHALL be obtained through typed
+extraction procedures, such as:
+
+```odin
+user, ok := current_user(ctx)
+if !ok {
+	return
+}
+```
+
+For the canonical API, middleware SHOULD primarily:
+
+- allow or reject request execution
+- modify HTTP response metadata
+- perform logging and observability
+- enforce transport-level policies
+
+The advanced typed-context API MAY allow middleware to populate an
+application-defined `Request_State`. Untyped request-local storage SHALL NOT
+be added to the canonical Context.
+
+**Avoiding duplicate validation.** When a handler needs the authenticated
+user, it calls `current_user` directly — the extractor authenticates and
+responds on failure, so no `require_auth` middleware is needed on that
+route. Gate-only middleware (`require_auth`) is for routes that must be
+authenticated but do not need the user value:
+
+```odin
+admin := web.group(&app, "/admin")
+web.use(&admin, require_auth)
+```
+
+Later, the advanced `Request_State` can cache the auth check so middleware
+and extractors validate at most once per request:
+
+```odin
+Auth_State :: struct {
+	checked: bool,
+	user:    Maybe(^User),
+}
+```
 
 ## Router
 
@@ -529,15 +731,23 @@ Custom middleware is an ordinary handler that calls `web.next`:
 
 ```odin
 require_auth :: proc(ctx: ^web.Context) {
-	token, ok := web.bearer_token(ctx)
-	if !ok {
+	token, found := web.bearer_token(ctx)
+	if !found {
 		web.unauthorized(ctx, "missing bearer token")
+		return
+	}
+
+	if !auth.token_is_valid(token) {
+		web.unauthorized(ctx, "invalid bearer token")
 		return
 	}
 
 	web.next(ctx)
 }
 ```
+
+Middleware gates, observes, and sets response metadata; it does not hand
+typed values to handlers (see *Middleware-Produced Request Data*).
 
 The user SHALL NOT be required to: return a new handler, assemble wrappers,
 manipulate a chain index, use `rawptr`, or provide continuation callbacks.
@@ -554,6 +764,13 @@ Deterministic cursor-based onion semantics:
 
 Ordering: app/global middleware → outer groups → inner groups → route
 middleware → terminal handler. Stable and test-covered.
+
+**Onion caveat:** post-`next` (after-response-side) semantics SHALL be
+supported only if the transport boundary can guarantee them without confusing
+behavior (e.g. around response commit). If it cannot, the contract is
+simplified to pre-handler middleware with short-circuit only. This decision
+is made at the Phase 2 Spec Gate, with a compiling prototype on the bootstrap
+transport.
 
 ### Error and panic policy
 
@@ -622,7 +839,7 @@ the temp allocator where safe. Allocator ownership is documented for every
 init/destroy pair.
 
 None of this appears in the Productive API. `web.app()` selects correct
-allocators internally; the Systems API exposes them.
+allocators internally; the Advanced API exposes them.
 
 ## AI-Friendly API Rules (normative)
 
@@ -646,14 +863,28 @@ Tag-driven validation (`validate:"required,min=2"`) and a
 `web.body_validated` extractor are attractive but SHALL NOT enter the core
 until prototypes establish: real tag-introspection capability, reflection
 cost, compile-time metadata options, diagnostic ergonomics, and binary-size
-impact. Code generation is the leading candidate mechanism.
+impact. Any solution MUST NOT require a mandatory code generator; in the
+MVP, validation is explicit procedural code in handlers and services.
 
-## Code Generation (future differentiator, not v1)
+## No Code Generation, No Mandatory CLI
 
-An optional CLI (`uruquim generate`) MAY later provide FastAPI-like ergonomics
-— attribute-driven route registration, binding, validation, OpenAPI, docs —
-by generating plain Odin code, keeping reflection and magic out of the
-runtime. The manual canonical API freezes first; codegen targets it.
+The framework ships without a code generator, without a mandatory CLI, and
+without heavy metaprogramming. This keeps the framework smaller, more
+transparent, easier to maintain — and simple enough for weaker LLMs to use
+from a handful of examples. Ergonomics come from extractors and canonical
+helpers.
+
+## OpenAPI (out of MVP)
+
+OpenAPI/automatic documentation is explicitly deferred. When it arrives, it
+SHALL be an optional layer over the existing API that does not require
+rewriting handlers. A possible future direction (not decided now):
+
+```odin
+web.post(&app, "/users", create_user, web.Route_Info{
+	summary = "Create user",
+})
+```
 
 ## Non-Goals for the Core
 
@@ -677,7 +908,7 @@ uruquim/
 │   ├── app.odin                app / bare / app_with_state / destroy
 │   ├── routing.odin            get/post/... , router/group/mount
 │   ├── context.odin
-│   ├── extract.odin            path_int, body, query_or, state, ...
+│   ├── extract.odin            path, path_int, query, query_int, query_int_or, body, state
 │   ├── respond.odin            ok, created, json, text, errors, ...
 │   ├── serve.odin              serve / serve_with / serve_transport
 │   ├── errors.odin             error envelope + codes
@@ -721,7 +952,7 @@ The framework is defined by five pillars:
 - custom radix router
 - deterministic flattened middleware chain
 - internal transport boundary with `core:net/http` as the canonical backend
-- opt-in typed state (Systems API), never a tax on ordinary applications
+- opt-in typed state (Advanced API), never a tax on ordinary applications
 
 Not "FastAPI in Odin", but: **FastAPI's productivity with a data-oriented,
 predictable implementation for Odin.**

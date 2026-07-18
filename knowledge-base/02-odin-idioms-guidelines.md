@@ -66,14 +66,26 @@ Odin verified by CI. In particular:
 - `or_else` takes an *expression*, not a statement block. Patterns like
   `id := f() or_else { respond(...); return }` are NOT valid Odin and MUST NOT
   appear anywhere in documentation.
-- The canonical extractor pattern is:
+- The canonical extractor patterns are exactly two:
 
 ```odin
+// Value-producing extractor
 id, ok := web.path_int(ctx, "id")
 if !ok {
 	return
 }
+
+// Destination-filling extractor
+input: Create_User
+if !web.body(ctx, &input) {
+	return
+}
 ```
+
+Value-producing extractors declare `#optional_ok` (legal in Odin for
+procedures with exactly two results where the last is `bool`), though HTTP
+code should almost always check the boolean. Destination-filling extractors
+take `dst: ^$T` and return only `bool`.
 
 If prototyping later proves a strictly better compiling form, the canonical
 pattern is amended once, spec-first, before the API freezes — never ad hoc in
@@ -208,10 +220,14 @@ Bind_Error :: union #shared_nil {
 }
 ```
 
-**Extractor contract:** public extractors return `(value, ok)` and are
-responsible for writing the standardized error response before returning
-`ok = false`. Detailed error taxonomies (`Bind_Error` etc.) exist internally
-and power the standardized envelope; ordinary handlers never inspect them.
+**Extractor contract:** public value-producing extractors return
+`(value, ok)` with `#optional_ok`; destination-filling extractors
+(`web.body(ctx, &dst)`) return `bool`. Both are responsible for writing the
+standardized error response before returning `false`. Detailed error
+taxonomies (`Bind_Error` etc.) exist internally and power the standardized
+envelope; ordinary handlers never inspect them. Typed extractors use
+explicit type-specific names (`query_int`, `query_int_or`) — never `typeid`
+parameters in the canonical surface.
 
 ### Panic policy
 
@@ -250,7 +266,7 @@ router_lookup :: proc(r: ^Router, method: Method, path: string) -> (^Resolved_Ro
 Use pointers for mutable large state; do not pass giant structs by value
 casually. Every type that owns memory has init/destroy pairs — in the
 Productive API these are wrapped (`web.app()` / `web.destroy(&app)`), but they
-exist and are documented in the Systems API.
+exist and are documented in the Advanced API.
 
 ## Context Usage Rules
 
@@ -301,6 +317,11 @@ Must-test invariants:
 - Explicit names over vague, magic, or cute ones.
 - No reflection-heavy validation by default; if metadata-driven validation
   appears later it is optional and never infects the hot path.
+- No code generator, no mandatory CLI, no heavy metaprogramming. Ergonomics
+  come from extractors and canonical helpers, not tooling.
+- The canonical `Context` never gains an untyped `user_data`/`locals`/
+  `map[string]any` field; middleware-produced values reach handlers through
+  typed extraction procedures (or, later, the advanced `Request_State`).
 
 ## Dependency Rules
 

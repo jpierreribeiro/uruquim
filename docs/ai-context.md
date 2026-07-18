@@ -51,26 +51,43 @@ handler :: proc(ctx: ^web.Context) {
 ## Extractors
 
 Every extractor that can fail RESPONDS TO THE CLIENT ITSELF on failure and
-returns `ok = false`. On `!ok`, just `return` — never write your own error
+returns `false`. On failure, just `return` — never write your own error
 response for an extractor failure.
 
+There are exactly two shapes:
+
 ```odin
-id, ok := web.path_int(ctx, "id")        // (int, bool)
+// Shape 1 — value-producing: (value, ok)
+id, ok := web.path_int(ctx, "id")
 if !ok {
 	return
 }
 
-name := web.path_string(ctx, "name")     // string (route matched ⇒ present)
-
-input, ok := web.body(ctx, Create_User)  // JSON body → (T, bool)
-if !ok {
+// Shape 2 — destination-filling: bool (JSON body into your struct)
+input: Create_User
+if !web.body(ctx, &input) {
 	return
 }
+```
 
-page := web.query_or(ctx, "page", int, 1)   // typed query with default
+All extractors:
 
-value, ok := web.header(ctx, "x-api-key")   // (string, bool), no auto-response
-token, ok := web.bearer_token(ctx)          // (string, bool), no auto-response
+```odin
+name := web.path(ctx, "name")                 // string (route matched ⇒ present)
+
+id, ok := web.path_int(ctx, "id")             // (int, ok), responds 400 on failure
+
+search, found := web.query(ctx, "search")     // (string, found), no auto-response
+
+page, ok := web.query_int(ctx, "page")        // required, responds 400 on failure
+
+limit, ok := web.query_int_or(ctx, "limit", 20) // default only when ABSENT;
+                                                // malformed value → 400
+
+value, found := web.header(ctx, "x-api-key")  // (string, found), no auto-response
+token, found := web.bearer_token(ctx)         // (string, found), no auto-response
+
+state := web.state(ctx, App_State)            // ^App_State (app_with_state apps)
 ```
 
 JSON structs use tags:
@@ -113,15 +130,24 @@ without calling it to stop the chain:
 
 ```odin
 require_auth :: proc(ctx: ^web.Context) {
-	token, ok := web.bearer_token(ctx)
-	if !ok {
+	token, found := web.bearer_token(ctx)
+	if !found {
 		web.unauthorized(ctx, "missing bearer token")
+		return
+	}
+
+	if !auth.token_is_valid(token) {
+		web.unauthorized(ctx, "invalid bearer token")
 		return
 	}
 
 	web.next(ctx)
 }
 ```
+
+Middleware never hands values to handlers. When a handler needs the
+authenticated user, it calls a typed extraction procedure
+(`current_user(ctx) -> (^User, bool)`) instead of relying on middleware.
 
 Built-ins: `web.logger()`, `web.recovery()`, `web.request_id()`,
 `web.cors(web.Cors_Config{...})`, `web.secure_headers()`,
@@ -175,8 +201,8 @@ get_user :: proc(ctx: ^web.Context) {
 }
 
 create_user :: proc(ctx: ^web.Context) {
-	input, ok := web.body(ctx, Create_User)
-	if !ok {
+	input: Create_User
+	if !web.body(ctx, &input) {
 		return
 	}
 
@@ -187,11 +213,18 @@ create_user :: proc(ctx: ^web.Context) {
 ## Rules
 
 - Never use `or_else { ... }` blocks — invalid Odin. Use `(value, ok)` +
-  `if !ok { return }`.
+  `if !ok { return }`, or `if !web.body(ctx, &input) { return }`.
+- `web.body` takes a POINTER to your struct and returns `bool` — it never
+  returns the value.
 - Never configure allocators, transports, or response writers — `web.app()`
   and `web.serve` handle them.
-- Never store request data in maps or `any` — use typed structs and
-  `web.state`.
+- Never store request data in maps or `any`; there is no `ctx.user_data` —
+  use typed structs, `web.state`, and extraction procedures like
+  `current_user(ctx) -> (^User, bool)`.
 - Never name a variable `context` (reserved by Odin); the framework context
   is always `ctx`.
-- One canonical call per task; do not mix or invent alternatives.
+- One canonical call per task; do not mix or invent alternatives. Typed query
+  extractors are named `query_<type>` / `query_<type>_or` — there is no
+  generic `query_or(ctx, name, type, default)`.
+- `web.ok(ctx, v)` == `web.json(ctx, .OK, v)`; `web.created(ctx, v)` ==
+  `web.json(ctx, .Created, v)`.

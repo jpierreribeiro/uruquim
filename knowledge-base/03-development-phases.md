@@ -17,72 +17,78 @@ Cross-phase invariants, enforced from Phase 1 onward:
 - no transport-native types in any public signature
 - every documented example compiles in CI
 - `docs/ai-context.md` matches the public API at every merge
+- no code generator, no mandatory CLI, no heavy metaprogramming
 
-## Phase One — Productive Vertical Slice
+**Note on `web.app()` defaults:** the architecture spec defines the full
+default-policy contract (recovery, limits, timeouts, 404/405, graceful
+shutdown). It is delivered progressively — recovery in Phase 2, limits and
+timeouts in Phase 3, shutdown robustness in Phase 4 — but the *end-state
+contract* is fixed now and each phase moves `web.app()` closer to it.
+
+## Phase 1 — Minimal Productive API
 
 ### Goal
 
-Not "Hello World". The phase is complete only when a user can build a small
-JSON CRUD-style API without accessing transport internals.
+A user can build a small JSON API with routes, extractors, and JSON/text
+responses, without touching transport internals. Not just Hello World: the
+phase is complete only when a small CRUD-style API is writable from the
+public API alone.
 
 ### Scope (required)
 
-- application creation with safe defaults: `web.app()`, `web.bare()`,
-  `web.destroy`
-- GET and POST routing (static and `:param` routes; full method set may land
-  in Phase 2 with the real router)
-- query access: `web.query_or`
-- path extractors: `web.path_int`, `web.path_string`
-- JSON rendering: `web.ok`, `web.created`, `web.no_content`, `web.json`,
+- application: `web.app()`, `web.bare()`, `web.destroy`
+- routes: `web.get`, `web.post`, `web.put`, `web.patch`, `web.delete`
+  (static and `:param`), via a simple interim dispatcher
+- `web.Context` (plain struct, non-parametric)
+- path extractors: `web.path`, `web.path_int`
+- query extractors: `web.query`, `web.query_int`, `web.query_int_or`
+- JSON body: `web.body(ctx, &dst)`
+- responses: `web.ok`, `web.created`, `web.no_content`, `web.json`,
   `web.text`
-- JSON binding: `web.body`
-- standardized error envelope + helpers (`bad_request`, `not_found`,
-  `unauthorized`, `forbidden`, `internal_error`)
-- body size limit (default-on)
-- panic recovery (default-on)
+- error helpers + standardized envelope: `bad_request`, `unauthorized`,
+  `forbidden`, `not_found`, `internal_error`
 - consistent 404 behavior
-- in-memory testing harness: `web.test_request` over the test transport
+- server: `web.serve(&app, port)` with clean stop
 - internal transport boundary (`Transport` struct) prepared for
-  `core:net/http`
-- functional bootstrap adapter over `odin-http`
-- transport-neutral public handler API: `proc(ctx: ^web.Context)`
-- `web.serve(&app, port)` and graceful shutdown
-
-Routing MAY use a simple interim dispatcher; the radix router is Phase 2. The
-interim dispatcher's *observable behavior* (precedence, 404) must already
-match the router spec so Phase 2 changes nothing publicly.
+  `core:net/http`; functional bootstrap adapter over `odin-http`
+- in-memory test transport + `web.test_request` (required by the tests-first
+  process itself)
 
 ### Forbidden in this phase
 
-- route groups, middleware registration API (`web.use`) beyond the built-in
-  defaults
-- streaming bodies
-- validation system
-- observability beyond startup/access logging needed for debugging
-- Systems API surface (`Typed_App`, custom allocators, `serve_transport`)
+- middleware registration (`web.use`), groups
+- radix tree (interim dispatcher must already match the routing spec's
+  observable behavior — precedence, 404 — so Phase 3 changes nothing
+  publicly)
+- streaming, uploads, validation system
+- Advanced API surface (`app_init`, `Advanced_Config`, `serve_transport`,
+  typed state)
+- OpenAPI
 
 ### Spec Gate checklist
 
-- [ ] freeze canonical names for everything in scope (extract/respond/app/serve)
-- [ ] define the standardized error envelope and initial code list
-- [ ] define extractor contract (respond-on-failure, `(value, ok)`)
+- [ ] freeze the canonical vocabulary (app/routes/extractors/responses/serve)
+- [ ] freeze the extractor control flow: `(value, ok)` + `#optional_ok` for
+      value-producing; `^$T` destination + `bool` for `web.body`
+- [ ] freeze `query_int_or` semantics (default only on absence; malformed
+      value is a 400)
+- [ ] freeze the error envelope and initial code list
 - [ ] define `Request`/`Response` minimum fields and commit semantics
 - [ ] define the `Transport` boundary and test-transport contract
-- [ ] define default policies of `web.app()` (limits, timeouts, recovery)
-- [ ] define shutdown behavior
+- [ ] define clean-stop behavior
 
 ### Test Gate checklist
 
 - [ ] static route returns expected status and body
-- [ ] `:param` route extracts value; `path_int` failure returns the
-      standardized `invalid_path_parameter` response
+- [ ] `:param` route extracts value; `path_int` failure produces
+      `invalid_path_parameter`
+- [ ] `web.query_int` missing/malformed produces `invalid_query_parameter`
+- [ ] `web.query_int_or`: absent → default; malformed → 400
 - [ ] `web.body` success and `invalid_json` failure paths
-- [ ] oversized body returns `body_too_large`
 - [ ] unknown route returns standardized 404
-- [ ] panic in handler returns 500 via recovery
+- [ ] `web.ok`/`web.created` byte-identical to equivalent `web.json` calls
 - [ ] `test_request` round-trips without sockets
 - [ ] adapter starts and stops cleanly; response cannot be committed twice
-- [ ] `web.bare()` installs none of the default policies
 
 ### Implementation Gate checklist
 
@@ -90,101 +96,100 @@ match the router spec so Phase 2 changes nothing publicly.
 - [ ] test transport implemented
 - [ ] examples `01-hello-world`, `02-json-api`, `03-route-params` compile and
       run in CI
-- [ ] a small CRUD example is writable using only public API (proof of goal)
+- [ ] small CRUD example writable using only public API (proof of goal)
 - [ ] no transport-native types leak into public signatures
 - [ ] `docs/quick-start.md`, `docs/errors.md`, `docs/canonical-patterns.md`,
       `docs/ai-context.md` cover the shipped surface
 
-## Phase Two — Custom Router
+## Phase 2 — Middleware and Groups
 
 ### Goal
 
-Replace the interim dispatcher with a real method-sharded radix router,
-with no public API change.
+Deterministic middleware and route organization, still on the interim
+dispatcher.
 
 ### Scope (required)
 
-- router init/destroy; one radix tree per HTTP method
-- full method set: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
-- static segments, `:param`, terminal `*wildcard`
-- zero-allocation lookup on the hot path
-- route conflict detection with diagnostics
-- 404 and 405 behavior
-- route pattern metadata preserved for observability
-- benchmarks (registration excluded, lookup measured)
-
-### Forbidden
-
-- middleware composition API
-- binding/validation changes
-- streaming
-
-### Spec Gate checklist
-
-- [ ] radix node shape; precedence rules; duplicate/conflict rules
-- [ ] path normalization policy
-- [ ] param extraction representation (no maps)
-- [ ] 405 and OPTIONS policy
-
-### Test Gate checklist
-
-- [ ] static/param/wildcard match; static beats param; param beats wildcard
-- [ ] duplicate registration rejected; invalid wildcard placement rejected
-- [ ] per-method routing isolated; 405 when route exists on another method
-- [ ] matched pattern preserved for instrumentation
-- [ ] fuzz/property tests for insert+lookup invariants
-
-### Implementation Gate checklist
-
-- [ ] radix insert/lookup implemented; conflict diagnostics implemented
-- [ ] params populated without map allocation
-- [ ] lookup hot path reviewed for avoidable allocations; benchmarks recorded
-- [ ] all Phase 1 public-behavior tests still pass unchanged
-
-## Phase Three — Middleware and Typed State
-
-### Goal
-
-Deterministic middleware composition and the opt-in typed state story.
-
-### Scope (required)
-
-- `web.use` at app, group, and route level; `web.router` / `web.group` /
-  `web.mount`
-- onion semantics: `web.next`, short-circuit, `abort`
-- chain flattening at registration time
-- application state: `web.app_with_state` + `web.state(ctx, T)` with
-  typeid-validated access
-- per-request state pattern (documented canonical pattern; Systems API
-  `Typed_App` prototype)
-- auth pattern via extraction procedures (`current_user`-style)
-- logger middleware (route-pattern aware)
+- `web.use` at app, group, and route level
+- route groups: `web.router`, `web.group`, `web.mount`
+- `web.next`; short-circuit by returning without `next`
+- recovery middleware — becomes default-on in `web.app()`
+- logger middleware
 - request ID middleware
+- `web.header`, `web.bearer_token` lookups
+- documented auth pattern: gate-only `require_auth` middleware + typed
+  `current_user` extraction procedure (no `user_data` field, ever)
 
 ### Spec Gate checklist
 
 - [ ] exact ordering rules (global → outer groups → inner → route → handler)
-- [ ] abort semantics; post-`next` unwind order
-- [ ] `app_with_state` registration and validation semantics
-- [ ] Systems API prototype decision: parametric `Typed_App` vs composed
-      context — decided with real compiled prototypes
+- [ ] **onion decision:** post-`next` semantics supported only if the
+      transport boundary guarantees them without confusing behavior
+      (prototype on the bootstrap transport); otherwise simplify to
+      pre-handler + short-circuit
+- [ ] chain flattening at registration time specified
+- [ ] recovery semantics; request ID source/generation
 
 ### Test Gate checklist
 
 - [ ] middleware order exactness, including nested groups
-- [ ] short-circuit stops downstream; unwind order correct
-- [ ] `web.state` returns registered state; wrong type asserts
+- [ ] short-circuit stops downstream
+- [ ] post-`next` unwind order correct (if onion adopted)
+- [ ] recovery converts panic to standardized 500
 - [ ] request ID present in context and response header
-- [ ] typed request state writable in middleware, readable in handler
+- [ ] `web.bare()` installs none of the defaults
 
 ### Implementation Gate checklist
 
 - [ ] flattened chains built at registration; no dispatch-time assembly
-- [ ] logger, request ID implemented
+- [ ] recovery, logger, request ID implemented
 - [ ] examples `04-middleware`, `05-route-groups`, `06-authentication`
-- [ ] all phase tests pass
+- [ ] all Phase 1 public-behavior tests still pass unchanged
 
-## Phase Four — Production
+## Phase 3 — Performance Core
+
+### Goal
+
+Replace the interim internals with the real data-oriented core, with no
+public API change.
+
+### Scope (required)
+
+- method-sharded radix tree router (static, `:param`, terminal `*wildcard`)
+- zero-allocation lookup on the common path
+- params in small fixed buffers (no maps)
+- route conflict detection with diagnostics; 405 behavior
+- precomputed middleware chains (from Phase 2) verified allocation-free at
+  dispatch
+- per-request arena; reusable buffers
+- allocation reduction pass across the hot path
+- body size limit and read/write timeouts — become default-on in `web.app()`
+- benchmark suite (lookup, dispatch, JSON round-trip) with regression harness
+
+### Spec Gate checklist
+
+- [ ] radix node shape; precedence rules; duplicate/conflict rules
+- [ ] path normalization policy; 405 and OPTIONS policy
+- [ ] param representation; arena lifetime contract
+- [ ] default limit/timeout values for `web.app()`
+
+### Test Gate checklist
+
+- [ ] static beats param; param beats wildcard
+- [ ] duplicate registration rejected; invalid wildcard placement rejected
+- [ ] per-method routing isolated; 405 when route exists on another method
+- [ ] matched pattern preserved for instrumentation
+- [ ] fuzz/property tests for insert+lookup invariants
+- [ ] oversized body produces `body_too_large`; timeout behavior covered
+
+### Implementation Gate checklist
+
+- [ ] radix insert/lookup implemented; params without map allocation
+- [ ] arena + buffer reuse implemented; hot path allocation-reviewed
+- [ ] benchmarks recorded; regression harness in CI
+- [ ] all Phase 1–2 public-behavior tests pass unchanged
+
+## Phase 4 — Production
 
 ### Goal
 
@@ -192,53 +197,50 @@ Harden for serious use.
 
 ### Scope (required)
 
-- read/write timeouts wired through config; timeout middleware
-- CORS middleware; secure headers middleware
 - graceful shutdown robustness (in-flight requests covered)
+- CORS middleware; secure headers middleware
 - cookies helpers
-- file upload (fully specified multipart contract) and static file serving
-- structured logging
-- metrics and tracing hooks (route-pattern keyed)
-- allocator/lifetime audit; benchmark regression harness
-- request/response edge-case coverage
+- file uploads (fully specified multipart contract)
+- static file serving
+- structured logging; observability hooks (route-pattern keyed metrics and
+  tracing points)
+- load tests
+- allocator/lifetime audit
 
 ### Gates (summary)
 
-- Spec: timeout semantics; telemetry hook points; upload/static contracts;
-  shutdown guarantees
-- Test: timeout behavior; shutdown with in-flight requests; recovery +
-  telemetry interaction; upload limits; benchmark harness exists
+- Spec: shutdown guarantees; upload/static contracts; telemetry hook points
+- Test: shutdown with in-flight requests; upload limits; recovery+telemetry
+  interaction; load-test baseline recorded
 - Implementation: hardening middleware done; audit completed; examples
   `07-crud`, `08-postgres`, `09-file-upload`, `10-observability`; docs
   `memory-model.md`, `middleware.md`, `cookbook.md` complete
 
-## Phase Five — Ecosystem and AI
+## Phase 5 — Future
 
 ### Goal
 
-Make Uruquim maximally usable by humans and coding agents, and land the
-canonical transport.
+Optional layers and the canonical transport, without disturbing the frozen
+API.
 
-### Scope
+### Scope (candidates, each spec-gated individually)
 
-- canonical documentation pass (quick-start, cookbook, errors complete and
-  example-verified)
-- `docs/ai-context.md` finalized as a maintained compatibility artifact
+- **official `core:net/http` adapter** when the package ships — parity tests
+  against the bootstrap adapter; migration verified to require zero
+  application changes; bootstrap adapter then demoted or removed. (If
+  `core:net/http` ships earlier, this item may be pulled forward between
+  phases.)
+- OpenAPI as an optional layer over the existing API (`web.Route_Info`
+  direction); no handler rewrites required
+- automatic documentation from the OpenAPI layer
+- WebSocket (separate package)
+- streaming request/response APIs
+- HTTP/2, as the official transport permits
+- Advanced API completion: `app_init` + `Advanced_Config`, typed
+  `Request_State`, `serve_transport`
+- validation story decision (explicit vs tag-based), prototype-gated, never
+  requiring a generator
 - project templates
-- optional CLI (`uruquim new`, `uruquim generate` exploration)
-- OpenAPI generation (likely codegen-based)
-- integrations (Postgres pool pattern, config loading pattern)
-- **official `core:net/http` adapter** when the package ships; parity tests
-  against the bootstrap adapter; bootstrap adapter then demoted or removed
-- validation story decision (tag-based vs codegen), prototype-gated
-
-### Gates (summary)
-
-- Spec: adapter parity contract; codegen scope; validation decision recorded
-- Test: adapter parity suite green on both transports; docs examples compile;
-  template projects build
-- Implementation: `core:net/http` adapter shipped as canonical; migration
-  verified to require zero application changes
 
 ## Exit Criteria for the Project Core
 

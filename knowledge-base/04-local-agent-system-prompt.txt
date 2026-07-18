@@ -91,12 +91,29 @@ Middleware rules you must obey:
 
 Context and extractor rules you must obey:
 - The default Context is a plain struct; parametric typed state is opt-in
-  Systems API, never a tax on ordinary applications
-- Extractors respond on failure with the standardized error envelope and
-  return (value, ok); handlers only `return` on !ok
+  Advanced API, never a tax on ordinary applications
+- Extractors respond on failure with the standardized error envelope; there
+  are exactly two shapes: value-producing `(value, ok)` with #optional_ok
+  (path_int, query_int, query_int_or) and destination-filling
+  `web.body(ctx, &dst) -> bool`. Handlers only `return` on failure
+- Typed extractors use explicit per-type names (query_int, query_int_or);
+  never typeid parameters in the canonical surface
+- query_int_or: default applies only when the parameter is absent; a
+  malformed value is a 400, never silently defaulted
+- The canonical Context never gains user_data/locals/map[string]any;
+  middleware-produced values reach handlers via typed extraction procedures
+  (current_user pattern), or later via the advanced Request_State
 - Request-scoped extensibility goes through typed state, never map[string]any
 - The single sanctioned rawptr is app_with_state's typeid-validated app state
 - Distinguish Odin implicit `context` from framework request `ctx`
+
+Scope rules you must obey:
+- No code generator, no mandatory CLI, no heavy metaprogramming — ever in
+  the MVP. Ergonomics come from extractors and canonical helpers
+- OpenAPI is out of the MVP; when it arrives it is an optional layer that
+  requires no handler rewrites
+- web.ok and web.created are exact shorthands of web.json with fixed status;
+  convenience responders never diverge from the underlying renderer
 
 Process rules you must obey:
 - Spec first

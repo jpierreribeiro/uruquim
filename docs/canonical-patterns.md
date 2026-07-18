@@ -44,19 +44,38 @@ main :: proc() {
 ## Handler
 
 ```odin
+Health :: struct {
+	status: string `json:"status"`,
+}
+
 health :: proc(ctx: ^web.Context) {
-	web.ok(ctx, web.object{
-		"status" = "ok",
-	})
+	web.ok(ctx, Health{status = "ok"})
 }
 ```
 
 Handlers take `^web.Context` and return nothing. They respond via helpers.
+Payloads are typed structs — there is no untyped object literal.
 
 ## Extractor pattern (the load-bearing pattern)
 
-Extractors respond on failure themselves. The handler checks `ok` and
-returns — nothing else:
+Extractors respond on failure themselves. The handler checks the boolean and
+returns — nothing else. There are exactly two shapes:
+
+```odin
+// 1. Value-producing extractor: (value, ok)
+id, ok := web.path_int(ctx, "id")
+if !ok {
+	return
+}
+
+// 2. Destination-filling extractor: bool
+input: Create_User
+if !web.body(ctx, &input) {
+	return
+}
+```
+
+Full handler:
 
 ```odin
 get_user :: proc(ctx: ^web.Context) {
@@ -65,9 +84,9 @@ get_user :: proc(ctx: ^web.Context) {
 		return
 	}
 
-	user, found := find_user(id)
+	user, found := users.find(id)
 	if !found {
-		web.not_found(ctx, "user")
+		web.not_found(ctx, "user not found")
 		return
 	}
 
@@ -93,6 +112,8 @@ responded.
 
 ## JSON body binding
 
+`web.body` fills a caller-owned destination and returns `bool`:
+
 ```odin
 Create_User :: struct {
 	name:  string `json:"name"`,
@@ -100,8 +121,8 @@ Create_User :: struct {
 }
 
 create_user :: proc(ctx: ^web.Context) {
-	input, ok := web.body(ctx, Create_User)
-	if !ok {
+	input: Create_User
+	if !web.body(ctx, &input) {
 		return
 	}
 
@@ -120,12 +141,34 @@ body produces `body_too_large`.
 
 ## Query parameters
 
+Three canonical procedures, explicit per-type names:
+
 ```odin
-page := web.query_or(ctx, "page", int, 1)
+// Plain text lookup — no automatic error response.
+search, found := web.query(ctx, "search")
+
+// Required int — missing or malformed responds 400 and returns ok = false.
+page, ok := web.query_int(ctx, "page")
+if !ok {
+	return
+}
+
+// Optional int with default — default applies ONLY when absent;
+// a malformed value is still a 400.
+limit, ok := web.query_int_or(ctx, "limit", 20)
+if !ok {
+	return
+}
 ```
 
-Missing or unparsable values fall back to the default. Use required-query
-extraction only when semantically required.
+```text
+GET /users              → limit = 20
+GET /users?limit=50     → limit = 50
+GET /users?limit=banana → 400 invalid_query_parameter
+```
+
+Future typed variants follow the same pattern: `query_<type>` /
+`query_<type>_or`.
 
 ## Responses
 
@@ -144,6 +187,9 @@ extraction only when semantically required.
 | 404 | `web.not_found(ctx, resource)` |
 | 409 | `web.conflict(ctx, msg)` |
 | 500 | `web.internal_error(ctx)` |
+
+`web.ok` is exactly `web.json(ctx, .OK, value)` and `web.created` is exactly
+`web.json(ctx, .Created, value)` — tiny shorthands, no extra behavior.
 
 ## Application state
 
@@ -185,13 +231,18 @@ web.use(&app,
 )
 ```
 
-Write:
+Write (a gate: allow or reject, then `web.next`):
 
 ```odin
 require_auth :: proc(ctx: ^web.Context) {
-	token, ok := web.bearer_token(ctx)
-	if !ok {
+	token, found := web.bearer_token(ctx)
+	if !found {
 		web.unauthorized(ctx, "missing bearer token")
+		return
+	}
+
+	if !auth.token_is_valid(token) {
+		web.unauthorized(ctx, "invalid bearer token")
 		return
 	}
 
@@ -201,28 +252,33 @@ require_auth :: proc(ctx: ^web.Context) {
 
 Returning without calling `web.next` short-circuits the chain.
 
+Middleware gates requests, logs, and sets response metadata. It does NOT hand
+values to handlers — there is no `ctx.user_data`, no `locals`, no
+`map[string]any`, by design.
+
 ## Auth / dependencies
 
-Composable extraction procedures, same contract as extractors:
+When the handler needs the user, call a typed extraction procedure directly
+(same contract as extractors) — no middleware involved:
 
 ```odin
 current_user :: proc(ctx: ^web.Context) -> (^User, bool) {
-	token, ok := web.bearer_token(ctx)
-	if !ok {
+	token, found := web.bearer_token(ctx)
+	if !found {
 		web.unauthorized(ctx, "missing bearer token")
 		return nil, false
 	}
 
-	user, verified := auth.verify(token)
-	if !verified {
-		web.unauthorized(ctx, "invalid token")
+	user, ok := auth.find_user_by_token(token)
+	if !ok {
+		web.unauthorized(ctx, "invalid bearer token")
 		return nil, false
 	}
 
 	return user, true
 }
 
-profile :: proc(ctx: ^web.Context) {
+get_profile :: proc(ctx: ^web.Context) {
 	user, ok := current_user(ctx)
 	if !ok {
 		return
@@ -231,6 +287,17 @@ profile :: proc(ctx: ^web.Context) {
 	web.ok(ctx, user)
 }
 ```
+
+Use `require_auth` middleware only for routes that must be authenticated but
+do not need the user value (typically whole groups):
+
+```odin
+admin := web.group(&app, "/admin")
+web.use(&admin, require_auth)
+```
+
+Do not stack both on the same route — that duplicates validation. Pick the
+extractor when you need the user, the gate when you don't.
 
 ## Route groups
 

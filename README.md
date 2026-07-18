@@ -2,8 +2,14 @@
 
 An Odin microframework for real-world JSON APIs.
 
+**Simple by default, explicit when needed, data-oriented underneath.**
+
 **Positioning:** internally data-oriented and allocator-aware; externally simple,
-productive, and predictable — for humans and for AI coding agents.
+productive, and predictable — for humans and for AI coding agents. No code
+generator, no mandatory CLI, no heavy metaprogramming: ergonomics come from
+extractors and canonical helpers.
+
+*A web framework for the Joy of Programming.*
 
 Uruquim is built on three equally important commitments:
 
