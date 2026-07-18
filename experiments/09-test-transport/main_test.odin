@@ -45,7 +45,8 @@ query_int_or :: proc(ctx: ^Context, name: string, def: int) -> (int, bool) {
 }
 query_value :: proc(query, name: string) -> string {
 	// toy: "page=2&x=1"
-	for part in strings.split_iterator(&query, "&") {
+	remaining := query
+	for part in strings.split_iterator(&remaining, "&") {
 		eq := strings.index_byte(part, '=')
 		if eq < 0 { continue }
 		if part[:eq] == name { return part[eq+1:] }
@@ -62,11 +63,11 @@ dispatch :: proc(ctx: ^Context) {
 		ctx.params["id"] = ctx.req.path[len("/users/"):]
 		id, good := path_int(ctx, "id")
 		if !good { return }
-		ok(ctx, strconv.itoa(make([]byte, 8, context.temp_allocator), id))
+		ok(ctx, strconv.write_int(make([]byte, 8, context.temp_allocator), i64(id), 10))
 	case ctx.req.method == "GET" && ctx.req.path == "/list":
 		limit, good := query_int_or(ctx, "limit", 20)
 		if !good { return }
-		ok(ctx, strconv.itoa(make([]byte, 8, context.temp_allocator), limit))
+		ok(ctx, strconv.write_int(make([]byte, 8, context.temp_allocator), i64(limit), 10))
 	case:
 		not_found(ctx, ctx.req.path)
 	}

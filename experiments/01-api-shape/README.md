@@ -32,13 +32,11 @@ odin check .
 this says nothing about heap arenas (experiment 06) or transport lifetime
 (experiment 08). The `self_addr` trick is diagnostic only.
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain (dev-2026-07a).`
-Baseline: compiler unavailable in the authoring environment
-(`planning/01-toolchain-baseline.md`).
+**Result.** `PASS` on `dev-2026-07-nightly:819fdc7`. Caller storage remained
+stable; the pre-return `self_addr` differed as predicted; both app instances
+were destroyed once.
 
-**Conclusion (pending ratification).** If the expectations hold, ADR-001 (App
-by value) is supported and `web.app()` / `web.destroy(&app)` can be frozen. A
-single subtlety must be captured in docs: **do not store a self-pointer taken
-before `app()` returns.** If instead a copy of the `[dynamic]` header caused a
-double-free under `defer destroy`, that would push toward the `app_init(&app)`
-form as canonical — the decisive evidence the runner must produce.
+**Conclusion.** ADR-001 is accepted: App by value is canonical. Do not store a
+self-pointer taken before `app()` returns; treat App as non-copyable and
+destroy only the original caller-owned value. `app_init(&app)` remains future
+Advanced API.

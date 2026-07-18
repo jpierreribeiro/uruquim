@@ -5,16 +5,19 @@ mitigation · fallback · resolution phase.
 
 Scale: probability/impact ∈ {Low, Med, High}.
 
-## R-01 · Pinned toolchain / vendor egress blocked
+## R-01 · Pinned toolchain / VPS egress blocked
 - **Prob** High · **Impact** High (blocks all ratification and WP0/WP8).
-- **Signals.** `curl` 403 from GitHub (already observed); CI cannot fetch
-  dev-2026-07a or laytan/odin-http.
-- **Mitigation.** obtain the toolchain where GitHub egress is allowed; cache the
-  artifact and vendor odin-http into the repo; run `run_checks.sh` there.
+- **Signals.** `curl` 403/truncated download; VPS cannot fetch dev-2026-07a,
+  the public repository, or the future vendored adapter.
+- **Mitigation.** SHA-verified installer with retries; cache a verified
+  artifact; vendor odin-http; local pre-push remains authoritative if the VPS
+  is temporarily unavailable.
 - **Fallback.** perform ratification on a developer machine; commit the runner
   output as evidence; keep the audit/plan (compiler-independent) as the
   deliverable meanwhile.
-- **Resolution.** WP0 (before WP1). **This is the gate's primary blocker.**
+- **Resolution.** Local compiler and clean-verifier mechanism are proven;
+  real VPS provisioning remains WP0 and adapter vendoring remains WP8. A
+  truncated archive is rejected before extraction.
 
 ## R-02 · odin-http is beta / API-unstable
 - **Prob** Med · **Impact** Med (WP8 churn).
@@ -60,30 +63,32 @@ Scale: probability/impact ∈ {Low, Med, High}.
 - **Fallback.** WP7 adds an explicit copy pass.
 - **Resolution.** WP7 / exp-03.
 
-## R-07 · `#optional_ok` enables silent error-drop (ADR-002 unresolved)
+## R-07 · `#optional_ok` enables silent error-drop (resolved policy)
 - **Prob** Med · **Impact** Med (correctness holes in user handlers).
 - **Signals.** exp-04 confirms the bool is droppable; reviews find `id :=
   path_int(...)` in the wild.
-- **Mitigation.** ADR-002 decision (lean: drop the directive for HTTP
-  extractors); examples/lint enforce `if !ok`.
-- **Fallback.** keep directive + a vet rule.
-- **Resolution.** WP5 (needs the human decision at the gate).
+- **Mitigation.** Accepted ADR-002 drops the directive for HTTP extractors;
+  the compiler rejects capturing only one of two results. Examples enforce
+  `if !ok`.
+- **Fallback.** none needed; a negative compile probe guards the policy.
+- **Resolution.** Policy resolved at the Spec Gate; WP5 implements/tests it.
 
-## R-08 · App by-value double-free (ADR-001 unresolved)
+## R-08 · App by-value double-free (accepted invariant)
 - **Prob** Low · **Impact** Med.
 - **Signals.** exp-01 double-free under `defer destroy`.
-- **Mitigation.** exp-01; if it fails, canonical switches to `app_init(&app)`.
+- **Mitigation.** exp-01 passed; App is non-copyable by contract, stores no
+  pre-return self-pointer, and only the caller-owned original is destroyed.
 - **Fallback.** `app_init` form (already designed).
 - **Resolution.** WP1 / exp-01.
 
-## R-09 · Docs overpromise `web.app()` defaults (audit A11/A12/A13)
+## R-09 · Docs overpromise `web.app()` defaults (resolved specification)
 - **Prob** High (present now) · **Impact** Low-Med (user trust).
 - **Signals.** Phase-1 build returns 200 for oversized body / no 405 while docs
   promise 413/405.
-- **Mitigation.** scope-review decision (include body-cap + minimal 405 in
-  Phase 1') OR AMEND-3 wording.
-- **Fallback.** AMEND-3 documentation note.
-- **Resolution.** WP4/WP7 + doc edit (WP10).
+- **Mitigation.** Accepted split: Phase 1 fixed 4 MiB cap plus minimal 405 with
+  `Allow`; later defaults are phase-marked in normative docs.
+- **Fallback.** gate fails if implementation/tests do not match this split.
+- **Resolution.** Specification resolved; behavior lands in WP4/WP7.
 
 ## R-10 · Contract vs conformance suite divergence (test transport lies)
 - **Prob** Low · **Impact** High (green tests, broken sockets).
@@ -107,11 +112,23 @@ Scale: probability/impact ∈ {Low, Med, High}.
 - **Fallback.** move work to its phase branch.
 - **Resolution.** ongoing; enforced at WP11.
 
+## R-13 · Official JSON rejects pointer payloads (baseline resolved)
+- **Prob** High when callers pass pointers · **Impact** Med (unexpected 500 or
+  pressure for reflection-heavy behavior).
+- **Signals.** exp-02 `^User -> Unsupported_Type`; pinned stdlib rejects
+  `runtime.Type_Info_Pointer` except JSON `Null`.
+- **Mitigation.** Accepted value-only baseline; canonical/AI docs explicitly
+  reject `&value` and pointer-typed payload variables. Marshal failure is
+  logged server-side before one complete pre-commit `internal_error`.
+- **Fallback.** WP6 prototypes one-level dereference. It is adopted only after
+  clean compiler evidence and an approved spec amendment.
+- **Resolution.** Baseline resolved at the Spec Gate; ergonomic probe in WP6.
+
 ## Heat summary
 
 | Risk | Prob | Impact | Phase |
 |---|---|---|---|
-| R-01 egress | High | High | WP0 |
+| R-01 egress | Med (CI/vendor remains) | High | WP0/WP8 |
 | R-04 ownership | Med | High | WP2 |
 | R-10 suite divergence | Low | High | WP9 |
 | R-02 odin-http beta | Med | Med | WP8 |
@@ -123,6 +140,8 @@ Scale: probability/impact ∈ {Low, Med, High}.
 | R-08 app double-free | Low | Med | WP1 |
 | R-11 freeze violation | Med | Med | WP11 |
 | R-12 scope creep | Med | Med | WP11 |
+| R-13 pointer JSON | High when used | Med | WP1/WP6 |
 
-**R-01 is the dominant risk** and is the concrete reason the gate cannot read
-plain READY from this environment.
+The local R-01 condition and all Phase-1 decision blockers are resolved.
+Remaining risks are owned by their implementation work packages or later
+phase gates.

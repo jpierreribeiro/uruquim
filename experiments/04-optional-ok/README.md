@@ -29,12 +29,11 @@ odin check .
 *permits* silent drop; the experiment can only confirm the mechanism, not the
 misuse rate.
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain.`
+**Result.** First run stopped at a disabled dynamic literal; after explicit map
+allocation, `PASS`. `#optional_ok` silently discards the bool. The separate
+plain-form probe fails with `Assignment count mismatch '1' = '2'`.
 
-**Conclusion (pending ratification).** Two defensible outcomes for ADR-002:
-1. Keep `#optional_ok` (matches stdlib idiom like `map[k]`), and rely on the
-   canonical `if !ok { return }` pattern + lint/example discipline.
-2. Drop `#optional_ok` so the compiler *forces* handling the bool, trading a
-   little idiom for a hard guarantee against silent drop.
-The runner's diagnostic text is the evidence that decides which is recommended.
+**Conclusion.** ADR-002 option 2 is accepted. HTTP extractors omit
+`#optional_ok`, so the compiler forces handlers to capture and check `ok`.
+The canonical call site remains unchanged.
 Either way the *call-site* canonical form is unchanged.

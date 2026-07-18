@@ -28,10 +28,11 @@ odin check .
 transport (experiment 08 / WP2). The buffer reuse is simulated manually rather
 than driven by an event loop.
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain.`
+**Result.** First run exposed missing struct-field commas; after that recorded
+syntax correction, `PASS`: buffer reuse changes the view to `######`, while
+the explicit clone remains `/users`.
 
-**Conclusion (pending ratification).** Supports ADR-007 (request vs temp
-allocator) and the `Request` view design: framework-owned *abstraction*,
-transport-owned *storage*, request-scoped validity, explicit copy to persist.
-Decisive negative: if views could not be sliced without copying, or if the
-clone did not survive reuse, the ownership model would need rework before WP2.
+**Conclusion.** Accepted ADR-007: the `Request` abstraction may expose
+transport-backed views with request-scoped validity. Temp allocation is for
+immediate scratch only; an explicit copy to the correct allocator is required
+to persist data.

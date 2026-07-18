@@ -29,10 +29,10 @@ routing + extractors + envelope + commit. The dispatcher is intentionally
 throwaway — Phase 3 replaces it with the radix tree, and *these same behavior
 assertions must still pass unchanged* (the regression contract).
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain.`
+**Result.** First run exposed Odin's address-of-parameter restriction and two
+deprecated conversions. After using a local string-header copy and
+`write_int`, all six tests pass on `819fdc7`.
 
-**Conclusion (pending ratification).** This is the prototype of the **contract
-suite**. If it passes, it demonstrates that the public behavior of Phase 1 is
-fully testable on the test transport before any real socket exists — the
-central claim behind "conformance suite from Phase 1". It also ratifies the
-`query_int_or` malformed-vs-absent rule with an executable test.
+**Conclusion.** This ratifies the in-memory **contract-suite** shape and the
+`query_int_or` malformed-vs-absent rule before real sockets. The production
+suite and every adapter's conformance run remain implementation work.

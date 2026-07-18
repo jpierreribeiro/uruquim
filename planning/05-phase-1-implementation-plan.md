@@ -1,7 +1,8 @@
 # 05 — Phase 1 Implementation Plan
 
-Status: **PLAN ONLY. Implementation remains prohibited at this stage**, even if
-the gate reads READY. Every work package (WP) follows:
+Status: **HUMAN-APPROVED SEQUENCE.** Implementation remains prohibited until
+`planning/07-spec-gate-phase-1.md` records READY. After that, execute one work
+package at a time. Every work package (WP) follows:
 **SPEC → TESTS → MINIMAL IMPLEMENTATION → REVIEW → DOCUMENTATION → GATE.**
 
 Each WP lists: objective · spec clauses · planned files · affected API · tests
@@ -12,17 +13,25 @@ runs on the pinned toolchain.
 ---
 
 ## WP0 — Toolchain and repository baseline
-- **Objective.** Reproducible build: pinned Odin, collection wiring, CI.
+- **Execution status.** **LOCAL GATE PASS; VPS CLEAN RUN PENDING.** Test-first run
+  failed on the missing pin, then passed against `819fdc7` after the minimal
+  baseline was added. GitHub Actions is unavailable by owner decision; the
+  same gate is mandatory pre-push and repeated on the VPS.
+- **Objective.** Reproducible build: pinned Odin, collection wiring, local
+  pre-push gate, and clean VPS repetition.
 - **Spec.** freeze discipline; baseline 01.
-- **Files.** `odin-version.txt` (pin), `build/check.sh`, `.github/workflows/ci.yml`
-  (or equivalent), `ols.json`/collection note.
+- **Files.** `odin-version.txt`, `build/check.sh`, `.githooks/pre-push`,
+  `ops/ci/`, and collection documentation.
 - **API.** none.
-- **Tests first.** CI job that runs `odin version` and asserts `dev-2026-07a`;
-  `odin check ./web`.
-- **Min impl.** install script into `/tmp/uruquim-odin-toolchain`; `-collection:
-  uruquim=<root>`.
-- **Done.** CI green on an empty compiling `web` package.
-- **Risks.** toolchain fetch blocked in CI too (same egress class) → R-01.
+- **Tests first.** `build/check_test.sh` verifies the release/commit/digest
+  pin, accepts the real compiler, observes 10/10 prototypes through the
+  `uruquim` collection mapping, and rejects a divergent compiler. It does not
+  check `web/`, which belongs to WP1.
+- **Min impl.** pin + verification-only checker + tracked pre-push hook; VPS
+  timer fetches a public branch, archives a clean commit, and runs the checker
+  with the SHA-verified compiler.
+- **Done.** local hook green and the VPS records the same pushed commit green.
+- **Risks.** VPS toolchain download or GitHub fetch blocked → R-01.
 - **Deps.** none. **Rollback.** delete build/ci files.
 
 ## WP1 — Compiling public API skeleton
@@ -75,7 +84,8 @@ runs on the pinned toolchain.
 - **Files.** `web/internal/dispatch/table.odin`, `web/internal/dispatch/match.odin`.
 - **API.** internal; public `get/post/...` register into the table.
 - **Tests first.** static match, `:param` capture, precedence (static>param),
-  404, 405-when-other-method (ports of exp-09 + one 405 case).
+  404, 405-when-other-method with exact `Allow` header (ports of exp-09 + one
+  405 case).
 - **Min impl.** method+exact map, plus single-`:param` segment matcher.
 - **Done.** dispatch behavior matches the router spec's *observable* contract,
   so Phase 3 radix changes nothing public.
@@ -92,8 +102,9 @@ runs on the pinned toolchain.
 - **Tests first.** valid/invalid path int; query absent→default,
   malformed→400; each failure writes envelope once (ports of exp-09).
 - **Min impl.** parse + write envelope + return false.
-- **Done.** extractor contract test-pinned; `#optional_ok` policy per ADR-002.
-- **Risks.** ADR-002 human decision unresolved → gate blocker.
+- **Done.** extractor contract test-pinned; signatures omit `#optional_ok` and
+  a negative compile probe proves that dropping `ok` is rejected.
+- **Risks.** a future contributor re-adds `#optional_ok` → compile probe guards.
 - **Deps.** WP2/WP4; exp-04/09. **Rollback.** signatures stable, bodies swap.
 
 ## WP6 — JSON responses and error envelope
@@ -102,15 +113,23 @@ runs on the pinned toolchain.
 - **Spec.** §Response; §Std Errors; AMEND-2 (`field` optional).
 - **Files.** `web/respond.odin`, `web/errors.odin`.
 - **API.** all response helpers; envelope encoder.
-- **Tests first.** `ok`==`json(.OK)` byte-identical; marshal error → pre-commit
-  internal_error; envelope omits absent `field` (AMEND-2) (ports of exp-02).
-- **Min impl.** `json.marshal` into request/temp buffer; commit guard.
-- **Done.** exp-02 behaviors pass; envelope contract fixed.
+- **Tests first.** `ok`==`json(.OK)` byte-identical; concrete value payloads
+  work; `&value`, pointer-typed variables, and other unsupported types follow
+  the documented rejection path; marshal error is logged server-side before
+  one pre-commit `internal_error`; envelope omits absent `field` (ports of
+  exp-02).
+- **Min impl.** `json.marshal` into request-owned response storage; commit
+  guard; explicit server-side marshal diagnostic. Before finalizing, run a
+  disposable one-level pointer-dereference prototype. If clean, propose a spec
+  amendment before adding support; otherwise keep the accepted value-only
+  baseline.
+- **Done.** exp-02 behaviors pass; envelope contract fixed; marshal failures
+  are observable in server logs; pointer-prototype result is recorded.
 - **Risks.** marshal-after-commit ordering → R-05.
 - **Deps.** WP2; exp-02. **Rollback.** helpers isolated.
 
 ## WP7 — JSON body binding
-- **Objective.** `body(ctx,&dst)->bool`, request allocator, body cap.
+- **Objective.** `body(ctx,&dst)->bool`, request allocator, fixed 4 MiB body cap.
 - **Spec.** §body; ADR-006; scope-review body-limit decision.
 - **Files.** `web/extract.odin` (`body`), `web/internal/memory/request_arena.odin`.
 - **API.** `body`.
@@ -152,17 +171,20 @@ runs on the pinned toolchain.
 - **Deps.** WP3/WP8. **Rollback.** suite is additive.
 
 ## WP10 — Phase 1 documentation and examples
-- **Objective.** examples 01-03 compile in CI; ai-context parity; AMEND-3/-4
+- **Objective.** examples 01-03 compile in the verification gate; ai-context
+  parity; AMEND-3/-4
   applied to docs.
 - **Spec.** §AI-Friendly API Rules; audit AMEND-3/-4.
 - **Files.** `examples/01-hello-world`, `02-json-api`, `03-route-params`;
   doc edits (proposed, not part of code freeze).
 - **API.** none.
-- **Tests first.** CI compiles every example; a parity check diffs ai-context
+- **Tests first.** the verification gate compiles every example; a parity
+  check diffs ai-context
   symbols against the public package.
 - **Min impl.** three example programs using only Phase-1' surface.
 - **Done.** examples green; docs carry phase markers (AMEND-4) and the
-  progressive-defaults note (AMEND-3).
+  progressive-defaults note (AMEND-3); every response example uses concrete
+  value payloads unless pointer support was separately amended after WP6.
 - **Risks.** doc/code drift → the parity check is the guard.
 - **Deps.** WP1-WP9. **Rollback.** examples are leaf packages.
 

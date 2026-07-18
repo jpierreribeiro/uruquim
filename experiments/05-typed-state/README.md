@@ -31,13 +31,12 @@ odin check .
 of nil is UB and would crash the run). The decision on where the nil-guard
 lives is a design output, not a measurement.
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain.`
+**Result.** `PASS` for both correct alternatives and shared mutation lifetime.
+The separate wrong-type probe exits 132 with the expected runtime assertion.
+Nil policy remains AMEND-1 rather than an intentional UB execution.
 
-**Conclusion (pending ratification).** This is the evidence for ADR-004.
-Expected recommendation: **A for the canonical API** (single sanctioned
-`rawptr+typeid`, zero generic noise at call sites, one asserted boundary),
-with **B reserved for the Advanced typed-context** where users opt into the
-type parameters. The nil rule (`app_with_state` rejects nil; `state` asserts
-registration happened) must be frozen alongside the signature. Decisive
-negative: if the `assert` cannot see `typeid` equality reliably, or if A's
-`cast(^T)` misbehaves, the canonical accessor reopens.
+**Conclusion.** ADR-004-A is accepted for the future Phase-3 Advanced API:
+one sanctioned private `rawptr+typeid`, zero generic noise at call sites, and
+one asserted boundary. `app_with_state` rejects nil; `state` asserts
+registration and exact type. A parametric typed context remains separately
+gateable.

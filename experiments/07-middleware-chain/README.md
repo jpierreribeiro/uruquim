@@ -30,7 +30,8 @@ transport can *safely* let code run after commit (headers already flushed,
 buffer released) is precisely what experiment 08 / the Phase-2 gate must decide.
 The abort branch is present but wired off (flip the `== 999` guard to exercise).
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain.`
+**Result.** `PASS`: exact onion and pre-order sequences printed; onion unwind
+occurs after handler commit. No Phase-2 policy was selected.
 
 **Conclusion (pending ratification).** Feeds ADR-005 (middleware) and ADR-008
 (response commit) with evidence, but **deliberately reaches no Phase-2

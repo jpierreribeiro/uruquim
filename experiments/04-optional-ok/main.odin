@@ -38,8 +38,10 @@ query_int_plain :: proc(ctx: ^Context, name: string) -> (int, bool) {
 }
 
 main :: proc() {
-	ctx := Context{ params = map[string]string{ "id" = "42", "bad" = "x" } }
+	ctx := Context{ params = make(map[string]string) }
 	defer delete(ctx.params)
+	ctx.params["id"] = "42"
+	ctx.params["bad"] = "x"
 
 	// canonical: check ok, then return.
 	id, ok := path_int(&ctx, "id")

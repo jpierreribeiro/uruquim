@@ -66,10 +66,11 @@ an explicit advanced surface when needed.
 
 ## Transport direction
 
-The future Odin `core:net/http` (built on `core:nbio`) is the **canonical
-transport backend**. Until it ships and stabilizes, Uruquim may run on
-`laytan/odin-http` strictly behind an internal adapter. No public Uruquim API
-exposes transport types, so migration requires no application changes.
+The future Odin `core:net/http` (expected to build on `core:nbio`) is the
+desired canonical transport backend if and when its real API is available and
+validated. Uruquim initially uses `laytan/odin-http` strictly behind an
+internal adapter. No public Uruquim API exposes transport types, so migration
+is confined to the adapter and conformance work; its difficulty is not assumed.
 
 ## Repository layout
 
@@ -88,5 +89,11 @@ docs/                    User- and agent-facing documentation
 
 ## Status
 
-Pre-implementation. The knowledge base is the governing specification; code
-follows the phases defined in `knowledge-base/03-development-phases.md`.
+Phase-1 Spec Gate: **READY** (2026-07-18). Production implementation has not
+started. The knowledge base is the governing specification; implementation
+now follows one approved work package at a time as defined in
+`planning/05-phase-1-implementation-plan.md`.
+
+WP0 local baseline is green. GitHub Actions is not required: a tracked
+pre-push hook runs the mandatory gate, and the project VPS repeats it from a
+clean commit. VPS execution is pending; WP1 has not started.

@@ -1,90 +1,184 @@
 # 07 — Phase 1 Spec Gate
 
-Status: **EVALUATED.** This gate is computed objectively from the current
-evidence. Because the pinned toolchain was unreachable (baseline 01), the
-compile-ratification criteria are **not satisfied yet**, and the result is
-computed accordingly.
+Status: **READY.** The gate was temporarily reopened for the requested
+Echo-style handler-error study. Experiment 10, ADR-011, and the corresponding
+normative updates are now complete; C-8 is closed without changing the
+canonical handler signature.
 
-## Criteria, in three buckets
+## Authority and execution
 
-### Bucket A — provable now by prototype
-*(each maps to an experiment; provable ⇒ the experiment RAN and PASSED)*
+```text
+Toolchain prefix: /tmp/uruquim-odin-toolchain
+odin version:     dev-2026-07-nightly:819fdc7
+Pinned commit:    819fdc7
+Platform:         Linux Mint 22.1, Linux 6.8.0-86-generic, LLVM 20.1.8
+Command:          env PATH=/tmp/uruquim-odin-toolchain:/usr/bin:/bin bash experiments/run_checks.sh
+Exit:             0
+Result:           PASS=10 FAIL=0 SKIP=0
+```
+
+The original `5 PASS / 4 FAIL` run, the corrected second run, and the intended
+negative probes remain preserved in `planning/10-c1-execution-evidence.md`.
+The following is the real verification run made after applying the accepted
+normative amendments. The only display normalization is the exp-06 body view:
+its long repeated `\\x00` tail is shown as `...`; status, diagnostics, test
+counts, addresses, timestamp, seed, and all decision-bearing values are copied
+from the runner output.
+
+```text
+odin version: odin version dev-2026-07-nightly:819fdc7
+--- api-shape (run) ---
+caller app addr = 0x7FFDD705B410 ; app.self_addr(recorded in app()) = 7ffdd705b330
+[serve] port=8080 routes=2 app_addr=0x7FFDD705B410
+[serve] port=8081 routes=1 app_addr=0x7FFDD705B3B0
+PASS: api-shape
+--- generic-json-response (run) ---
+[json] marshal error: Unsupported_Type
+ok/User      -> status=OK commit=1 body={"id":1,"name":"Jean"}
+created/^User -> status=Bad_Request commit=1 body={"id":1,"name":"Jean"}
+json/Big     -> status=OK commit=1 body={"tags":["a","b","c"],"scores":[10,20,30,40],"nested":[{"id":3,"name":"x"},{"id":4,"name":"y"}]}
+PASS: generic-json-response
+--- body-binding (run) ---
+valid+nested       ok=true err=None responded=false name="Jean" tags=["a", "b"]
+empty-body         ok=false err=Invalid_Json responded=true name="" tags=[]
+invalid-json       ok=false err=Invalid_Json responded=true name="" tags=[]
+over-limit         ok=false err=Body_Too_Large responded=true name="" tags=[]
+arena used bytes: 68
+PASS: body-binding
+--- optional-ok (run) ---
+checked   -> id=42 ok=true
+discarded -> just_id=42 (ok discarded; allowed but discouraged)
+missing   -> v=0 ok=false responded=true
+PASS: optional-ok
+--- typed-state (run) ---
+[A] correct -> db="primary" hits=1 (lifetime: shared &st)
+[A] st.hits after handler = 1 (mutation visible => same object)
+[B] correct -> db="primary" (wrong type is a COMPILE error, not runtime)
+PASS: typed-state
+--- request-views (run) ---
+views    -> method="GET" path="/users" query="page=2" body="body-bytes-here..."
+after reuse -> req.path (view, now GARBAGE)="######" ; saved (copied)="/users"
+PASS: request-views
+--- middleware-chain (run) ---
+onion order   : ["global:before", "group:before", "route:auth", "handler:commit", "route:after", "group:after", "global:after"]
+onion commit  : true  (commit happens at handler; middleware 'after' runs post-commit)
+preorder order: ["preorder:run", "preorder:run", "handler:commit"]
+per-request chain state = slice + index + aborted + committed (no per-hop alloc)
+PASS: middleware-chain
+--- transport-boundary (run) ---
+resp[0] status=200 commit=1 body=pong
+resp[1] status=404 commit=1 body={"error":{"code":"not_found"}}
+PASS: transport-boundary
+--- test-transport (test) ---
+[INFO ] --- [2026-07-18 22:33:41] Starting test runner with 6 threads. Set with -define:ODIN_TEST_THREADS=n.
+[INFO ] --- [2026-07-18 22:33:41] The random seed sent to every test is: 236291843545088. Set with -define:ODIN_TEST_RANDOM_SEED=n.
+[INFO ] --- [2026-07-18 22:33:41] Memory tracking is enabled. Tests will log their memory usage if there's an issue.
+
+Finished 6 tests in 645.988µs. All tests were successful.
+
+PASS: test-transport
+============================================
+PASS=9 FAIL=0 SKIP=0
+```
+
+The toy exp-02 deliberately records its rejected pointer as `Bad_Request` and
+leaves the prior body visible; that output is negative evidence, not the
+framework contract. The accepted production contract requires a server log
+and a fresh complete `internal_error` before commit. WP6 tests that behavior.
+
+## Bucket A — prototype-ratified language and contract shapes
 
 | ID | Criterion | Experiment | State |
 |---|---|---|---|
-| A-1 | `app()`/`destroy` compile, address stable, no double-free | exp-01 | **NOT_EXECUTED** |
-| A-2 | `json(ctx,status,$T)` + `ok`/`created` commit==1 | exp-02 | NOT_EXECUTED |
-| A-3 | `body(ctx,&dst)->bool`, arena ownership, empty/invalid/limit | exp-03 | NOT_EXECUTED |
-| A-4 | `#optional_ok` legal; discard diagnostic captured | exp-04 | NOT_EXECUTED |
-| A-5 | `state(ctx,T)` correct/wrong/nil/lifetime | exp-05 | NOT_EXECUTED |
-| A-6 | request views + invalidation + persist copy | exp-06 | NOT_EXECUTED |
-| A-7 | cursor chain, onion==post-commit, state cost | exp-07 | NOT_EXECUTED |
-| A-8 | minimal transport, single-commit, no leaked types | exp-08 | NOT_EXECUTED |
-| A-9 | contract-suite behaviors (404, path/query/body) pass | exp-09 | NOT_EXECUTED |
+| A-1 | `app()`/`destroy` compile; caller storage is authoritative | exp-01 | **PASS / DECIDED** — by value, no pre-return self-pointer, no copied destroy |
+| A-2 | `$T` JSON values; exact one-call `ok`/`created`; rejection known | exp-02 | **PASS / DECIDED** — value-only baseline; pointer/proc rejected; WP6 deref probe non-blocking |
+| A-3 | `body(ctx,&dst)->bool`; request allocator; empty/invalid/limit | exp-03 | **PASS / DECIDED** — fixed Phase-1 cap is 4 MiB |
+| A-4 | two-result safety diagnostic | exp-04 | **PASS / DECIDED** — omit `#optional_ok`; plain discard is a compiler error |
+| A-5 | typed app state alternatives, correct access and wrong-type guard | exp-05 | **PASS / DECIDED** — future private rawptr+typeid; reject nil; assert presence/type |
+| A-6 | request views, invalidation, explicit persistent copy | exp-06 | **PASS / DECIDED** |
+| A-7 | middleware chain alternatives and post-commit unwind risk | exp-07 | **PASS / DEFERRED** — decision belongs to Phase-2 gate |
+| A-8 | conceptual transport boundary and single commit | exp-08 | **PASS / DECIDED** — private shape remains unfrozen |
+| A-9 | in-memory dispatch contract | exp-09 | **PASS** — six tests |
+| A-10 | void vs returned-error/outcome handler models | exp-10 | **PASS / DECIDED** — keep void handler; private typed error path; four behavior tests plus two compiler probes |
 
-Bucket A satisfied: **0 / 9** (all authored, none executed).
+Bucket A result: **10/10 PASS; zero undecided Phase-1 signature blockers.**
 
-### Bucket B — designed, but dependent on future implementation
-*(cannot be closed at a Spec Gate; carried into WPs)*
+## Bucket B — intentionally deferred, with owner
 
-- B-1 onion post-`next` semantics → Phase-2 gate (ADR-005).
-- B-2 guaranteed threading model → after official adapter.
-- B-3 final request arena / benchmarks → Phase 3.
-- B-4 definitive `Transport` ABI → after 2nd adapter.
-- B-5 read/write timeouts → Phase 3 (transport-dependent).
-- B-6 radix optimization → Phase 3 (behavior pinned now by exp-09 tests).
+- Middleware pre-order vs onion: Phase-2 Spec Gate, ADR-005.
+- Guaranteed threading/event-loop model: no promise; revisit with real
+  transport evidence.
+- Typed application state implementation and configurable limits: Phase 3.
+- Final request arena, radix, benchmarks, optimized 405/header construction:
+  Phase 3.
+- Definitive internal `Transport` ABI: not frozen before a second real adapter.
+- Robust in-flight graceful shutdown: Phase 4.
+- Typed per-request `Request_State` and remaining Advanced API: later gate.
 
-These are **not** blockers; they are correctly deferred and test-pinned where
-observable.
+These items cannot expand Phase 1 and are not blockers.
 
-### Bucket C — blockers requiring an ADR or human decision
+## Bucket C — blocker closure ledger
 
-| ID | Blocker | Owner | Evidence needed | Deadline |
-|---|---|---|---|---|
-| C-1 | **Run the prototype suite on dev-2026-07a** (Bucket A) | toolchain owner | `run_checks.sh` output, all PASS + intended-failures recorded | before WP1 |
-| C-2 | ADR-002: keep or drop `#optional_ok` for extractors | API owner | exp-04 diagnostic | before WP5 |
-| C-3 | ADR-004: confirm rawptr+typeid canonical + AMEND-1 nil policy | API owner | exp-05 | before WP-typed-state (P3) |
-| C-4 | ADR-001: confirm `app()` by value | API owner | exp-01 | before WP1 freeze |
-| C-5 | Scope decision: body-cap + minimal 405 in Phase 1' (vs AMEND-3 defer) | product owner | scope-review §contested | before WP4/WP7 |
-| C-6 | AMEND-2: `error.field` optional/omitted | API owner | audit A10 | before WP6 |
+| ID | Closure | Evidence / human decision |
+|---|---|---|
+| C-1 | **CLOSED** | pinned compiler; original ratification `9/9`, extended final verification `10/10`; transcript above, evidence 10, and exp-10 |
+| C-2 | **CLOSED** | ADR-002 B: remove `#optional_ok`; exp-04 mismatch diagnostic |
+| C-3 | **CLOSED** | ADR-004 A + AMEND-1; future Phase-3 only |
+| C-4 | **CLOSED** | ADR-001 C: canonical `app()` by value with ownership invariants |
+| C-5 | **CLOSED** | fixed 4 MiB body cap + minimal 405 with required `Allow` in Phase 1 |
+| C-6 | **CLOSED** | AMEND-2: `error.field` optional and omitted when absent |
+| C-7 | **CLOSED** | ADR-003 value-only baseline; mandatory marshal logging; WP6 deref probe non-blocking |
+| C-8 | **CLOSED** | ADR-011 A: exp-10 proved returned results may be ignored and break bare `return`; keep `proc(ctx)` plus private typed error reporting |
+
+## Normative amendment check
+
+- AMEND-1 applied: nil/type policy for future typed application state.
+- AMEND-2 applied: optional omitted `error.field`.
+- AMEND-3 applied: progressive defaults with Phase-1 cap/404/405+`Allow`.
+- AMEND-4 applied: future surfaces are phase-marked in `ai-context.md`.
+- JSON value-only guidance and marshal logging were added to the architecture,
+  idioms, agent prompt, canonical patterns, AI context, errors, and WP6 plan.
+- App-by-value and no-copy/no-self-pointer invariants are normative.
+
+Static parity checks found no response call using `&payload` except the
+explicitly commented **not accepted** example. One old `^User` responder in
+the architecture was changed to explicit value dereference. There is no
+`web/` or `examples/` directory yet, so no product example can truthfully be
+compiled at this pre-implementation gate. Exact documentation/example
+compilation becomes a hard WP1/WP10 test; the ten prototype packages cover
+the proposed language shapes now.
 
 ## Objective result
 
-Decision rule (from the plan):
-- **READY** — all pre-implementation criteria satisfied AND zero critical
-  blockers.
-- **READY_WITH_BLOCKERS** — architecture viable, but explicit human/ADR
-  decisions are assigned before the first affected WP.
-- **NOT_READY** — a central signature does not compile, ownership/commit is
-  undefined, or transport/JSON makes the slice unviable.
+Decision rule:
 
-Evaluation:
-- No central signature has been shown *not* to compile (they simply have not
-  been compiled). Ownership and commit models are fully designed
-  (exp-06/07/08) and internally consistent. JSON and the transport boundary are
-  viable on paper and prototyped. → **not NOT_READY.**
-- Bucket A is 0/9 executed, so criteria are **not all satisfied** → **not
-  READY.**
-- The architecture is viable and every open item has a named owner, evidence,
-  and a deadline tied to a WP. → **READY_WITH_BLOCKERS.**
+- **READY:** every pre-implementation criterion has executed evidence, all
+  Phase-1 decisions are explicit, normative docs agree, and no critical
+  blocker remains.
+- **READY_WITH_BLOCKERS:** architecture is viable but a named Phase-1 human or
+  compiler decision remains.
+- **NOT_READY:** a central signature is refuted without an accepted fallback,
+  or ownership/commit/transport feasibility is undefined.
 
-### RESULT: **READY_WITH_BLOCKERS**
+### HISTORICAL RESULT BEFORE C-8: **READY**
 
-The single critical blocker is **C-1** (execute the ratification suite on the
-pinned toolchain; blocked today by egress, risk R-01). C-2, C-4, C-5, C-6 are
-decision blockers due before their first affected WP; C-3 is due before the
-Phase-3 typed-state work.
+All C-1 through C-7 blockers are closed. Production implementation was not
+started before this READY result. Subsequent work is authorized only in the
+approved sequence WP0 → WP1 → …, one work package at a time, using
+SPEC → TESTS → MINIMAL IMPLEMENTATION → REVIEW → DOCUMENTATION → GATE.
 
-## What this means concretely
+This READY result does not freeze middleware semantics, a transport ABI,
+threading, radix internals, pointer response support, or any later-phase API.
 
-- The **planning** deliverable is complete and independent of the compiler.
-- **No production implementation may start** (WP1+) until C-1 turns Bucket A to
-  9/9 PASS and C-2/C-4/C-5/C-6 are decided.
-- When C-1 is executed, this document is updated in place (WP11) with real
-  runner output, and the result is recomputed — expected to move to **READY**
-  if Bucket A passes and the decision blockers are closed.
+## Recomputed result after C-8
 
-## Non-critical items explicitly deferred
+### CURRENT RESULT: **READY**
 
-Bucket B in full; AMEND-3 timeout clause; path-string empty-vs-missing
-semantics; examples 04-10; observability. None gate Phase 1'.
+All C-1 through C-8 blockers are closed. Experiment 10 passed four behavior
+tests; its ignored-result probe compiled and its bare-return probe failed with
+the expected diagnostic. ADR-011 is accepted, canonical documents agree, and
+the Phase-1 handler remains `proc(ctx: ^Context)`.
+
+This READY result authorizes the approved WP sequence but does not itself
+start production implementation. WP0 must complete its real-VPS repetition
+before WP1 begins.

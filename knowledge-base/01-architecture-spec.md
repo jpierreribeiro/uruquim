@@ -176,6 +176,14 @@ app := web.bare()           // no default middleware or policies (advanced)
 app := web.app_with_state(&state)   // app() + registered typed app state
 ```
 
+`web.app()` returns `App` by value and is the canonical Productive API. After
+the return, all mutating operations take `^App` pointing at the caller's
+storage. The implementation SHALL NOT retain a self-pointer captured inside
+`app()` before it returns. `App` owns its allocations and is non-copyable by
+contract after initialization: copied values SHALL NOT be independently
+destroyed. `web.destroy` is called exactly once for the original caller-owned
+value. The future Advanced API MAY additionally expose `app_init(&app)`.
+
 `web.app()` SHALL be appropriate for moderate production use, not only demos.
 It SHALL configure by default:
 
@@ -188,6 +196,19 @@ It SHALL configure by default:
 - rejection of malformed requests
 - startup logging
 - graceful shutdown
+
+This list is the end-state default-policy contract. Delivery is progressive:
+
+- Phase 1: fixed 4 MiB buffered request-body cap, consistent 404, and minimal
+  405 with an `Allow` header containing the registered methods for the path
+- Phase 2: panic recovery
+- Phase 3: read/write timeouts, configurable body limits, header limits, and
+  the optimized router implementation of the already-frozen 405 behavior
+- Phase 4: robust graceful shutdown for in-flight requests and the remaining
+  production hardening
+
+A build SHALL document which phase it implements and SHALL NOT claim defaults
+scheduled for a later phase.
 
 `web.bare()` creates an application with none of the default middleware or
 policies, for users who want full control.
@@ -224,9 +245,24 @@ Handler :: proc(ctx: ^web.Context)
 ```
 
 One signature for handlers and middleware. Handlers write to the context via
-response helpers; they do not return values in v1. (Result-returning handlers
-`proc(ctx) -> web.Result` are a possible future ergonomic layer; they require
-boxing/codegen decisions and SHALL NOT block the first release.)
+response helpers and do not return values in v1. This is a deliberate Odin
+decision, not an accidental omission of an Echo-style `error` result.
+
+Experiment 10 proved that Odin permits a caller to silently discard a returned
+`Handler_Error` or `Handler_Outcome`. It also proved that an unnamed result
+breaks the canonical extractor flow `if !ok { return }`. A returned error would
+therefore add ceremony without providing the safety property expected from it.
+
+Framework-detected failures SHALL enter one private, typed error-report path
+before formatting, server-side logging, and response commit. If the response is
+already committed, the failure is logged/observed but SHALL NOT produce a
+second write. Application-domain errors remain application types and are
+mapped explicitly at the HTTP boundary; the framework SHALL NOT transport
+arbitrary errors through `any`.
+
+A typed error observer/policy is Phase-2 scope. A result-returning handler may
+only be reconsidered as a separately gated breaking design after real
+application evidence; it SHALL NOT coexist as a second canonical handler.
 
 ### Extractors
 
@@ -254,12 +290,18 @@ if !web.body(ctx, &input) {
 
 #### Canonical Extractor Control Flow (normative)
 
-Fallible HTTP extractors SHALL return `(value, ok: bool)` and SHALL use
-`#optional_ok` where applicable:
+Fallible HTTP extractors SHALL return `(value, ok: bool)` without
+`#optional_ok`:
 
 ```odin
-path_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool) #optional_ok
+path_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool)
 ```
+
+The missing directive is intentional. On the pinned compiler, discarding the
+boolean from a plain two-result procedure is a compile error (`Assignment
+count mismatch`), while `#optional_ok` permits silent discard. HTTP extractors
+write a response on failure, so forcing the caller to handle `ok` is safer for
+humans and coding agents. The canonical call site remains unchanged.
 
 When extraction fails, the extractor SHALL write the complete HTTP error
 response before returning `false`.
@@ -377,6 +419,22 @@ from the underlying renderer — no extra serialization, headers, or error
 handling.
 ```
 
+Phase-1 JSON response payloads are passed as values. Canonical examples SHALL
+use `web.ok(ctx, value)`, `web.created(ctx, value)`, and
+`web.json(ctx, status, value)`, never `&value` and never a variable whose type
+is a pointer. The pinned `core:encoding/json` marshaller rejects pointer and
+procedure payloads with `Unsupported_Type`.
+
+When serialization fails, the framework SHALL log the marshal error on the
+server before producing `internal_error`. Serialization completes before the
+response is committed; the error path SHALL emit one fresh standardized 500
+response and SHALL NOT leak or reuse a partially rendered/stale payload.
+
+WP6 SHALL contain a non-blocking prototype for dereferencing exactly one
+pointer level before marshal. If that implementation is small, explicit, and
+compiles cleanly on the pinned toolchain, the pointer restriction MAY be
+relaxed through a spec-first amendment. Until then, value-only is normative.
+
 ### Serving
 
 ```odin
@@ -446,6 +504,11 @@ Required error codes include at minimum:
 The envelope shape and code list are part of the compatibility contract and
 SHALL be documented in `docs/errors.md`.
 
+`error.field` is optional. It is present only when an error is bound to a
+specific input field or parameter. When there is no applicable field, the key
+SHALL be omitted entirely; it SHALL NOT be emitted as `null` or `""`. Clients
+MUST NOT rely on `field` being present.
+
 ## Context Model
 
 ### Default Context (non-parametric)
@@ -508,6 +571,8 @@ App :: struct {
 }
 
 state :: proc(ctx: ^Context, $T: typeid) -> ^T {
+	assert(ctx.private.app.state_ptr != nil,
+		"web.state called without registered application state")
 	assert(ctx.private.app.state_type == typeid_of(T),
 		"web.state called with a type different from the registered App_State")
 	return cast(^T)ctx.private.app.state_ptr
@@ -517,6 +582,13 @@ state :: proc(ctx: ^Context, $T: typeid) -> ^T {
 A single `rawptr` isolated behind a typed, asserted accessor is acceptable; a
 `map[string]any` bag spread through the request is not. This distinction is
 normative.
+
+`app_with_state` SHALL reject a nil state pointer at registration.
+`web.state(ctx, T)` SHALL assert both that application state was registered and
+that `T` matches the registered type before casting. Nil/unregistered state or
+a wrong requested type is programmer misuse detected at the boundary, never a
+request-time validation error. This policy belongs to the future typed-state
+work and does not add state to the Phase-1 public surface.
 
 ### Typed request state — opt-in (Advanced API)
 
@@ -590,7 +662,7 @@ profile :: proc(ctx: ^web.Context) {
 		return
 	}
 
-	web.ok(ctx, user)
+	web.ok(ctx, user^) // explicit value; `user` itself is ^User
 }
 ```
 
@@ -754,18 +826,20 @@ manipulate a chain index, use `rawptr`, or provide continuation callbacks.
 
 ### Execution model (internal)
 
-Deterministic cursor-based onion semantics:
+The Phase-2 prototype SHALL evaluate this deterministic cursor-based onion
+candidate:
 
 - `next(ctx)` advances to the next handler
 - middleware may run code before and after `next(ctx)`
 - returning without calling `next(ctx)` short-circuits
 - `abort(ctx)` prevents further downstream execution
-- post-`next` code runs in reverse-unwind order
+- if onion is adopted, post-`next` code runs in reverse-unwind order
 
-Ordering: app/global middleware → outer groups → inner groups → route
-middleware → terminal handler. Stable and test-covered.
+Ordering is fixed regardless of the selected continuation model:
+app/global middleware → outer groups → inner groups → route middleware →
+terminal handler. It SHALL be stable and test-covered.
 
-**Onion caveat:** post-`next` (after-response-side) semantics SHALL be
+**Decision gate:** post-`next` (after-response-side) semantics SHALL be
 supported only if the transport boundary can guarantee them without confusing
 behavior (e.g. around response commit). If it cannot, the contract is
 simplified to pre-handler middleware with short-circuit only. This decision
@@ -981,7 +1055,10 @@ allocators internally; the Advanced API exposes them.
 - No overloads whose behavior depends on `any`.
 - Prefer explicit helpers: `ok`, `json`, `text`, `body`, `path_int`.
 - Every public procedure has a minimal compiling example.
-- Public examples are part of the compatibility contract and compile in CI.
+- Public examples are part of the compatibility contract and compile in the
+  mandatory verification gate. The gate runs locally before every push and
+  MAY be repeated by a remote verifier; it SHALL NOT depend on a paid CI
+  provider.
 - Internal procedures are never documented beside public ones without being
   clearly marked private.
 - `docs/canonical-patterns.md` defines the single recommended form for each
@@ -1080,7 +1157,7 @@ uruquim/
 │   ├── middleware.md
 │   └── ai-context.md
 │
-└── examples/                   all compiled in CI
+└── examples/                   all compiled by the verification gate
     ├── 01-hello-world/
     ├── 02-json-api/
     ├── 03-route-params/

@@ -13,10 +13,10 @@ import "core:mem"
 Header_View :: struct { name: string, value: string } // both alias buffer
 
 Request :: struct {
-	method:  string        // view
-	path:    string        // view
-	query:   string        // view
-	headers: []Header_View // views
+	method:  string,        // view
+	path:    string,        // view
+	query:   string,        // view
+	headers: []Header_View, // views
 	body:    []byte        // view
 }
 

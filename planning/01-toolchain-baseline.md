@@ -1,7 +1,7 @@
 # 01 — Toolchain and Repository Baseline
 
-Status: **RECORDED**. This document fixes the initial conditions of the
-pre-implementation audit. It is descriptive, not normative.
+Status: **UPDATED AFTER C-1 EXECUTION.** This document preserves the initial
+authoring condition and records the toolchain that is now available locally.
 
 ## Pinned toolchain (authority for Phase 1)
 
@@ -10,7 +10,7 @@ pre-implementation audit. It is descriptive, not normative.
 | Release | `dev-2026-07a` |
 | Commit | `819fdc7` |
 | Release date | 2026-07-10 |
-| Target artifact | `odin-linux-amd64-dev-2026-07a.zip` (official) |
+| Target artifact | local distribution corresponding to pinned commit |
 | Intended install prefix | `/tmp/uruquim-odin-toolchain` (isolated, no global config change) |
 
 The pinned toolchain is the **only practical authority** for Phase 1. Official
@@ -23,7 +23,29 @@ References:
 - JSON: https://pkg.odin-lang.org/core/encoding/json/
 - nbio: https://pkg.odin-lang.org/core/nbio/
 
-## Initial condition: compiler UNAVAILABLE in this environment
+## Current execution baseline: compiler AVAILABLE
+
+The installed distribution at `/home/jp/.local/opt/Odin` was copied in full to
+`/tmp/uruquim-odin-toolchain` so the compiler resolves its matching `base`,
+`core`, and `vendor` trees from the isolated prefix.
+
+```text
+odin version dev-2026-07-nightly:819fdc7
+OS:      Linux Mint 22.1, Linux 6.8.0-86-generic
+CPU:     Intel(R) Core(TM) i7-8665U CPU @ 1.90GHz
+RAM:     23845 MiB
+Backend: LLVM 20.1.8
+SHA-256: 6fea037515fee6c4e681a67fe86818998241f15abbadd8df67899d9f0ff32b12
+```
+
+The commit matches the pin. The binary's literal version label is
+`dev-2026-07-nightly`, not `dev-2026-07a`; this difference is retained in the
+evidence. See `planning/10-c1-execution-evidence.md`.
+
+`core:net`, `core:nbio`, and `core:encoding/json` are present in the isolated
+distribution.
+
+## Historical authoring condition: compiler was unavailable
 
 The pinned toolchain **could not be installed** in the authoring environment.
 This is a recorded baseline condition, **not evidence against the viability of
@@ -55,10 +77,11 @@ around**. No mirror, apt, or snap route exists:
 - `snap`: not present.
 - No `odin` executable exists anywhere on disk.
 
-### Consequence for this audit (carried into the gate)
+### Historical consequence for the initial audit
 
-Prototype **code** is authored as planned and is a deliverable. But it **was
-not compiled** here. Therefore:
+Prototype code was initially authored without compilation. C-1 has now run the
+suite; the historical `NOT_EXECUTED` state is superseded by the first-run
+evidence (`5 PASS / 4 FAIL`).
 
 - No canonical signature is marked `READY_FOR_GATE` on compile evidence.
 - Every experiment result is recorded as `NOT_EXECUTED — pending compile on
@@ -73,16 +96,15 @@ This keeps the deliverable honest: the intellectual work (audit, scope,
 ADRs, risk, gate design) is complete and independent of the compiler; the
 signature *ratification* is pending and clearly flagged.
 
-## Commands that WILL be used once the toolchain is present
+## Commands used with the isolated toolchain
 
 Recorded now so the runner and WP0 are unambiguous:
 
 ```bash
-# install (isolated)
-mkdir -p /tmp/uruquim-odin-toolchain
-# unzip official artifact there; export PATH="/tmp/uruquim-odin-toolchain:$PATH"
+# selected execution PATH
+export PATH="/tmp/uruquim-odin-toolchain:/usr/bin:/bin"
 
-odin version                 # must print dev-2026-07a (819fdc7)
+odin version                 # prints dev-2026-07-nightly:819fdc7
 odin report                  # environment / backend record
 
 odin check <dir> -collection:uruquim=<root>     # type-check without codegen
@@ -90,20 +112,30 @@ odin build  <dir> -collection:uruquim=<root>    # produce binary
 odin test   <dir> -collection:uruquim=<root>    # run *_test.odin
 ```
 
-Standard-library presence to confirm by `odin check` on a probe import once
-installed (expected, from documentation — to be verified, not assumed):
+Standard-library presence in the installed tree:
 
 | Package | Expectation |
 |---|---|
-| `core:net` | present (Berkeley sockets) |
-| `core:nbio` | present (per-thread event loops, tick-driven callbacks) |
-| `core:encoding/json` | present (`marshal`, `unmarshal`, `unmarshal` generic `^$T`) |
+| `core:net` | present |
+| `core:nbio` | present |
+| `core:encoding/json` | present |
 | `core:testing` | present (`@(test)`, `testing.T`, `expect`) |
 | `core:mem` | present (allocators, arenas) |
 | `core:net/http` | **expected ABSENT** — this is the whole reason for the transport boundary |
 | `laytan/odin-http` | third-party, vendored only for the bootstrap adapter; not imported by transport-free prototypes |
 
 ## Repository baseline
+
+Current execution workspace:
+
+| Field | Value |
+|---|---|
+| Working dir | `/home/jp/Desktop/uruquim-odin` |
+| Platform | Linux Mint 22.1, Linux x86_64 |
+| Git metadata | local `.git` directory is empty; `git status` reports “not a git repository” |
+
+The following table is retained as the historical authoring environment
+reported by the original audit; it is not the current workspace:
 
 | Field | Value |
 |---|---|

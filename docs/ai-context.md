@@ -5,8 +5,9 @@ Paste this file into your agent's context (Cursor rules, CLAUDE.md, etc.).
 **Use only the APIs documented here. Do not invent procedures, aliases, or
 alternative forms. If something is not listed, it does not exist.**
 
-> Status: tracks the public API; updated in the same commit as any public API
-> change. Pre-Phase-1: describes the frozen target surface.
+> Status: phase-aware public API contract. Before implementation, only the
+> Phase-1 sections below are ratified; sections marked Phase 2/3/4 do not yet
+> exist and must not be emitted by a coding agent.
 
 ## Application
 
@@ -16,8 +17,8 @@ package main
 import web "uruquim:web"
 
 main :: proc() {
-	app := web.app()          // production defaults: recovery, body limit,
-	defer web.destroy(&app)   // timeouts, 404/405, graceful shutdown
+	app := web.app()          // Phase 1: fixed 4 MiB body cap, 404,
+	defer web.destroy(&app)   // and minimal 405 with required Allow header
 
 	web.get(&app, "/path", handler)
 	web.post(&app, "/path", handler)
@@ -25,18 +26,25 @@ main :: proc() {
 	web.patch(&app, "/path/:id", handler)
 	web.delete(&app, "/path/:id", handler)
 
-	web.use(&app, middleware)     // optional
-
 	web.serve(&app, 8080)
 }
 ```
 
-With typed application state:
+`App` owns resources and is non-copyable by contract. Pass `&app` and destroy
+that same value once; never copy it or destroy a copy. Recovery arrives in
+Phase 2; configurable limits, read/write timeouts, and optimized 405/header
+handling in Phase 3; robust graceful shutdown in Phase 4.
+
+Typed application state is an Advanced API available from Phase 3, not Phase
+1:
 
 ```odin
 app := web.app_with_state(&state)         // state: ^App_State (your struct)
 state := web.state(ctx, App_State)        // inside handlers: ^App_State
 ```
+
+`app_with_state` rejects nil. `web.state` asserts registered state and exact
+type before returning the pointer.
 
 ## Handler
 
@@ -44,9 +52,15 @@ Handlers take `^web.Context`, return nothing, and respond via helpers:
 
 ```odin
 handler :: proc(ctx: ^web.Context) {
-	web.ok(ctx, payload)
+	payload: User = load_user()
+	web.ok(ctx, payload) // payload is a User value
 }
 ```
+
+Do not return `error`, `Handler_Error`, `Handler_Outcome`, or another result
+from a canonical handler. Uruquim is intentionally not Echo: framework
+failures use a private typed reporting path, while application-domain errors
+are mapped explicitly at the HTTP boundary. There is only one handler shape.
 
 ## Extractors
 
@@ -84,10 +98,12 @@ page, ok := web.query_int(ctx, "page")        // required, responds 400 on failu
 limit, ok := web.query_int_or(ctx, "limit", 20) // default only when ABSENT;
                                                 // malformed value → 400
 
-value, found := web.header(ctx, "x-api-key")  // (string, found), no auto-response
-token, found := web.bearer_token(ctx)         // (string, found), no auto-response
+// Phase 2, unavailable in Phase 1:
+value, found := web.header(ctx, "x-api-key")
+token, found := web.bearer_token(ctx)
 
-state := web.state(ctx, App_State)            // ^App_State (app_with_state apps)
+// Phase 3 Advanced API, unavailable in Phase 1:
+state := web.state(ctx, App_State)
 ```
 
 JSON structs use tags:
@@ -107,23 +123,46 @@ web.created(ctx, payload)         // 201 JSON
 web.no_content(ctx)               // 204
 web.json(ctx, .Accepted, payload) // any status, JSON
 web.text(ctx, .OK, "pong")
-web.redirect(ctx, .Found, "/login")
 
 web.bad_request(ctx, "invalid input")            // 400
 web.unauthorized(ctx, "authentication required") // 401
 web.forbidden(ctx, "insufficient permission")    // 403
 web.not_found(ctx, "user")                       // 404
-web.conflict(ctx, "already exists")              // 409
 web.internal_error(ctx)                          // 500
 ```
+
+`web.redirect` and `web.conflict` belong to later phases and do not exist in
+the Phase-1 surface.
+
+The Phase-1 JSON baseline accepts concrete values only:
+
+```odin
+user: User = load_user()
+web.ok(ctx, user)       // accepted
+// web.ok(ctx, &user)   // not accepted
+```
+
+If `user` has type `^User`, it is also not an accepted payload. Do not pass a
+pointer variable. WP6 may prototype one-level pointer dereference, but pointer
+support does not exist unless compiler evidence and a later spec amendment
+say otherwise.
+
+If marshalling rejects a value type, the renderer logs the marshal error on
+the server, then—only while uncommitted—writes one complete standardized
+`internal_error`. A silent 500 or partial JSON is forbidden.
 
 All error responses share the envelope:
 
 ```json
-{"error": {"code": "...", "message": "...", "field": "..."}}
+{"error": {"code": "...", "message": "..."}}
 ```
 
+`field` is optional and is omitted when the error is not associated with a
+specific input field.
+
 ## Middleware
+
+> Phase 2 and later. None of this section exists in Phase 1.
 
 A middleware is a handler that calls `web.next(ctx)` to continue, or returns
 without calling it to stop the chain:
@@ -149,11 +188,13 @@ Middleware never hands values to handlers. When a handler needs the
 authenticated user, it calls a typed extraction procedure
 (`current_user(ctx) -> (^User, bool)`) instead of relying on middleware.
 
-Built-ins: `web.logger()`, `web.recovery()`, `web.request_id()`,
-`web.cors(web.Cors_Config{...})`, `web.secure_headers()`,
-`web.body_limit(bytes)`.
+Phase-2 built-ins: `web.logger()`, `web.recovery()`, `web.request_id()`.
+CORS and secure headers are Phase 4. A configurable body limit is Phase 3;
+Phase 1 has the fixed 4 MiB cap and no `web.body_limit` middleware.
 
 ## Route groups
+
+> Phase 2 and later. None of this section exists in Phase 1.
 
 ```odin
 api := web.router("/api")
@@ -216,11 +257,13 @@ create_user :: proc(ctx: ^web.Context) {
   `if !ok { return }`, or `if !web.body(ctx, &input) { return }`.
 - `web.body` takes a POINTER to your struct and returns `bool` — it never
   returns the value.
+- JSON response helpers take payloads BY VALUE in the Phase-1 baseline. Do
+  not pass `&value` or a variable with pointer type such as `^User`.
 - Never configure allocators, transports, or response writers — `web.app()`
   and `web.serve` handle them.
-- Never store request data in maps or `any`; there is no `ctx.user_data` —
-  use typed structs, `web.state`, and extraction procedures like
-  `current_user(ctx) -> (^User, bool)`.
+- Never store request data in maps or `any`; there is no `ctx.user_data`.
+  Use typed structs and extraction procedures. `web.state` is a Phase-3
+  Advanced API, not a Phase-1 escape hatch.
 - Never name a variable `context` (reserved by Odin); the framework context
   is always `ctx`.
 - One canonical call per task; do not mix or invent alternatives. Typed query

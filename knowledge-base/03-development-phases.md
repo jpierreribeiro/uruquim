@@ -15,7 +15,7 @@ Each phase has three mandatory gates: **Spec Gate**, **Test Gate**,
 Cross-phase invariants, enforced from Phase 1 onward:
 
 - no transport-native types in any public signature
-- every documented example compiles in CI
+- every documented example compiles in the mandatory verification gate
 - `docs/ai-context.md` matches the public API at every merge
 - no code generator, no mandatory CLI, no heavy metaprogramming
 - every real transport adapter passes the factory-parameterized transport
@@ -24,9 +24,12 @@ Cross-phase invariants, enforced from Phase 1 onward:
 
 **Note on `web.app()` defaults:** the architecture spec defines the full
 default-policy contract (recovery, limits, timeouts, 404/405, graceful
-shutdown). It is delivered progressively — recovery in Phase 2, limits and
-timeouts in Phase 3, shutdown robustness in Phase 4 — but the *end-state
-contract* is fixed now and each phase moves `web.app()` closer to it.
+shutdown). It is delivered progressively: Phase 1 enforces a fixed 4 MiB
+request-body cap plus standardized 404 and minimal 405 with `Allow`; recovery
+arrives in Phase 2; configurable limits, read/write timeouts, and optimized
+405/header handling arrive in Phase 3; shutdown robustness arrives in Phase
+4. The *end-state contract* is fixed now, but documentation must say which
+part is available in each phase.
 
 ## Phase 1 — Minimal Productive API
 
@@ -50,7 +53,8 @@ public API alone.
   `web.text`
 - error helpers + standardized envelope: `bad_request`, `unauthorized`,
   `forbidden`, `not_found`, `internal_error`
-- consistent 404 behavior
+- fixed 4 MiB request-body cap; oversized input produces `body_too_large`
+- consistent 404 behavior and minimal 405 with the required `Allow` header
 - server: `web.serve(&app, port)` with clean stop
 - internal transport boundary as a **conceptual contract** (accepts HTTP
   work → invokes dispatch → commits response → supports shutdown); the
@@ -104,8 +108,9 @@ is decided at its own later gate.
 - [ ] every signature below is backed by a compiling example AND a behavior
       test before being marked frozen
 - [ ] freeze the canonical vocabulary (app/routes/extractors/responses/serve)
-- [ ] freeze the extractor control flow: `(value, ok)` + `#optional_ok` for
-      value-producing; `^$T` destination + `bool` for `web.body`
+- [ ] freeze the extractor control flow: plain `(value, ok)` without
+      `#optional_ok` for value-producing extractors, so the compiler forces
+      the boolean to be captured; `^$T` destination + `bool` for `web.body`
 - [ ] freeze `query_int_or` semantics (default only on absence; malformed
       value is a 400)
 - [ ] freeze the error envelope and initial code list
@@ -128,8 +133,14 @@ is decided at its own later gate.
 - [ ] `web.query_int` missing/malformed produces `invalid_query_parameter`
 - [ ] `web.query_int_or`: absent → default; malformed → 400
 - [ ] `web.body` success and `invalid_json` failure paths
+- [ ] body larger than 4 MiB produces `body_too_large` without decoding
 - [ ] unknown route returns standardized 404
+- [ ] known path under another method returns standardized 405 and an exact
+      `Allow` header
 - [ ] `web.ok`/`web.created` byte-identical to equivalent `web.json` calls
+- [ ] unsupported JSON payload type logs the marshal failure server-side and,
+      before commit, produces one complete `internal_error` response with no
+      partial JSON
 - [ ] `test_request` round-trips without sockets
 - [ ] `transport_contract_test` passes on the test transport AND the
       bootstrap adapter
@@ -140,7 +151,7 @@ is decided at its own later gate.
 - [ ] odin-http bootstrap adapter implemented behind the boundary
 - [ ] test transport implemented
 - [ ] examples `01-hello-world`, `02-json-api`, `03-route-params` compile and
-      run in CI
+      run in the verification gate
 - [ ] small CRUD example writable using only public API (proof of goal)
 - [ ] no transport-native types leak into public signatures
 - [ ] `docs/quick-start.md`, `docs/errors.md`, `docs/canonical-patterns.md`,
@@ -161,6 +172,9 @@ dispatcher.
 - recovery middleware — becomes default-on in `web.app()`
 - logger middleware
 - request ID middleware
+- typed framework-error observer/policy for centralized logging and optional
+  external reporting; it receives a closed event, never arbitrary `any`, and
+  does not change the canonical handler signature
 - `web.header`, `web.bearer_token` lookups
 - documented auth pattern: gate-only `require_auth` middleware + typed
   `current_user` extraction procedure (no `user_data` field, ever)
@@ -174,6 +188,8 @@ dispatcher.
       pre-handler + short-circuit
 - [ ] chain flattening at registration time specified
 - [ ] recovery semantics; request ID source/generation
+- [ ] error-event fields, redaction policy, observer isolation, and behavior
+      after response commit
 
 ### Test Gate checklist
 
@@ -182,6 +198,8 @@ dispatcher.
 - [ ] post-`next` unwind order correct (if onion adopted)
 - [ ] recovery converts panic to standardized 500
 - [ ] request ID present in context and response header
+- [ ] every framework error is observed exactly once; an observer cannot
+      trigger a second response write or expose internal details
 - [ ] `web.bare()` installs none of the defaults
 
 ### Implementation Gate checklist
@@ -203,12 +221,17 @@ public API change.
 - method-sharded radix tree router (static, `:param`, terminal `*wildcard`)
 - zero-allocation lookup on the common path
 - params in small fixed buffers (no maps)
-- route conflict detection with diagnostics; 405 behavior
+- route conflict detection with diagnostics; optimized 405 method discovery
+  and header construction
 - precomputed middleware chains (from Phase 2) verified allocation-free at
   dispatch
 - per-request arena; reusable buffers
 - allocation reduction pass across the hot path
-- body size limit and read/write timeouts — become default-on in `web.app()`
+- typed application state: `app_with_state` + `web.state`, backed by the one
+  sanctioned private `rawptr + typeid` pair; this is Advanced and never a
+  Phase-1 requirement
+- configurable body-size limit (replacing the fixed Phase-1 cap) and
+  read/write timeouts — become default-on in `web.app()`
 - benchmark suite (lookup, dispatch, JSON round-trip) with regression harness
 
 ### Spec Gate checklist
@@ -225,13 +248,15 @@ public API change.
 - [ ] per-method routing isolated; 405 when route exists on another method
 - [ ] matched pattern preserved for instrumentation
 - [ ] fuzz/property tests for insert+lookup invariants
-- [ ] oversized body produces `body_too_large`; timeout behavior covered
+- [ ] configured body limit overrides the 4 MiB default; oversized body still
+      produces `body_too_large`; timeout behavior covered
 
 ### Implementation Gate checklist
 
 - [ ] radix insert/lookup implemented; params without map allocation
 - [ ] arena + buffer reuse implemented; hot path allocation-reviewed
-- [ ] benchmarks recorded; regression harness in CI
+- [ ] benchmarks recorded; regression harness in the mandatory verification
+      gate (local pre-push plus clean VPS repetition)
 - [ ] all Phase 1–2 public-behavior tests pass unchanged
 
 ## Phase 4 — Production
@@ -288,7 +313,8 @@ API.
 - streaming request/response APIs
 - HTTP/2, as the official transport permits
 - Advanced API completion: `app_init` + `Advanced_Config`, typed
-  `Request_State`, `serve_transport`
+  per-request `Request_State`, `serve_transport` (typed application state is
+  introduced separately in Phase 3)
 - validation story decision (explicit vs tag-based), prototype-gated, never
   requiring a generator
 - project templates
@@ -302,4 +328,4 @@ The framework core is architecturally established only when:
 - middleware semantics are stable and test-pinned
 - transport is decoupled, with `core:net/http` as canonical backend
 - the hot path has been allocation-reviewed
-- every documented example compiles in CI
+- every documented example compiles in the verification gate

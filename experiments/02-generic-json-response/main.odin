@@ -6,7 +6,7 @@
 // THROWAWAY. Not imported by any product package.
 package generic_json_response
 
-import "core:encoding/json"
+import encoding_json "core:encoding/json"
 import "core:fmt"
 
 Status :: enum { OK = 200, Created = 201, Bad_Request = 400 }
@@ -24,7 +24,7 @@ Context :: struct {
 // The single renderer. Uses `any` INTERNALLY only because json.marshal takes
 // any — this is an encapsulated stdlib detail, never framework storage/API.
 json :: proc(ctx: ^Context, status: Status, value: $T) {
-	data, err := json.marshal(value, allocator = context.temp_allocator)
+	data, err := encoding_json.marshal(value, allocator = context.temp_allocator)
 	if err != nil {
 		// real framework: this becomes internal_error before commit; here we record.
 		fmt.eprintln("[json] marshal error:", err)

@@ -45,6 +45,27 @@ check 06-request-views        run  "request-views"
 check 07-middleware-chain     run  "middleware-chain"
 check 08-transport-boundary   run  "transport-boundary"
 check 09-test-transport       test "test-transport"
+check 10-handler-errors       test "handler-errors"
+
+echo "--- handler-errors ignored-result probe (expected compile success) ---"
+if odin check "$HERE/10-handler-errors/probes/ignored_results.odin" -file $COLL; then
+  echo "PASS: returned handler errors can be ignored (risk confirmed)"
+else
+  echo "FAIL: ignored-result probe no longer compiles"
+  FAIL=$((FAIL+1))
+fi
+
+echo "--- handler-errors bare-return probe (expected compile failure) ---"
+URUQUIM_PROBE_OUTPUT="$(odin check "$HERE/10-handler-errors/probes/bare_return.odin" -file $COLL 2>&1)"
+URUQUIM_PROBE_EXIT=$?
+if test "$URUQUIM_PROBE_EXIT" -ne 0 && \
+   grep -q "Expected 1 return values, got 0" <<<"$URUQUIM_PROBE_OUTPUT"; then
+  echo "PASS: bare return rejected with expected diagnostic"
+else
+  echo "$URUQUIM_PROBE_OUTPUT"
+  echo "FAIL: bare-return diagnostic changed"
+  FAIL=$((FAIL+1))
+fi
 
 echo "============================================"
 echo "PASS=$PASS FAIL=$FAIL SKIP=$SKIP"

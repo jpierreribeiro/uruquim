@@ -1,7 +1,16 @@
 # 00 — Knowledge Base Audit
 
-Status: **COMPLETE (analysis)**. No normative file was modified. Every
-recommended change appears only as a `PROPOSED SPEC AMENDMENT` block below.
+Status: **COMPLETE; AMENDMENTS ACCEPTED AND APPLIED 2026-07-18.** The original
+matrix is preserved as historical audit evidence. AMEND-1 through AMEND-4
+were accepted by the human owner and applied to the normative knowledge base
+and docs; exact application is recorded below.
+
+Post-audit note: the matrix preserves the state at the end of the original
+uncompiled audit. C-1 has since executed on commit `819fdc7`; current compile
+states and both runner passes are authoritative in
+`planning/07-spec-gate-phase-1.md` and
+`planning/10-c1-execution-evidence.md`. Do not read the historical
+`UNVALIDATED` rows below as the current gate state.
 
 ## Method
 
@@ -14,9 +23,10 @@ must match the public API.
 Status vocabulary: **CONSISTENT**, **AMBIGUOUS**, **CONTRADICTORY**,
 **PREMATURE**, **UNVALIDATED**, **MISSING**, **READY_FOR_GATE**.
 
-Because the pinned toolchain was unreachable (baseline 01), **no row can be
-`READY_FOR_GATE` on compile evidence.** Rows whose only gap is compilation are
-marked `UNVALIDATED` with a pointer to the experiment that will ratify them.
+At original audit time the pinned toolchain was unreachable, so rows whose
+only gap was compilation were marked `UNVALIDATED`. They are intentionally not
+rewritten in place; the post-audit ledger records what subsequently passed,
+failed, was corrected, or remains a human decision.
 
 ## Audit matrix
 
@@ -47,11 +57,16 @@ marked `UNVALIDATED` with a pointer to the experiment that will ratify them.
 | A23 | no `web.object` untyped literal | (removed earlier) | CONSISTENT | grep: none | — | — |
 | A24 | examples 01-10 compile in CI | spec §Reference structure; phases | MISSING | examples not yet authored | claimed contract with no files | WP10 creates them |
 
-## Proposed spec amendments
+## Spec amendments — accepted and applied
 
-Conflicts are not resolved silently. Each amendment is a proposal only.
+The proposal text below is retained for traceability. Human acceptance was
+received on 2026-07-18; the implemented wording may be more explicit while
+preserving the approved decision.
 
 ### AMEND-1 — `web.state` nil policy (A6)
+
+**Status: ACCEPTED AND APPLIED.** Applied to architecture, idioms, agent
+prompt, canonical patterns, and AI context; implementation remains Phase 3.
 
 **Current (spec §Application state):** the asserted accessor validates the
 `typeid` but says nothing about a `nil` registered state.
@@ -69,6 +84,8 @@ state (Phase 3), not Phase 1.
 
 ### AMEND-2 — `error.field` optionality (A10)
 
+**Status: ACCEPTED AND APPLIED.** `field` is omitted when absent.
+
 **Current:** the envelope is shown as `{code, message, field}`; several errors
 (`invalid_json`, `internal_error`) have no meaningful field.
 
@@ -83,6 +100,9 @@ state (Phase 3), not Phase 1.
 envelope encoder; affects WP6.
 
 ### AMEND-3 — `web.app()` defaults are progressive; docs must not overpromise (A11/A12/A13)
+
+**Status: ACCEPTED AND APPLIED WITH SCOPE DECISION.** Phase 1 includes fixed
+4 MiB cap and minimal 405 with `Allow`; later policies are phase-marked.
 
 **Current:** `docs/ai-context.md` L19-20 and `docs/canonical-patterns.md`
 L38-39 state `web.app()` provides recovery, body limit, timeouts, 404/405, and
@@ -104,6 +124,9 @@ body-limit + 405 forward into Phase 1 (they do not need radix). Recorded as
 open question OQ-3 for the scope review.
 
 ### AMEND-4 — mark not-yet-available surfaces in `ai-context.md` (A14)
+
+**Status: ACCEPTED AND APPLIED.** Middleware/groups are marked Phase 2 and
+typed application state Phase 3/Advanced.
 
 **Current:** `ai-context.md` presents the full target surface (middleware,
 groups, typed state) with only a global "frozen target surface" status line. A
@@ -128,7 +151,9 @@ only; no API change.
 - CONTRADICTORY: 2 rows (A11, A12) — AMEND-3 (docs overpromise vs progressive).
 - PREMATURE: 1 row (A22) — correctly deferred, watch for leakage.
 - MISSING: 1 row (A24) — examples authored in WP10.
-- READY_FOR_GATE: **0** — by baseline, nothing compiled here.
+- READY_FOR_GATE at original audit: **0**. Current gate evidence is maintained
+  separately; the corrected runner is 9/9 and the accepted amendments close
+  the original human-decision blockers.
 
 No CONTRADICTORY finding blocks the architecture; all four amendments are
 documentation-or-one-sentence changes. The gate (07) carries A11/A12/A13 as the

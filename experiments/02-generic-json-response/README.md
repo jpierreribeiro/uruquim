@@ -30,10 +30,14 @@ odin check .
 (request arena vs temp) is decided in experiments 03/06, not here. Says nothing
 about streaming large bodies.
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain.`
+**Result.** First run failed due the recorded package/procedure name collision;
+after aliasing the stdlib import, the runner passed mechanically. Struct and
+large values serialize with one commit. `^User` and the separate proc probe
+return `Unsupported_Type`. The human-approved ADR-003 baseline is value-only;
+the toy `Bad_Request`/stale-body capture is negative evidence and is not the
+production error contract.
 
-**Conclusion (pending ratification).** If expectations hold, ADR-003 (response
-by value/pointer via `$T`) and the `ok`/`created` exact-shorthand contract are
-supported and freezable. The decisive negative evidence would be either (a) the
-parametric wrapper failing to pass `$T` to `any` cleanly, or (b) `ok`/`created`
-needing more than one statement — either would reopen the response API.
+**Conclusion.** Response by concrete `$T` value and the `ok`/`created`
+exact-shorthand shape are ratified. Pointer support is not. WP6 must log a
+marshal failure and render a fresh pre-commit `internal_error`, and will run a
+non-blocking one-level dereference prototype before any amendment is proposed.

@@ -31,10 +31,10 @@ odin check .
 real transport enforces the limit while reading (WP7 concern). Does not test
 streaming bodies (out of MVP).
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain.`
+**Result.** `PASS` on `819fdc7`: nested value bound successfully; empty,
+invalid, and over-limit branches responded as expected; arena usage was 68
+bytes.
 
-**Conclusion (pending ratification).** If expectations hold, ADR-006 (body
-ownership: request allocator, explicit) and the `body(ctx, &dst) -> bool`
-signature are supported and freezable. Decisive negatives: `unmarshal` not
-accepting a substituted allocator for nested allocations, or empty-body being
-treated as success — either reopens WP7.
+**Conclusion.** ADR-006 and `body(ctx, &dst) -> bool` are accepted: decoded
+nested data uses the request allocator. Phase 1 applies a fixed 4 MiB cap;
+empty and invalid bodies use the error contract.

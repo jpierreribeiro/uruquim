@@ -5,8 +5,9 @@ recommended form. Documentation, examples, tests, and generated code use only
 these forms. If a pattern here conflicts with any other document except
 `knowledge-base/01-architecture-spec.md`, this document wins.
 
-> Status: normative draft. Frozen at the Phase 1 Spec Gate; until then,
-> amendments are allowed but must be made here first, spec-first.
+> Status: Phase-1 canonical forms ratified at the 2026-07-18 Spec Gate.
+> Later-phase sections are design targets and become available only at their
+> marked phase gates.
 
 ## The one rule
 
@@ -35,11 +36,18 @@ main :: proc() {
 }
 ```
 
-- `web.app()` — production-oriented defaults (recovery, body limit, timeouts,
-  404/405, graceful shutdown).
+- `web.app()` — progressive production defaults. Phase 1 provides a fixed
+  4 MiB request-body cap, standardized 404, and minimal 405 with `Allow`.
+  Phase 2 adds recovery; Phase 3 adds configurable limits, read/write
+  timeouts, and optimized 405/header handling; Phase 4 hardens graceful
+  shutdown.
 - `web.bare()` — no defaults (advanced; not for quick starts).
 - `web.serve(&app, port)` — canonical. Use `web.serve_with(&app,
   web.Serve_Config{...})` only when you need host or other options.
+
+`App` owns resources and is non-copyable by contract. Keep the value returned
+by `web.app()`, pass its address, and destroy that same value exactly once.
+Do not copy an `App` or destroy a copy.
 
 ## Handler
 
@@ -55,6 +63,13 @@ health :: proc(ctx: ^web.Context) {
 
 Handlers take `^web.Context` and return nothing. They respond via helpers.
 Payloads are typed structs — there is no untyped object literal.
+
+The missing return value is deliberate: Uruquim does not use Echo-style
+generic error propagation. Odin allows returned results to be ignored, and a
+result would make the canonical extractor `return` more ceremonial. Internal
+framework failures still pass through one private typed path for consistent
+logging, public error formatting, and single-commit protection. Keep domain
+errors in the application and map them explicitly at the HTTP boundary.
 
 ## Extractor pattern (the load-bearing pattern)
 
@@ -84,7 +99,7 @@ get_user :: proc(ctx: ^web.Context) {
 		return
 	}
 
-	user, found := users.find(id)
+	user, found := users.find(id) // returns a User value
 	if !found {
 		web.not_found(ctx, "user not found")
 		return
@@ -179,19 +194,39 @@ Future typed variants follow the same pattern: `query_<type>` /
 | 204 | `web.no_content(ctx)` |
 | other status + JSON | `web.json(ctx, status, payload)` |
 | plain text | `web.text(ctx, status, s)` |
-| raw bytes | `web.bytes(ctx, status, content_type, data)` |
-| redirect | `web.redirect(ctx, .Found, url)` |
+| raw bytes (later phase) | `web.bytes(ctx, status, content_type, data)` |
+| redirect (later phase) | `web.redirect(ctx, .Found, url)` |
 | 400 | `web.bad_request(ctx, msg)` |
 | 401 | `web.unauthorized(ctx, msg)` |
 | 403 | `web.forbidden(ctx, msg)` |
 | 404 | `web.not_found(ctx, resource)` |
-| 409 | `web.conflict(ctx, msg)` |
+| 409 (later phase) | `web.conflict(ctx, msg)` |
 | 500 | `web.internal_error(ctx)` |
 
 `web.ok` is exactly `web.json(ctx, .OK, value)` and `web.created` is exactly
 `web.json(ctx, .Created, value)` — tiny shorthands, no extra behavior.
 
+Phase-1 JSON payloads are concrete values:
+
+```odin
+user: User = load_user()
+web.ok(ctx, user)       // accepted: User value
+```
+
+Do not pass `&user`, and do not pass a variable whose type is `^User`.
+Pointers are unsupported by the Phase-1 baseline because the pinned official
+JSON marshaller rejects them. WP6 will separately prototype a one-level
+dereference; pointer support may be added only if that compiles cleanly and
+the specification is amended first.
+
+If marshalling rejects a payload type, the renderer logs the marshal error on
+the server before returning one complete standardized `internal_error`, while
+the response is still uncommitted. It never returns a silent 500 or partial
+JSON.
+
 ## Application state
+
+> Available from Phase 3 as an Advanced API. It does not exist in Phase 1.
 
 ```odin
 App_State :: struct {
@@ -202,6 +237,9 @@ App_State :: struct {
 state := App_State{db = db, config = config}
 app := web.app_with_state(&state)
 ```
+
+`app_with_state` rejects nil. `web.state` asserts that state was registered
+and that the requested type matches before returning the typed pointer.
 
 ```odin
 list_users :: proc(ctx: ^web.Context) {
@@ -218,6 +256,9 @@ list_users :: proc(ctx: ^web.Context) {
 ```
 
 ## Middleware
+
+> Available from Phase 2. It does not exist in Phase 1. CORS is a Phase-4
+> built-in.
 
 Attach:
 
@@ -284,7 +325,7 @@ get_profile :: proc(ctx: ^web.Context) {
 		return
 	}
 
-	web.ok(ctx, user)
+	web.ok(ctx, user^) // explicit value; `user` itself is ^User
 }
 ```
 
@@ -300,6 +341,8 @@ Do not stack both on the same route — that duplicates validation. Pick the
 extractor when you need the user, the gate when you don't.
 
 ## Route groups
+
+> Available from Phase 2. They do not exist in Phase 1.
 
 Explicit router values; no configuration callbacks:
 

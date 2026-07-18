@@ -30,11 +30,10 @@ backend (`core:nbio`) may invoke `dispatch` from a callback on the loop thread
 `Transport` field set is deliberately **not frozen**; a second real adapter may
 change it.
 
-**Result.** `NOT_EXECUTED — pending compile on pinned toolchain.`
+**Result.** `PASS`: 200 and 404 responses each committed exactly once through
+the private throwaway boundary.
 
-**Conclusion (pending ratification).** Supports ADR-008 (single commit) and
-ADR-009 (transport boundary): the conceptual contract (accept work → dispatch →
-commit → stop) is sufficient and expressible without leaking backend types.
-The private shape stays mutable until the bootstrap and a future adapter both
-exist. Decisive negative: if a single-commit guard could not be enforced
-without transport cooperation, response semantics would reopen.
+**Conclusion.** Accepted ADR-008 (framework-side single commit for buffered
+responses) and ADR-009 (private, unfrozen transport boundary). The conceptual
+contract is accept work → dispatch → commit → stop; the private shape stays
+mutable until multiple real adapters force it.

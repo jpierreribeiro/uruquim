@@ -1,0 +1,345 @@
+From a26abec703830cb8770288b22f506bb98f07a5bf Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 18 Jul 2026 20:35:09 +0000
+Subject: [PATCH 3/4] Make transport migration claims precise: conceptual
+ contract, execution non-guarantee, conformance suite from Phase 1
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Incorporates three corrections to the core:net/http migration story:
+
+- Transport boundary is a conceptual contract (accept HTTP work, invoke
+  dispatch, commit response, support shutdown), not a frozen four-procedure
+  ABI; the private Transport shape stays minimal (data/serve/stop) and
+  mutable until a second real adapter forces decisions, since the official
+  package's server model (blocking, event loop, callbacks, workers) is
+  unknown
+- Execution model non-guarantee (normative): handlers are synchronous from
+  the application perspective; the transport MAY run them on an I/O thread,
+  worker, or managed context; no thread guarantee until the official
+  adapter is prototyped. Records the open nbio question (slow sync handler
+  can stall a per-thread loop) without choosing an answer prematurely
+- Request/Response ownership (normative): framework-owned abstractions
+  whose storage MAY be transport-owned views for the request lifetime;
+  retention requires explicit copy — no mandatory full copies
+- Testing split into contract suite (test transport), factory-parameterized
+  transport conformance suite (every real adapter, from Phase 1 so the
+  bootstrap backend cannot shape the design), and a small end-to-end suite
+- New 'Future Migration to core:net/http' normative section with explicit
+  migration success criteria; wording fixed to 'future official package'
+  with no assumed release date, and 'controlled and application-transparent'
+  instead of 'trivial'
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb8XLFPAMxHCWVuHrjpUAw
+---
+ knowledge-base/01-architecture-spec.md        | 153 ++++++++++++++++--
+ knowledge-base/02-odin-idioms-guidelines.md   |   8 +
+ knowledge-base/03-development-phases.md       |  39 ++++-
+ .../04-local-agent-system-prompt.txt          |  16 +-
+ 4 files changed, 197 insertions(+), 19 deletions(-)
+
+diff --git a/knowledge-base/01-architecture-spec.md b/knowledge-base/01-architecture-spec.md
+index 4da0713..a6673ab 100644
+--- a/knowledge-base/01-architecture-spec.md
++++ b/knowledge-base/01-architecture-spec.md
+@@ -784,26 +784,159 @@ transport.
+ The adapter isolates the core from socket/event-loop, HTTP parser, body
+ streaming, and server runtime concerns.
+ 
+-```odin
+-Dispatch_Proc :: proc(req: ^Request, res: ^Response)
++### Conceptual contract, not a frozen ABI
++
++The internal transport shape SHALL NOT be frozen before the first real
++adapter is implemented. The future official `core:net/http` may expose a
++blocking server, an explicit event loop, per-connection or per-request
++callbacks, its own lifecycle objects, multiple loops per thread, or internal
++workers — `core:nbio` today runs per-thread event loops with tick-driven
++callbacks executed on the loop's thread. The internal contract therefore
++expresses **what the framework needs**, not the anticipated shape of a
++library that does not exist yet:
++
++```text
++transport accepts HTTP work
++transport invokes framework dispatch
++transport commits framework response
++transport supports shutdown when available
++```
+ 
++A minimal private shape is sufficient until a real adapter forces decisions:
++
++```odin
+ Transport :: struct {
+-	user_data: rawptr,
++	data: rawptr,
++
++	serve: Serve_Proc,
++	stop:  Stop_Proc,
++}
++```
++
++This type is private. Its fields and procedures may change freely until the
++first Implementation Gate that exercises two transports.
++
++### Execution model (normative)
++
++```markdown
++The canonical handler API is synchronous from the application perspective.
++
++The transport implementation MAY execute handlers on an I/O thread, worker
++thread, or transport-managed execution context.
++
++No guarantee SHALL be made about the execution thread until the official
++transport adapter is prototyped and specified.
++```
++
++Because `core:nbio`-style loops execute callbacks on the loop's thread, a
++slow synchronous handler could stall other work on that loop. Whether the
++answer is transport-managed workers, an adapter-side thread pool, or a
++documented "don't block the I/O thread" rule is **an open question that
++cannot be closed until the official package exists**. The spec deliberately
++does not choose.
++
++### Request/Response ownership (normative)
++
++```markdown
++Public request types SHALL be framework-owned abstractions.
++
++Their underlying storage MAY be transport-owned for the duration of request
++dispatch.
++
++Applications SHALL NOT retain request-derived slices, strings, headers, or
++body views beyond the request lifecycle without making an explicit copy.
++```
++
++"Framework-owned types" means the *abstraction* is ours — it does not mean
++copying every header, path, and body into independent storage. Views over
++transport buffers are the expected implementation:
+ 
+-	init:             proc(t: ^Transport) -> Transport_Error,
+-	listen_and_serve: proc(t: ^Transport, endpoint: Endpoint, dispatch: Dispatch_Proc) -> Transport_Error,
+-	shutdown:         proc(t: ^Transport),
+-	destroy:          proc(t: ^Transport),
++```odin
++Request :: struct {
++	method:  Method,
++	path:    string,
++	query:   string,
++	headers: Header_View,
++	body:    []u8,
+ }
+ ```
+ 
+-The framework defines its own transport-agnostic `Request` and `Response`
+-types. Phase 1 assumes buffered request bodies; streaming is a later,
+-specialized API.
++Valid only during the request; anything persistent is copied with an
++explicit allocator.
++
++Phase 1 assumes buffered request bodies; streaming is a later, specialized
++API.
++
++### Test transport
+ 
+ A **test transport** (in-memory, no sockets) is required from Phase 1 so that
+ `web.test_request` works without binding ports.
+ 
++### Three test suites (normative)
++
++Transport correctness is verified by three separate suites — not by running
++the whole application suite against every backend:
++
++```text
++Contract suite         — runs on the test transport
++    router, extractors, middleware, responses, error envelopes, JSON,
++    404/405 — the public behavior of the framework
++
++Transport conformance suite — runs against EVERY real adapter
++    request conversion, body lifetime, header normalization, response
++    commit, connection close, timeouts, shutdown, malformed HTTP,
++    concurrency
++
++End-to-end suite       — a few complete flows over real sockets
++```
++
++The conformance suite exists **from Phase 1** as a factory-parameterized
++harness, so the bootstrap adapter is held to the same contract a future
++adapter must meet, and the first backend cannot silently shape the design:
++
++```odin
++transport_contract_test :: proc(t: ^testing.T, factory: Transport_Factory)
++```
++
++## Future Migration to `core:net/http`
++
++Migration to the future official Odin HTTP package is expected to be
++localized to the transport boundary, provided the framework preserves the
++following constraints:
++
++1. No transport-specific type is exposed through the public application API.
++2. Router, middleware, extractors, request context, response rendering, and
++   error behavior remain framework-owned.
++3. Request-derived data is valid only for the request lifecycle unless copied
++   explicitly.
++4. Buffered request bodies remain the canonical MVP contract.
++5. Every real transport must pass the transport conformance suite.
++
++The official `core:net/http` API is not yet known — official communication
++says only that it will be built on `core:nbio`, with no published API or
++timeline. Therefore, the framework SHALL NOT assume its threading model,
++callback model, ownership rules, shutdown semantics, or server lifecycle.
++Documentation SHALL refer to it as the "future official `core:net/http`
++package", never with an assumed release date.
++
++The canonical application handler API SHALL remain synchronous from the
++application developer's perspective. A transport adapter MAY invoke handlers
++directly, dispatch them to worker threads, or use transport-managed
++execution, provided public behavior remains equivalent.
++
++Migration SHALL be considered successful when:
++
++- the public application examples compile unchanged;
++- the framework contract suite remains green;
++- the new adapter passes the transport conformance suite;
++- request lifetime, response commit, concurrency, shutdown, and timeout
++  semantics are documented and tested.
++
++The architecture aims to make migration **controlled and
++application-transparent**. It does not guarantee that implementing the future
++adapter will be trivial, because the official package API and execution model
++are not yet defined.
++
+ ## Lifecycle
+ 
+ Request lifecycle:
+diff --git a/knowledge-base/02-odin-idioms-guidelines.md b/knowledge-base/02-odin-idioms-guidelines.md
+index 3965cfe..7d97838 100644
+--- a/knowledge-base/02-odin-idioms-guidelines.md
++++ b/knowledge-base/02-odin-idioms-guidelines.md
+@@ -298,6 +298,14 @@ semantics; integration tests via the in-memory test transport; negative tests
+ for route conflicts; allocator/lifetime tests where possible; **compile tests
+ for every documented example**.
+ 
++Transport testing is split into three suites (see architecture spec): the
++**contract suite** (public framework behavior, runs on the test transport),
++the **transport conformance suite** (factory-parameterized
++`transport_contract_test`, runs against every real adapter — body lifetime,
++header normalization, response commit, shutdown, malformed HTTP,
++concurrency), and a small **end-to-end suite** over real sockets. Do not
++duplicate application-level rules into per-backend tests.
++
+ Must-test invariants:
+ 
+ - Router: static beats param; param beats wildcard; duplicates rejected;
+diff --git a/knowledge-base/03-development-phases.md b/knowledge-base/03-development-phases.md
+index df85dbf..d4f47aa 100644
+--- a/knowledge-base/03-development-phases.md
++++ b/knowledge-base/03-development-phases.md
+@@ -18,6 +18,9 @@ Cross-phase invariants, enforced from Phase 1 onward:
+ - every documented example compiles in CI
+ - `docs/ai-context.md` matches the public API at every merge
+ - no code generator, no mandatory CLI, no heavy metaprogramming
++- every real transport adapter passes the factory-parameterized transport
++  conformance suite (`transport_contract_test`), which exists from Phase 1
++  so the first backend cannot silently shape the design
+ 
+ **Note on `web.app()` defaults:** the architecture spec defines the full
+ default-policy contract (recovery, limits, timeouts, 404/405, graceful
+@@ -49,8 +52,13 @@ public API alone.
+   `forbidden`, `not_found`, `internal_error`
+ - consistent 404 behavior
+ - server: `web.serve(&app, port)` with clean stop
+-- internal transport boundary (`Transport` struct) prepared for
+-  `core:net/http`; functional bootstrap adapter over `odin-http`
++- internal transport boundary as a **conceptual contract** (accepts HTTP
++  work → invokes dispatch → commits response → supports shutdown); the
++  private `Transport` shape is NOT frozen before the first real adapter
++- functional bootstrap adapter over `odin-http`
++- transport conformance suite skeleton:
++  `transport_contract_test(t, factory)`, run against the test transport and
++  the bootstrap adapter from day one
+ - in-memory test transport + `web.test_request` (required by the tests-first
+   process itself)
+ 
+@@ -73,8 +81,15 @@ public API alone.
+ - [ ] freeze `query_int_or` semantics (default only on absence; malformed
+       value is a 400)
+ - [ ] freeze the error envelope and initial code list
+-- [ ] define `Request`/`Response` minimum fields and commit semantics
+-- [ ] define the `Transport` boundary and test-transport contract
++- [ ] define `Request`/`Response` minimum fields, commit semantics, and the
++      request-lifetime view rule (no retention without explicit copy)
++- [ ] define the conceptual transport contract and the conformance suite
++      scope (request conversion, body lifetime, header normalization,
++      response commit, connection close, shutdown, malformed HTTP) —
++      WITHOUT freezing the internal `Transport` ABI
++- [ ] record the execution-model non-guarantee: handlers are synchronous
++      from the application perspective; execution thread is unspecified
++      until the official adapter is prototyped
+ - [ ] define clean-stop behavior
+ 
+ ### Test Gate checklist
+@@ -88,6 +103,8 @@ public API alone.
+ - [ ] unknown route returns standardized 404
+ - [ ] `web.ok`/`web.created` byte-identical to equivalent `web.json` calls
+ - [ ] `test_request` round-trips without sockets
++- [ ] `transport_contract_test` passes on the test transport AND the
++      bootstrap adapter
+ - [ ] adapter starts and stops cleanly; response cannot be committed twice
+ 
+ ### Implementation Gate checklist
+@@ -225,10 +242,16 @@ API.
+ 
+ ### Scope (candidates, each spec-gated individually)
+ 
+-- **official `core:net/http` adapter** when the package ships — parity tests
+-  against the bootstrap adapter; migration verified to require zero
+-  application changes; bootstrap adapter then demoted or removed. (If
+-  `core:net/http` ships earlier, this item may be pulled forward between
++- **official `core:net/http` adapter** when the package ships (no assumed
++  date — "coming soon" is not a schedule). Migration is successful when:
++  public application examples compile unchanged; the contract suite stays
++  green; the new adapter passes the transport conformance suite; and request
++  lifetime, response commit, concurrency, shutdown, and timeout semantics
++  are documented and tested. The bootstrap adapter is then demoted or
++  removed. The adapter's difficulty depends on the execution and ownership
++  model the official package adopts — the architecture guarantees a
++  *controlled, application-transparent* migration, not a trivial adapter.
++  (If the package ships earlier, this item may be pulled forward between
+   phases.)
+ - OpenAPI as an optional layer over the existing API (`web.Route_Info`
+   direction); no handler rewrites required
+diff --git a/knowledge-base/04-local-agent-system-prompt.txt b/knowledge-base/04-local-agent-system-prompt.txt
+index 2a759a9..7f00b92 100644
+--- a/knowledge-base/04-local-agent-system-prompt.txt
++++ b/knowledge-base/04-local-agent-system-prompt.txt
+@@ -51,9 +51,23 @@ Productivity rules you must obey:
+   Do not publish speculative syntax (e.g. `or_else` with a statement block).
+ 
+ Transport rules you must obey:
+-- The future core:net/http is the canonical transport backend.
++- The future official core:net/http is the canonical transport backend.
++  Its API, threading model, callback model, ownership rules, and timeline
++  are NOT yet known — never assume them, and never refer to it with an
++  assumed release date.
+ - odin-http is a bootstrap adapter only, hidden behind the internal boundary.
+ - The public API never exposes transport types.
++- The internal Transport shape is a conceptual contract (accept HTTP work,
++  invoke dispatch, commit response, support shutdown); do not freeze its ABI
++  before a second real adapter forces the decisions.
++- The canonical handler API is synchronous from the application perspective;
++  the execution thread is unspecified. Never promise or rely on a specific
++  threading model in code or docs.
++- Request data may be views over transport buffers, valid only during the
++  request; persistence requires an explicit copy. Never let handlers retain
++  request-derived views.
++- Every real adapter must pass the factory-parameterized transport
++  conformance suite (transport_contract_test), which exists from Phase 1.
+ - The ordinary user calls web.serve; transport injection is an advanced,
+   separately documented API.
+ 
+-- 
+2.43.0
+

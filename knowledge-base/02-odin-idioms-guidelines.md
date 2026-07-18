@@ -61,7 +61,7 @@ not a burden we shift onto every Hello World.
 ### Canonical syntax must actually compile
 
 Every pattern published in docs, examples, or `ai-context.md` MUST be valid
-Odin verified by CI. In particular:
+Odin verified by the mandatory local/remote verification gate. In particular:
 
 - `or_else` takes an *expression*, not a statement block. Patterns like
   `id := f() or_else { respond(...); return }` are NOT valid Odin and MUST NOT
@@ -82,10 +82,11 @@ if !web.body(ctx, &input) {
 }
 ```
 
-Value-producing extractors declare `#optional_ok` (legal in Odin for
-procedures with exactly two results where the last is `bool`), though HTTP
-code should almost always check the boolean. Destination-filling extractors
-take `dst: ^$T` and return only `bool`.
+Value-producing HTTP extractors deliberately do **not** declare
+`#optional_ok`. The pinned compiler then rejects a call that captures only
+the value (`Assignment count mismatch`), forcing humans and coding agents to
+handle `ok`. Destination-filling extractors take `dst: ^$T` and return only
+`bool`.
 
 If prototyping later proves a strictly better compiling form, the canonical
 pattern is amended once, spec-first, before the API freezes — never ad hoc in
@@ -221,13 +222,22 @@ Bind_Error :: union #shared_nil {
 ```
 
 **Extractor contract:** public value-producing extractors return
-`(value, ok)` with `#optional_ok`; destination-filling extractors
+`(value, ok)` without `#optional_ok`; destination-filling extractors
 (`web.body(ctx, &dst)`) return `bool`. Both are responsible for writing the
 standardized error response before returning `false`. Detailed error
 taxonomies (`Bind_Error` etc.) exist internally and power the standardized
 envelope; ordinary handlers never inspect them. Typed extractors use
 explicit type-specific names (`query_int`, `query_int_or`) — never `typeid`
 parameters in the canonical surface.
+
+Handlers do not return a generic error. The fixed compiler accepts silently
+discarded procedure results, so an Echo-like return does not force callers to
+handle failures; an unnamed result also prevents the canonical bare `return`
+after extractor failure. Route framework failures through a private, closed,
+typed error event that owns formatting, logging, and commit checks.
+Application-domain errors remain application types and are mapped explicitly
+at the HTTP boundary. Do not imitate Go error propagation with `any`, an open
+error bag, or multiple canonical handler signatures.
 
 ### Panic policy
 
@@ -253,7 +263,9 @@ annotated, and isolated at boundaries.
 `app_with_state` stores a single `rawptr` + `typeid` pair, validated by
 assertion inside `web.state(ctx, T)`. This controlled, boundary-isolated use
 of type information is explicitly permitted. It does not license dynamic bags
-anywhere else.
+anywhere else. This is a future Phase-3/Advanced API: registration rejects a
+nil pointer, and access asserts that state was registered and that the
+requested `typeid` matches before casting. `rawptr` is never public.
 
 ## Procedure Design Rules
 
@@ -267,6 +279,20 @@ Use pointers for mutable large state; do not pass giant structs by value
 casually. Every type that owns memory has init/destroy pairs — in the
 Productive API these are wrapped (`web.app()` / `web.destroy(&app)`), but they
 exist and are documented in the Advanced API.
+
+`web.app()` returns an owning `App` by value for the Productive API. `App` is
+non-copyable by contract: initialize it once, pass `&app`, and destroy that
+same value exactly once. Initialization must not store a pointer to the
+pre-return local `App`; internal self-pointers may only be established after
+the caller-owned value exists. `app_init(&app)` remains a future Advanced API.
+
+JSON response payloads are passed by value in the Phase-1 baseline. A pointer
+variable (for example `user: ^User`) and `&user` are not accepted payload
+forms until a separate one-level-dereference prototype proves a clean
+implementation. If the official JSON marshaller rejects a payload type, the
+renderer logs the marshal error on the server and, while still uncommitted,
+writes one fresh standardized `internal_error` response. It never emits a
+silent 500 or partial JSON.
 
 ## Context Usage Rules
 
@@ -310,13 +336,21 @@ Must-test invariants:
 
 - Router: static beats param; param beats wildcard; duplicates rejected;
   wildcard-last enforced; per-method dispatch isolated.
-- Middleware: exact order; short-circuit stops downstream; post-`next` runs in
-  reverse-unwind order; recovery catches panics.
+- Middleware: exact order and short-circuit are mandatory; if the Phase-2 gate
+  adopts onion semantics, post-`next` runs in reverse-unwind order. Recovery
+  catches panics.
 - Context/extractors: params/query/header lookups predictable; failed
   extractors write the standardized envelope exactly once; response commit
   rules enforced.
-- Defaults: `web.app()` actually installs recovery, body limit, timeouts,
-  404/405 handling — verified by tests, not by documentation.
+- Defaults are progressive and test-pinned: Phase 1 enforces a fixed 4 MiB
+  request-body cap and standardized 404/405 handling (`Allow` is mandatory on
+  405); Phase 2 installs recovery; Phase 3 adds configurable limits,
+  read/write timeouts, and optimized 405/header handling; Phase 4 hardens
+  graceful shutdown. Documentation must identify the delivery phase instead
+  of implying that the end-state set already ships.
+- JSON rendering: unsupported payload types log the marshal error server-side
+  and produce exactly one standardized `internal_error` before commit; no
+  partial JSON may escape.
 
 ## Public API Design Rules
 

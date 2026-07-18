@@ -1,113 +1,93 @@
 # 09 — Executive Summary
 
-## What this is
+## Headline
 
-A pre-implementation audit and Phase-1 Spec Gate for **Uruquim**, an Odin HTTP
-microframework. It audits the knowledge base, designs (but does not run)
-throwaway prototypes to ratify proposed signatures, and produces the ten
-planning documents plus nine experiments. **No normative file was modified and
-no production code was implemented.**
+**Phase-1 Spec Gate = READY as of 2026-07-18.**
 
-## Headline result
+The fixed Odin toolchain is available at `/tmp/uruquim-odin-toolchain` and
+identifies itself as `dev-2026-07-nightly:819fdc7`. After the original failed
+run was preserved and four transparent throwaway-source corrections were
+made, the suite passed. A final verification after normative amendments also
+produced **PASS=9 FAIL=0 SKIP=0**. Real transcripts and intended negative
+probes are recorded in `planning/07-spec-gate-phase-1.md` and
+`planning/10-c1-execution-evidence.md`. The later handler study extended the
+suite to **PASS=10 FAIL=0 SKIP=0** and closed C-8 without changing the public
+handler signature.
 
-**Spec Gate Phase 1 = READY_WITH_BLOCKERS.**
+## Closed decisions
 
-The architecture is viable and internally consistent. It is not plain READY for
-one concrete reason: the pinned Odin toolchain (`dev-2026-07a`, commit
-`819fdc7`) was **unreachable in this environment** — GitHub release egress is
-blocked by the session's network policy (HTTP 403; GitHub is not on the proxy
-allowlist). Therefore the nine ratification experiments are authored and
-runnable but **not executed**, and the freeze discipline forbids marking any
-signature ratified. That single blocker (C-1) plus four decision blockers
-(C-2/C-4/C-5/C-6) are each assigned an owner and a deadline before their first
-affected work package.
+- HTTP extractors omit `#optional_ok`; ignoring `ok` is a compiler error.
+- `web.app()` returns App by value. App stores no pre-return self-pointer, is
+  non-copyable by contract, and only the original is destroyed.
+- Phase 1 has a fixed 4 MiB request-body cap and minimal 405 with required
+  `Allow`; configurable limits/timeouts remain Phase 3.
+- `error.field` is optional and omitted when absent.
+- Phase-1 JSON response payloads are concrete values. `&value` and
+  pointer-typed variables are unsupported in the accepted baseline.
+- Marshal failure is logged server-side before one fresh complete
+  `internal_error` is written, while uncommitted; partial JSON is forbidden.
+- WP6 will prototype one-level pointer dereference. This is non-blocking and
+  changes the baseline only through a later approved amendment.
+- Typed application state uses one private rawptr+typeid pair in future Phase
+  3; registration rejects nil and access asserts presence/type.
+- Future surfaces in `ai-context.md` are explicitly phase-marked.
+- The Phase-1 handler remains `proc(ctx: ^Context)`. Framework failures use a
+  private typed report path; application-domain failures are mapped explicitly
+  at the HTTP boundary. A typed observer/policy is Phase-2 scope.
 
-This is the honest outcome: the intellectual work — audit, scope, ADRs, risk,
-gate design — is complete and compiler-independent; the signature
-*ratification* is pending and clearly flagged.
+ADRs 001, 002, 003-baseline, 004, 006, 007, 008, 009, and 011 are accepted.
+ADR-005 (middleware semantics) and ADR-010 (remaining Advanced API) stay
+proposed and owned by later gates; neither can expand Phase 1.
 
-## Key findings
+## Approved Phase-1 vertical slice
 
-1. **The canonical core holds together.** 10 audited decisions are CONSISTENT;
-   8 more are sound but await compilation (each mapped to an experiment).
-2. **Two real contradictions, both documentation-level.** `web.app()` promises
-   its full default set (body-limit, 405, timeouts) in user docs, but the
-   phases deliver them progressively — so a Phase-1 build would under-deliver
-   vs the docs (audit A11/A12/A13 → AMEND-3, or the recommended scope fix).
-3. **`ai-context.md` shows future surfaces without phase markers**, which can
-   make a Phase-1 coding agent hallucinate that middleware/groups exist
-   (AMEND-4).
-4. **Two API edges need a one-line decision:** `error.field` optionality
-   (AMEND-2) and the nil app-state policy (AMEND-1).
-5. **The freeze discipline works as intended:** it is exactly what prevents us
-   from calling this gate READY without a compiler.
+The slice contains the compiling public API skeleton, Request/Response views
+and single-commit, in-memory test transport, simple static+`:param`
+dispatcher, canonical path/query/body extractors, JSON/text/error responses,
+fixed body cap, 404, minimal 405+`Allow`, bootstrap transport adapter,
+transport conformance baseline, and examples 01–03.
 
-## Recommended reduced vertical slice (Phase 1')
+Middleware, groups, radix, public typed state, configurable limits/timeouts,
+production hardening, OpenAPI, streaming, WebSocket, code generation, and CLI
+remain out of scope.
 
-Public API skeleton (ratified signatures only) · Request/Response with views
-and single-commit · in-memory test transport · simple static+`:param`
-dispatcher (no radix) · extractors (path/query/body) · JSON/text/error
-envelope · consistent 404 · **minimal body-cap and 405** (recommended, cheap,
-removes the doc contradiction) · minimal odin-http bootstrap adapter ·
-conformance baseline · examples 01-03 in CI. Everything else (middleware,
-radix, typed state, hardening, observability, OpenAPI) stays in later phases.
+## Implementation sequence
 
-## Ten proposed ADRs (none accepted)
+Execute exactly one package at a time under
+SPEC → TESTS → MINIMAL IMPLEMENTATION → REVIEW → DOCUMENTATION → GATE:
 
-App-by-value (001) · `#optional_ok` (002) · response `$T` (003) · state access
-(004) · middleware (005) · body ownership (006) · request vs temp allocator
-(007) · response commit (008) · transport boundary (009) · Advanced API policy
-(010). Four carry an explicit human decision (002, 004, 005, 010).
+1. WP0 — toolchain and repository baseline
+2. WP1 — compiling public API skeleton
+3. WP2 — request/response model
+4. WP3 — in-memory test transport
+5. WP4 — minimal registration and dispatch
+6. WP5 — canonical extractors
+7. WP6 — JSON responses and error envelope
+8. WP7 — JSON body binding
+9. WP8 — bootstrap real transport adapter
+10. WP9 — transport conformance baseline
+11. WP10 — Phase-1 docs and examples
+12. WP11 — implementation gate and freeze
 
-## Immediate next actions (in order)
+WP0 has now started and its local gate passes. The pinned checker accepts
+`819fdc7`, rejects a divergent compiler, and observes 10/10 prototypes. GitHub
+Actions is unavailable; a tracked pre-push hook is now the mandatory gate and
+the project VPS will repeat it from a clean pushed commit. WP1 has not started;
+see `planning/12-wp0-gate.md`.
 
-1. **Unblock C-1 / R-01:** obtain dev-2026-07a where GitHub egress is allowed,
-   vendor `laytan/odin-http`, run `experiments/run_checks.sh`, and paste the
-   output into `07-spec-gate-phase-1.md` (WP11 turns Bucket A to 9/9 or reopens
-   the affected ADRs).
-2. **Close decision blockers** C-2 (`#optional_ok`), C-4 (app-by-value), C-5
-   (body-cap+405 in Phase 1'?), C-6 (`error.field`).
-3. **Only then** begin WP0→WP1. Implementation stays prohibited until the gate
-   recomputes to READY.
+## Parity statement
 
-## Files created / changed
+All ten prototype packages compile/run on the pinned compiler. Static scans
+found no accepted response example using `&payload`; the sole occurrence is a
+comment explicitly marked “not accepted”. The repository still has no `web/`
+or `examples/` directory, so literal product-example compilation cannot be
+claimed yet. WP1 and WP10 make compilation of every documented/example
+surface a hard gate.
 
-**Created (planning/):**
-- `00-knowledge-base-audit.md`
-- `01-toolchain-baseline.md`
-- `02-prototype-findings.md`
-- `03-proposed-adrs.md`
-- `04-phase-1-scope-review.md`
-- `05-phase-1-implementation-plan.md`
-- `06-risk-register.md`
-- `07-spec-gate-phase-1.md`
-- `08-open-questions.md`
-- `09-executive-summary.md`
+## Production state
 
-**Created (experiments/):**
-- `README.md`, `run_checks.sh`
-- `01-api-shape/{main.odin,README.md}`
-- `02-generic-json-response/{main.odin,README.md}`
-- `03-body-binding/{main.odin,README.md}`
-- `04-optional-ok/{main.odin,README.md}`
-- `05-typed-state/{main.odin,README.md}`
-- `06-request-views/{main.odin,README.md}`
-- `07-middleware-chain/{main.odin,README.md}`
-- `08-transport-boundary/{main.odin,README.md}`
-- `09-test-transport/{main_test.odin,README.md}`
+No `web/` package or production framework implementation exists. The only
+source changes before READY were disposable experiments and normative/planning
+documents.
 
-**Changed:** none of `README.md`, `knowledge-base/**`, `docs/**`. All
-recommended normative edits exist only as `PROPOSED SPEC AMENDMENT` blocks in
-`00-knowledge-base-audit.md`.
-
-## Assumptions and limits
-
-- `dev-2026-07a` / `819fdc7` is the sole practical authority for Phase 1; an
-  upgrade requires re-running every experiment and suite.
-- Official docs inform; the pinned compiler and stdlib decide divergences.
-- The compiler's absence here is a baseline condition, not evidence against the
-  APIs.
-- JSON proofs may use `any` internally (stdlib requirement) — an encapsulated
-  detail, never framework API or dynamic storage.
-- No production implementation was started, and none may start, even though the
-  gate is READY_WITH_BLOCKERS.
+**Nenhuma implementação de produção foi iniciada.**
