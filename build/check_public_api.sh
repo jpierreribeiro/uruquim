@@ -70,6 +70,13 @@ unauthorized"
 
 test -d "$URUQUIM_WEB" || fail "web/ does not exist; WP1 has not created the public package"
 
+# Every structural scan below reads CODE, not comments: a comment that names a
+# forbidden construct in order to prohibit it must not be reported as that
+# construct. (No string literal in the public package contains "//".)
+uruquim_code_only() {
+  sed -E 's://.*$::' "$URUQUIM_WEB"/*.odin
+}
+
 # ---------------------------------------------------------------------------
 # 1. File set
 # ---------------------------------------------------------------------------
@@ -107,9 +114,10 @@ uruquim_exported_names() {
       next
     }
     { pending_attr = 0; pending_private = 0 }
-  ' "$URUQUIM_WEB"/*.odin | LC_ALL=C sort -u
+  ' <<<"$URUQUIM_WEB_CODE" | LC_ALL=C sort -u
 }
 
+URUQUIM_WEB_CODE="$(uruquim_code_only)"
 URUQUIM_ACTUAL_EXPORTS="$(uruquim_exported_names)"
 URUQUIM_EXPECTED_EXPORTS_SORTED="$(LC_ALL=C sort -u <<<"$URUQUIM_EXPECTED_EXPORTS")"
 
@@ -146,12 +154,12 @@ done
 # (ADR-004); when it does, this check is narrowed spec-first to exported
 # declarations rather than deleted.
 # ---------------------------------------------------------------------------
-if grep -nE '^[[:space:]]*(user_data|locals|values)[[:space:]]*:' "$URUQUIM_WEB"/*.odin; then
+if grep -nE '^[[:space:]]*(user_data|locals|values)[[:space:]]*:' <<<"$URUQUIM_WEB_CODE"; then
   fail "web/ declares an untyped request-local storage field (planning/15 G-03)"
 fi
 for URUQUIM_BAG in 'map\[string\]any' 'map\[any\]any' '\bany\b' '\brawptr\b' \
   'Handler_Error' 'Handler_Outcome'; do
-  if grep -nE "$URUQUIM_BAG" "$URUQUIM_WEB"/*.odin; then
+  if grep -nE "$URUQUIM_BAG" <<<"$URUQUIM_WEB_CODE"; then
     fail "web/ uses a forbidden construct matching /$URUQUIM_BAG/ (planning/15 G-03, ADR-011)"
   fi
 done
@@ -170,11 +178,17 @@ grep -qx 'Handler :: proc(ctx: ^Context)' "$URUQUIM_WEB/context.odin" ||
 #     exported declaration block is the declaration line plus, for aggregate
 #     types, its body up to the closing brace in column 1.
 # ---------------------------------------------------------------------------
-URUQUIM_LEAK_ROOTS=("$URUQUIM_WEB")
-test -d "$URUQUIM_ROOT/examples" && URUQUIM_LEAK_ROOTS+=("$URUQUIM_ROOT/examples")
+# Scoped to the exported package files and application examples. It does NOT
+# recurse into web/internal/, where a future adapter (WP8) is exactly where
+# backend names belong.
+URUQUIM_LEAK_TEXT="$URUQUIM_WEB_CODE"
+if test -d "$URUQUIM_ROOT/examples"; then
+  URUQUIM_LEAK_TEXT+="
+$(find "$URUQUIM_ROOT/examples" -name '*.odin' -exec sed -E 's://.*$::' {} +)"
+fi
 
 for URUQUIM_BACKEND in 'odin[-_]http' 'nbio' 'laytan'; do
-  if grep -rniE "$URUQUIM_BACKEND" "${URUQUIM_LEAK_ROOTS[@]}"; then
+  if grep -niE "$URUQUIM_BACKEND" <<<"$URUQUIM_LEAK_TEXT"; then
     fail "backend identifier matching /$URUQUIM_BACKEND/ reached the public package or examples (planning/15 G-06)"
   fi
 done
@@ -193,11 +207,14 @@ uruquim_exported_blocks() {
     /^\}/ { emitting = 0; skipping = 0; next }
     emitting { print }
     { pending_private = 0 }
-  ' "$URUQUIM_WEB"/*.odin
+  ' <<<"$URUQUIM_WEB_CODE"
 }
 
 URUQUIM_EXPORTED_BLOCKS="$(uruquim_exported_blocks)"
-for URUQUIM_TYPE in 'Transport' 'Socket' 'TCP' 'Connection' 'Server' 'net\.' 'http\.'; do
+# Word-bounded: `Internal_Server_Error` is an HTTP status name, not a
+# transport type, and must not be reported as leakage.
+for URUQUIM_TYPE in '\bTransport\b' '\bSocket\b' '\bTCP\b' '\bConnection\b' \
+  '\bServer\b' '\bnet\.' '\bhttp\.'; do
   if grep -nE "$URUQUIM_TYPE" <<<"$URUQUIM_EXPORTED_BLOCKS"; then
     fail "transport-shaped name matching /$URUQUIM_TYPE/ appears in an exported declaration (planning/15 G-06)"
   fi
