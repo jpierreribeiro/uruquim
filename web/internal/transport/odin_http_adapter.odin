@@ -47,6 +47,11 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	opts := http.Default_Server_Opts
 	opts.thread_count = 1
 	opts.redirect_head_to_get = false
+	// WP9 D5: Phase 1 implements no interim-response flow. Leaving the backend's
+	// automatic continue on made it answer "100 Continue" and then WAIT for a
+	// body the client may never send. `Expect` is refused with 417 in
+	// `catch_all` instead, and the connection closes.
+	opts.auto_expect_continue = false
 
 	endpoint := net.Endpoint {
 		address = net.IP4_Address{0, 0, 0, 0},
@@ -85,6 +90,17 @@ request_stop :: proc() {
 // read; everything else happens in `on_body` once the body is available.
 @(private)
 catch_all :: proc(req: ^http.Request, res: ^http.Response) {
+	// WP9 D5 — `Expect: 100-continue` is refused before anything is read. This
+	// is a PROTOCOL error handled by the adapter rather than by the core (D6):
+	// there is no framework-owned request yet, so there is no envelope to write.
+	// The handler never runs and the server never waits for a body.
+	if expect, ok := http.headers_get_unsafe(req.headers, "expect"); ok && len(expect) > 0 {
+		http.headers_set_close(&res.headers)
+		res.status = http.Status.Expectation_Failed
+		http.respond(res)
+		return
+	}
+
 	exchange := new(Exchange, context.temp_allocator)
 	exchange.req = req
 	exchange.res = res
@@ -105,7 +121,11 @@ on_body :: proc(user_data: rawptr, body: http.Body, err: http.Body_Error) {
 	rline := req.line.(http.Requestline)
 
 	inbound := Inbound {
-		method     = http.method_string(rline.method),
+		// WP9 D7 — the ORIGINAL token. A valid but non-Phase-1 method
+		// (PROPFIND) reaches the core, which maps it to its own `.UNKNOWN` and
+		// applies the ratified 404/405 policy. The backend no longer answers
+		// 501 on its own.
+		method     = rline.method_raw,
 		path       = req.url.path,
 		query      = req.url.query,
 		headers    = neutral_headers(req, context.temp_allocator),
