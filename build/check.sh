@@ -46,6 +46,7 @@ command -v clang >/dev/null 2>&1 ||
 bash -n "$URUQUIM_ROOT/build/check.sh"
 bash -n "$URUQUIM_ROOT/build/check_test.sh"
 bash -n "$URUQUIM_ROOT/build/check_public_api.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -240,3 +241,6 @@ echo "PASS: the one-way dependency is enforced by the compiler (C5)"
 
 echo "--- Phase-1 public API anti-accretion contract ---"
 bash "$URUQUIM_ROOT/build/check_public_api.sh"
+
+echo "--- WP3 mutation checks: forbidden dual-ledger states are rejected ---"
+bash "$URUQUIM_ROOT/build/check_wp3_mutations.sh"

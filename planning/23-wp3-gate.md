@@ -173,20 +173,149 @@ GREEN).
 
 ## GREEN
 
-_(filled by the implementation/gate commit)_
+`bash build/check.sh` exits 0 on the pinned toolchain. WP3-specific results:
 
-## Review — hidden-cost audit
+```
+PASS=10 FAIL=0 SKIP=0                       (experiment prototypes, unchanged)
+WP1 public API: check + compile contract    PASS
+WP2 internal + public surface + probes      PASS
+WP3 probe C1: web/testing compiles alone (neutral, core-only)   PASS
+WP3 probe C2: web imports web/testing one-way                    PASS
+WP3 machinery internal behavior (throwaway package, 7 tests)     PASS
+WP3 public surface incl. C4 in-memory round trip (4 tests)       PASS
+WP3 probe: Recorded_Response has no public headers field         PASS
+WP3 probe C5: web/testing -> web back-edge is a compile cycle    PASS
+Phase-1 anti-accretion contract: 32 + 2 = 34                     PASS
+WP3 mutation checks: 8 forbidden states all rejected             PASS
+```
 
-_(filled by the implementation/gate commit)_
+Probes C1–C5 are the committed, executable ratification the amendment asked for
+(planning/21 Part II). The exact diagnostics the gate pins:
 
-## Bridge exports (unsupported internals of package `testing`)
+- C5 back-edge: `Cyclic importation of 'web_testing'` (the machinery's declared
+  package name; the facade's import alias is still `testing`).
+- no-headers probe: `'res' of type 'Recorded_Response' has no field 'headers'`.
 
-_(filled by the implementation/gate commit)_
+### Package-name note (deviation from the planning/21 sketch)
+
+planning/21 sketched the machinery as `package testing`. On the pinned toolchain
+a package literally named `testing` collides with `core:testing` at link time
+(`Duplicate declaration of 'package testing' … A package name must be unique`),
+because any application test binary links both. The machinery therefore declares
+`package web_testing`, while the facade imports it with the alias `testing`
+(`import testing "uruquim:web/testing"`). The directory is still `web/testing/`,
+callers still write `testing.*` internally, and `web.test_request` is unchanged.
+This is a naming correction forced by the compiler, not an architecture change.
+
+## Review — hidden-cost audit (BINARY DELTA IS NON-ZERO)
+
+Same minimal consumer, same source, same flags, rebuilt against the WP3 `web`:
+
+| Binary | test_request? | bytes | delta vs baseline |
+|---|---|---|---|
+| baseline (pre-impl) | no | 42744 | — |
+| after (post-impl) | no | **47976** | **+5232** |
+| user (calls test_request) | yes | 395456 | +352712 |
+
+Verified linkage facts (`nm`):
+
+- `core:testing` appears in NEITHER non-test binary (0 symbols). The permanent
+  ban holds — the machinery ships without the test runner.
+- `recorder_capture` / `strings.clone_from_bytes` are DEAD-CODE-ELIMINATED in the
+  unused-facade binary (0 symbols) and present in the using binary (2). The lazy
+  design works: an app that never calls `test_request` links no capture path.
+- No `@(init)` runs; `app()`/`bare()` allocate nothing; the internal tests prove
+  the recorder is inactive before the first call.
+
+**Cause of the +5232 bytes (fully explained, not unexplained).** The 15 new
+symbols in the unused-facade binary are exactly the TEARDOWN path, reachable
+because every `web.destroy(&app)` calls `web_testing.destroy` →
+`recorder_destroy`, whose body references `delete` on the owned types even though
+it early-returns for an inactive recorder:
+
+```
+web_testing::destroy
+web_testing::recorder_destroy
+runtime::delete_dynamic_array (for [dynamic]web_testing.Recorded)
+runtime::delete_slice        (for []web_testing.Header)
+runtime::delete_string
+runtime::mem_free_with_size
+mem::query_page_size_init, mem::PAGE_SIZE   (pulled by the free path)
+```
+
+This is intrinsic to the ratified lifetime (planning/21: the App OWNS the
+test-support state and frees it at `destroy`). The delete instantiations are
+linked by reachability, not by runtime use, so the runtime `if !active { return }`
+guard cannot remove them. Reducing this to zero would require changing the
+ownership/lifetime or moving packages — which the WP3 prompt forbids the agent
+from doing unilaterally.
+
+**Decision required (human).** Per the WP3 cost-review rule, a non-zero
+unused-facade delta — even an explained one — is a human-review item. The gate
+is marked `READY_WITH_BLOCKER`: everything technical is green, but WP3 is NOT
+marked COMPLETE until a human accepts (or rejects) the +5232-byte teardown cost
+that every application binary now carries. For comparison, the cost the WP2
+arrangement eliminated was +41,592 bytes (`core:testing`); this cost is ~1/8 of
+that and buys the App-owned, leak-checked recorder lifetime.
+
+## Bridge exports (unsupported internals of package `web_testing`)
+
+The facade calls the machinery across the package boundary, so a minimal set of
+`web_testing` declarations is exported. These are UNSUPPORTED INTERNALS: not part
+of the 34-symbol `web` surface, not documented for direct consumption. The set
+is LOCKED exactly by `build/check_public_api.sh` (ledger 2d) so it cannot grow
+silently. Exactly six:
+
+| Bridge export | File | Why the facade needs it |
+|---|---|---|
+| `Request` | request_builder.odin | return of `build_request`; facade reads `.method`/`.path` |
+| `build_request` | request_builder.odin | facade constructs the neutral inbound request |
+| `Header` | recorder.odin | facade passes neutral response headers to the recorder |
+| `Test_Transport` | test_transport.odin | the App owns one as its test-support state |
+| `capture` | test_transport.odin | facade records the response into owned storage |
+| `destroy` | test_transport.odin | `web.destroy` releases the transport |
+
+Everything else in the machinery is `@(private)`: `Recorded`, `Recorder`,
+`recorder_ensure`, `recorder_capture`, `recorder_destroy`.
 
 ## Mutation checks
 
-_(filled by the implementation/gate commit)_
+`build/check_wp3_mutations.sh` (run by the gate) copies the package into a
+throwaway tree, applies ONE forbidden mutation, and asserts the checker rejects
+it with the expected message. All eight pass (state → rejected):
+
+1. extra application-ledger symbol → rejected
+2. extra test-support-ledger symbol → rejected
+3. subdirectory other than web/testing → rejected
+4. `core:testing` imported by the machinery → rejected
+5. `uruquim:web` imported by the machinery → rejected
+6. `@(init)` in the machinery → rejected
+7. bridge export beyond the locked set → rejected
+8. public `headers` field on `Recorded_Response` → rejected
+
+## Lifetime / cleanup evidence
+
+- Public (external consumer, `tests/wp3-public-surface`): two consecutive
+  `test_request` results both remain readable after the second call; an App that
+  never calls `test_request` constructs and destroys cleanly under the memory
+  tracker.
+- Internal (machinery, `tests/wp3-internal`): the recorder copies body and every
+  header name/value out of the source buffer (mutating the source does not change
+  the copy); a local `mem.Tracking_Allocator` shows `len(allocation_map) == 0`
+  and `len(bad_free_array) == 0` after `destroy`, and a second `destroy` reports
+  no bad free (freed exactly once, idempotent).
 
 ## Status
 
-_(filled by the implementation/gate commit)_
+**READY_WITH_BLOCKER.** All technical completion criteria are met: gate exit 0;
+prototypes PASS=10; WP1/WP2 green; 32 application + 2 test-support = 34; C1–C5
+committed and green; `test_request` runs in-memory with no socket and no routing;
+recorder copies body/headers and two responses survive until `destroy`; memory
+tracker shows complete cleanup; no `core:testing`/test file in the shipped
+package; no init/allocation when `test_request` is unused; docs match the code;
+no WP4+ symbol entered.
+
+The one open item is the measured, explained **+5232-byte** teardown cost in
+application binaries that never use `test_request`. Per the WP3 prompt this
+requires human acceptance before WP3 is COMPLETE. The agent does not weaken the
+gate or mask the cost to reach COMPLETE on its own.

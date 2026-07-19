@@ -9,15 +9,23 @@ alternative forms. If something is not listed, it does not exist.**
 > ratified; sections marked Phase 2/3/4 do not yet exist and must not be
 > emitted by a coding agent.
 >
-> **Implementation status (WP2): the Phase-1 surface below is a compiling
-> skeleton plus a request/response model, not a working server.** Every name
-> and signature here exists in `web/` and compiles on the pinned toolchain, so
-> code written against this reference compiles. `Request`, `Method` and
-> `Header_View` now have real behavior. Everything else still does nothing: no
-> route is matched, no value is extracted, no JSON is produced, no response is
-> committed, and `web.serve` returns immediately without binding a port.
-> Behavior is added by WP3–WP9. Write against these shapes; do not deploy
-> against them.
+> **Implementation status (WP3): the Phase-1 surface below is a compiling
+> skeleton plus a request/response model and an in-memory test transport, not a
+> working server.** Every name and signature here exists in `web/` and compiles
+> on the pinned toolchain, so code written against this reference compiles.
+> `Request`, `Method` and `Header_View` have real behavior, and
+> `web.test_request` really drives one request in-memory (no sockets). But there
+> is still NO router: no route is matched, no value is extracted, no JSON is
+> produced, no response is committed, and `web.serve` returns immediately without
+> binding a port. Because nothing is routed yet, `web.test_request` returns the
+> uncommitted response — a zero status and an empty body — until WP4 wires
+> dispatch. Behavior is added by WP4–WP9. Write against these shapes; do not
+> deploy against them.
+>
+> **Two ledgers.** The application API is exactly 32 symbols (below). The
+> test-support API is a separate ledger of exactly 2 — `web.test_request` and
+> `web.Recorded_Response` (see Testing). Union: 34. Do not fold them together and
+> do not invent a third form.
 
 ## Application
 
@@ -213,6 +221,50 @@ All error responses share the envelope:
 `field` is optional and is omitted when the error is not associated with a
 specific input field.
 
+## Testing
+
+The test-support API is a SEPARATE ledger of exactly two public symbols, both in
+package `web`: `web.test_request` and `web.Recorded_Response`. They are public,
+documented, and behavior-tested, but tracked apart from the 32-symbol
+application surface.
+
+```odin
+app := web.app()
+defer web.destroy(&app)
+
+res := web.test_request(&app, .GET, "/users/42")   // in-memory, no sockets
+testing.expect_value(t, res.status, web.Status.OK)
+testing.expect_value(t, res.body, `{"id":42}`)
+```
+
+```odin
+web.test_request(a: ^web.App, method: web.Method, path: string) -> web.Recorded_Response
+
+Recorded_Response :: struct {
+	status: web.Status,   // copied by value
+	body:   string,       // a view over a copy the App owns
+}
+```
+
+Lifetime: every `Recorded_Response` stays readable — alongside all the others
+from the same App — until `web.destroy(&app)`, which frees them. There is no
+per-response cleanup to call.
+
+Prohibitions (these do NOT exist; do not emit them):
+
+- no `testing.test_request` — the symbol is `web.test_request`; the `web/testing`
+  machinery is internal and is not imported directly;
+- no `res.headers`, no `res.committed`, no allocator or transport field on
+  `Recorded_Response` — it has exactly `status` and `body`;
+- no `web.test_request` overloads, builders, or optional query/body/header
+  arguments — the signature is exactly `(&app, method, path)`;
+- no cleanup procedure for `Recorded_Response`.
+
+Until WP4 wires routing, `web.test_request` returns the uncommitted response (a
+zero status and an empty body). It exercises the in-memory round trip and the
+response lifetime, not routed behavior; the same call returns real routed
+results once WP4 lands.
+
 ## Middleware
 
 > Phase 2 and later. None of this section exists in Phase 1.
@@ -337,3 +389,6 @@ create_user :: proc(ctx: ^web.Context) {
 - `web.Request`, `web.Method` and `web.Header_View` are the only types WP2
   adds. There is no public `Response`, no `Header_Pair`, no `[]Header`, and no
   `method_raw`.
+- The only test-support symbols are `web.test_request` and
+  `web.Recorded_Response` (see Testing). There is no `testing.test_request`, no
+  `Recorded_Response.headers`, no builder, and no cleanup call.
