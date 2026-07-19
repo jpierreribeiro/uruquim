@@ -14,6 +14,11 @@ these forms. If a pattern here conflicts with any other document except
 > public API skeleton, not a functional server** — the procedures are inert
 > stubs until WP2–WP9. The canonical *forms* are what this document fixes, and
 > they are unchanged.
+>
+> WP2 has added the request/response model: `Request`, `Method` and
+> `Header_View` now exist and behave as described below. It is **still not a
+> functional server** — there is no dispatch and no transport, so nothing
+> fills a `Request` in yet.
 
 ## The one rule
 
@@ -34,14 +39,80 @@ Background work must receive owned application data — never a captured `ctx`
 and never a request view.
 
 The reused buffer does not fail loudly; the view silently starts reading
-different bytes. This is observable: a header value read as
-`"application/json"` before the buffer was reused read as `"text/plain"`
-afterwards, while an explicit copy kept its original contents.
+different bytes — same length, still live memory, different contents. This is
+test-pinned (WP2): a path view that read `"/users"` reads `"######"` after the
+transport reused its buffer, while a copy taken beforehand still reads
+`"/users"`.
+
+The canonical form is an explicit clone with an explicit allocator, taken
+BEFORE the request ends:
+
+```odin
+import "core:slice"
+import "core:strings"
+
+handler :: proc(ctx: ^web.Context) {
+	// Views — valid only for this request.
+	path := ctx.request.path
+	body := ctx.request.body
+
+	// Copies — owned by the caller, valid afterwards. Free them.
+	saved_path := strings.clone(path, context.allocator)
+	saved_body := slice.clone(body, context.allocator)
+	defer delete(saved_path)
+	defer delete(saved_body)
+
+	web.no_content(ctx)
+}
+```
+
+Never hand `ctx`, a `Request`, or any view to background work: give it the
+owned copies instead.
 
 Applications do not reach a response object. There is no `ctx.response` — you
 respond through `web.json`, `web.ok`, `web.created`, `web.text`,
 `web.no_content` and the error helpers, and the framework guarantees those
 supported paths do not overwrite a response that was already produced.
+
+That guarantee covers the supported paths. It is not a security boundary: the
+application and the framework share one program, and code that deliberately
+reaches into framework internals bypasses it (ADR-008, "Scope of the
+guarantee").
+
+## Reading the request
+
+```odin
+handler :: proc(ctx: ^web.Context) {
+	if ctx.request.method == .GET {   // UPPERCASE: .GET, never .Get
+		web.ok(ctx, ctx.request.path)
+		return
+	}
+
+	web.no_content(ctx)
+}
+```
+
+`ctx.request` is the only public request surface in Phase 1:
+
+| Field | Type | Notes |
+|---|---|---|
+| `method` | `web.Method` | `.UNKNOWN`, `.GET`, `.POST`, `.PUT`, `.PATCH`, `.DELETE` |
+| `path` | `string` | view |
+| `query` | `string` | view, raw and unparsed — use the query extractors |
+| `headers` | `web.Header_View` | no lookup in Phase 1 |
+| `body` | `[]u8` | view |
+
+`Method` members are UPPERCASE. `.GET` is the canonical spelling; `.Get` does
+not compile.
+
+Any method token outside that set — `"HEAD"`, `"OPTIONS"`, `"PROPFIND"`, or a
+lowercase `"get"`, since methods are case-sensitive — arrives as `.UNKNOWN`.
+`.UNKNOWN` is not an error and produces no response by itself.
+
+`Header_View` is **encapsulated by contract**, not opaque: Odin offers no
+opacity, and it promises nothing about its representation. **There is no
+header lookup in Phase 1** — `web.header(ctx, name)` is Phase 2. Do not invent
+a substitute by reaching into the view.
 
 ## Application skeleton
 
