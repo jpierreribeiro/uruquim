@@ -25,6 +25,15 @@ import transport "uruquim:web/internal/transport"
 // returns. On success it listens on IPv4 Any and blocks while serving. Full
 // graceful-shutdown deadlines are Phase 4; configurable timeouts are Phase 3.
 serve :: proc(a: ^App, port: int) {
+	// ADR-019: a poisoned application never binds. The dispatch-path guard
+	// would answer 500 anyway — it lives there so both transports reject
+	// identically — but a server that starts and then 500s everything is a
+	// worse operator experience than one that refuses with the diagnostic.
+	if a.private.poisoned {
+		framework_report(App, .Use_After_Route)
+		return
+	}
+
 	if port < 1 || port > 65535 {
 		framework_report(App, .Invalid_Serve_Port)
 		return

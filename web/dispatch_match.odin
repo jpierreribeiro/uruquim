@@ -276,64 +276,56 @@ allow_value :: proc(a: ^App, path: string, buffer: []u8) -> (value: string, allo
 //
 // The order of decisions is exactly:
 //
-//  1. a matching route runs its handler, once, and dispatch returns;
-//  2. otherwise, `bare()` returns without committing anything;
-//  3. otherwise, a path known under another method is a 405 with `Allow`;
-//  4. otherwise, it is a 404.
+//  1. a poisoned App (ADR-019 fail-closed) answers 500, on BOTH transports —
+//     this guard lives here, on the shared dispatch path, on purpose;
+//  2. a matching route runs its chain — globals, then the handler as the last
+//     step inside the bound — once, and dispatch returns;
+//  3. otherwise the MISS CHAIN runs (ADR-023): the same globals, terminating
+//     in the automatic-response step. Under `app()` that terminal commits the
+//     405-with-`Allow` or the 404; under `bare()` it commits nothing, because
+//     `bare()` means no default POLICY — the observation mechanism stays on.
 //
-// TWO THINGS IT DOES NOT DO. It never fabricates a 200: a handler that returns
+// The 404-vs-405 decision is made HERE, before the chain runs, because it
+// needs the App-owned table and a `Handler` receives only the Context; the
+// terminal acts on the precomputed record (see web/middleware.odin).
+//
+// TWO THINGS IT DOES NOT DO. It never fabricates a 200: a chain that returns
 // without responding leaves the response uncommitted, and the framework does
-// not invent success on its behalf. And it never overwrites a response that was
-// already committed — every automatic response goes through `response_commit`,
-// so the ADR-008 guard applies to the framework's own writes exactly as it
-// applies to a handler's.
+// not invent success on its behalf. And it never overwrites a response that
+// was already committed — every automatic response goes through
+// `response_commit`, so the ADR-008 guard applies to the framework's own
+// writes exactly as it applies to a handler's.
 //
 // `.UNKNOWN` gets no special case. It is a valid HTTP method the framework
 // gives no public meaning to, so it simply matches no route and falls through
 // to the ordinary 405/404 rules. It never becomes a 501: that would be a
 // response policy WP4 has no mandate to freeze.
 //
-// The 404 and 405 bodies are the STATIC envelope constants defined in
-// `web/errors.odin` (WP6 D5). They are compile-time byte constants rather than
-// marshalled values, which is what keeps this procedure allocation-free — an
-// unauthenticated client can drive a 404 at will — and keeps the JSON encoder
-// out of applications that never render a payload of their own.
+// The 404 and 405 bodies remain the STATIC envelope constants of WP6 D5,
+// committed by the miss terminal; this file stays encoder-free and this
+// procedure stays allocation-free at steady state (the one exception is the
+// LAZY one-time miss-chain build on the first miss, an App-lifetime
+// allocation, not a per-request one).
 @(private)
 dispatch :: proc(a: ^App, ctx: ^Context) {
+	a.private.dispatched = true
+
+	if mw_poison_intercept(a, ctx) {
+		return
+	}
+
 	entry, param, found := route_lookup(a, ctx.request.method, ctx.request.path)
 	if found {
 		ctx.private.param = param
-		entry.handler(ctx)
+		chain_enter(a, ctx, entry.chain_start, entry.chain_len)
 		return
 	}
 
-	// `bare()` installs no default policy, so an unmatched request stays
-	// uncommitted. This is the first work package in which `app()` and `bare()`
-	// are observably different — the distinction the documentation already
-	// described — and it is expressed without inventing middleware (D4).
-	if !a.private.default_responses {
-		return
-	}
-
-	// The `Allow` value and its header pair live in request-local storage on the
-	// Context, NOT in a local: the committed response holds views over them, and
-	// views into a dead stack frame would be exactly the dangling-view bug the
-	// ownership rules exist to prevent.
-	allow, other_methods_exist := allow_value(a, ctx.request.path, ctx.private.allow_buffer[:])
-	if other_methods_exist {
-		response_commit(
-			&ctx.private.response,
-			.Method_Not_Allowed,
-			response_allow_headers(ctx, allow),
-			transmute([]u8)string(ERROR_BODY_METHOD_NOT_ALLOWED),
-		)
-		return
-	}
-
-	response_commit(
-		&ctx.private.response,
-		.Not_Found,
-		response_json_headers(ctx),
-		transmute([]u8)string(ERROR_BODY_NOT_FOUND_ROUTE),
-	)
+	// The `Allow` value and the 404/405 decision live in request-local storage
+	// on the Context, NOT in a local: the committed response holds views over
+	// them, and views into a dead stack frame would be exactly the
+	// dangling-view bug the ownership rules exist to prevent.
+	mw_miss_prepare(a, ctx)
+	miss_chain_ensure(a)
+	chain_enter(a, ctx, a.private.miss_start, a.private.miss_len)
 }

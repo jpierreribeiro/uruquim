@@ -9,6 +9,7 @@ application	proc	forbidden :: proc(ctx: ^Context, message: string)
 application	proc	get :: proc(a: ^App, pattern: string, handler: Handler)
 application	proc	internal_error :: proc(ctx: ^Context)
 application	proc	json :: proc(ctx: ^Context, status: Status, value: $T)
+application	proc	next :: proc(ctx: ^Context)
 application	proc	no_content :: proc(ctx: ^Context)
 application	proc	not_found :: proc(ctx: ^Context, resource: string)
 application	proc	ok :: proc(ctx: ^Context, value: $T)
@@ -23,6 +24,7 @@ application	proc	query_int_or :: proc(ctx: ^Context, name: string, default_value
 application	proc	serve :: proc(a: ^App, port: int)
 application	proc	text :: proc(ctx: ^Context, status: Status, s: string)
 application	proc	unauthorized :: proc(ctx: ^Context, message: string)
+application	proc	use :: proc(a: ^App, middleware: Handler)
 application	type	App :: struct {private: App_Internal}
 application	type	Context :: struct {request: Request, private: Context_Internal}
 application	type	Handler :: proc(ctx: ^Context)

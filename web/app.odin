@@ -41,6 +41,32 @@ App_Internal :: struct {
 	// is WP7, and no allocator or production transport is wired before WP8.
 	default_responses: bool,
 
+	// WP17 middleware storage (ADR-005). All of it is LAZY: an application that
+	// never calls `use` and registers no route allocates nothing here.
+	//
+	// `mw_globals` is the `use` list, in registration order. `mw_pool` is the
+	// flattened chain pool every route's `chain_start`/`chain_len` index pair
+	// points into; it is APPEND-ONLY and never compacted before `destroy` —
+	// the invariant that makes index pairs immune to the P8 dangling-slice
+	// corruption (spec §2.2). Both are freed exactly once by `destroy` via
+	// `mw_destroy`.
+	mw_globals: [dynamic]Handler,
+	mw_pool:    [dynamic]Handler,
+
+	// The miss chain (ADR-023): built lazily at the first miss, at most once —
+	// `use()` is rejected after any registration AND after the first dispatch,
+	// so the chain can never be invalidated once built.
+	miss_start: int,
+	miss_len:   int,
+	miss_built: bool,
+
+	// WP17 fail-closed state (ADR-019). `poisoned` is the private predicate a
+	// test observes (`use()` returns void and cannot signal by return);
+	// `dispatched` records that a first dispatch happened, which is what closes
+	// the ADR-023 edge (`use()` after a served miss but before any route).
+	poisoned:   bool,
+	dispatched: bool,
+
 	// WP3 test-support state (the in-memory `web.test_request` transport). It is
 	// LAZY: this zero value holds no allocation, so `app()`/`bare()` allocate
 	// nothing and an application that never calls `test_request` never creates a
@@ -117,6 +143,7 @@ bare :: proc() -> App {
 // nothing further for `destroy` to release.
 destroy :: proc(a: ^App) {
 	routes_destroy(a)
+	mw_destroy(a)
 
 	if a.private.test_teardown != nil {
 		a.private.test_teardown(&a.private.test_transport)
