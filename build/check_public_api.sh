@@ -247,8 +247,13 @@ fi
 if test -n "$(find "$URUQUIM_TESTING" -mindepth 1 -maxdepth 1 -type d -print -quit)"; then
   fail "web/testing/ has subdirectories; the machinery is flat"
 fi
-grep -qx 'package testing' "$URUQUIM_TESTING"/*.odin ||
-  fail "web/testing/ does not declare 'package testing'"
+# The declared package name is `web_testing`, NOT `testing`: a package named
+# `testing` collides with `core:testing` at link time (link-name prefixing
+# requires a unique package name across the binary). The import ALIAS in the
+# facade is still `testing`, so callers write `testing.*` and the C5 cyclic
+# diagnostic still names 'testing'.
+grep -qx 'package web_testing' "$URUQUIM_TESTING"/*.odin ||
+  fail "web/testing/ does not declare 'package web_testing'"
 
 # The export inventory below reads only files that are NOT `#+private`, which
 # is exactly what the compiler exports. This narrows the scan to match the

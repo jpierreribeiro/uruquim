@@ -230,9 +230,9 @@ if URUQUIM_WP3_CYCLE_OUT="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
   echo "$URUQUIM_WP3_CYCLE_OUT" >&2
   fail "the back-edge compiled; web/testing -> web must be a compile cycle (C5)"
 fi
-if ! grep -qF "Cyclic importation of 'testing'" <<<"$URUQUIM_WP3_CYCLE_OUT"; then
+if ! grep -qF "Cyclic importation of 'web_testing'" <<<"$URUQUIM_WP3_CYCLE_OUT"; then
   echo "$URUQUIM_WP3_CYCLE_OUT" >&2
-  fail "the back-edge failed for the wrong reason; expected: Cyclic importation of 'testing'"
+  fail "the back-edge failed for the wrong reason; expected: Cyclic importation of 'web_testing'"
 fi
 rm -rf "$URUQUIM_WP3_CYCLE"
 trap - EXIT

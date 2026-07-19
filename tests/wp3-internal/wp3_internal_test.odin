@@ -16,7 +16,7 @@
 // which is exactly what keeps the dependency one-way). The public callsite
 // test in tests/wp3-public-surface/ proves form and the socket-free round trip.
 #+private
-package testing
+package web_testing
 
 import "core:mem"
 import "core:slice"

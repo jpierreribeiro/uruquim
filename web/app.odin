@@ -4,6 +4,8 @@
 // default policy, allocates nothing, and builds no router.
 package web
 
+import testing "uruquim:web/testing"
+
 // App owns the application's resources.
 //
 // Ownership contract (ADR-001, ratified by experiment 01): `app()` returns App
@@ -22,8 +24,16 @@ App :: struct {
 @(private)
 App_Internal :: struct {
 	// WP1 skeleton marker. No route table, allocator, default policy, or
-	// transport is wired yet; those belong to WP4, WP7 and WP8.
+	// production transport is wired yet; those belong to WP4, WP7 and WP8.
 	skeleton_only: bool,
+
+	// WP3 test-support state (the in-memory `web.test_request` transport). It is
+	// LAZY: this zero value holds no allocation, so `app()`/`bare()` allocate
+	// nothing and an application that never calls `test_request` never creates a
+	// recorder. `destroy` frees it if it was used. The type belongs to the
+	// machinery package `web/testing`; `web` names it but the machinery never
+	// names a `web` type, keeping the dependency one-way.
+	test_transport: testing.Test_Transport,
 }
 
 // app creates an application with the progressive Phase-1 defaults.
@@ -51,6 +61,10 @@ bare :: proc() -> App {
 //
 // Call it exactly once, on the original value returned by `app` or `bare`.
 //
-// WP1 STUB: there is nothing to release, so this does nothing.
+// WP3: releases the test-support state if `test_request` was ever used, exactly
+// once. It remains a no-op for an application that never called `test_request`
+// — the recorder is inactive and frees nothing. There is still no production
+// transport, route table, or allocator to release; those arrive in WP4/WP7/WP8.
 destroy :: proc(a: ^App) {
+	testing.destroy(&a.private.test_transport)
 }
