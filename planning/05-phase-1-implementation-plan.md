@@ -84,7 +84,7 @@ runs on the pinned toolchain.
 - **API.** Public, package `web`: `web.test_request(&app, method, path) ->
   Recorded_Response`. `test_request` and `Recorded_Response` are the only two
   public symbols; both belong to the **test-support ledger**, tracked apart
-  from the frozen 32-symbol application surface (planning/15 G-10; planning/21
+  from the frozen 32-symbol application surface (planning/15 G-11; planning/21
   Decision 2). Total exported after WP3: 34 = 32 application + 2 test-support.
 - **Dependency direction (ratified, planning/21).** One-way only:
   `web` (facade) → `web/testing` (machinery) → neutral internal/boundary
@@ -107,11 +107,20 @@ runs on the pinned toolchain.
   `web/test_support.odin` as the 2-symbol test-support ledger; keep the other
   `web/*.odin` at exactly 32; assert the 34-symbol union; drop `test_request`
   from the forbidden later-phase list) and records the RED evidence before the
-  machinery exists.
+  machinery exists. It ports the planning/21 package prototype into committed
+  compile probes (one-way import succeeds; back-edge cycle fails with the
+  expected diagnostic; neither side imports `core:testing`). It also records a
+  minimal application binary before/after the facade exists, verifies that an
+  application which never calls `test_request` performs no test-support
+  allocation or package initialization, and reports any binary-size delta for
+  human review rather than declaring hidden cost absent by assumption.
 - **Min impl.** inbox/outbox loop over neutral request/response values; the
   facade owns the dispatch call, the recorder is a passive sink that copies
   status/headers/body/commit into owned storage.
-- **Done.** `test_request` usable by all later WduP tests.
+- **Done.** `test_request` usable by all later WP tests; two recorded responses
+  remain readable across consecutive calls until `destroy(&app)`; tracked
+  recorder allocations are released by destroy; the unused-facade binary/init
+  evidence is recorded and accepted.
 - **Risks.** test transport diverging from real behavior → mitigated by WP9.
 - **Deps.** WP2. **Rollback.** test-only package.
 

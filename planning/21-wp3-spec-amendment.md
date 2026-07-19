@@ -126,6 +126,11 @@ antes da produção. O protótipo vive **fora do repositório** (§3.6) e reprod
 esqueleto `web` (fachada) + `web/testing` (maquinaria neutra) + consumidor
 externo.
 
+O protótipo externo é evidência de viabilidade, não o guard permanente. O
+commit TESTS-FIRST do WP3 deve portar C1–C5 para probes executáveis e
+versionados. A forma só é considerada ratificada pelo produto quando esses
+probes rodam no gate normal; o agente não pode citar apenas esta tabela.
+
 | # | Requisito | Evidência | Status |
 |---|---|---|---|
 | C1 | `web/testing` compila sozinho como maquinaria neutra | `odin check web/testing` `exit=0`; imports = só `core:strings` | RATIFICADO |
@@ -217,6 +222,10 @@ WP3, `build/check_public_api.sh`:
    seção 0), e NÃO lê `web/testing/` para a política de imports core/uruquim da
    seção 7 se isso reintroduzir falsos positivos — a maquinaria pode importar
    `core:` livremente.
+7. executa os probes versionados equivalentes a C1–C5 e mede uma aplicação
+   mínima que não chama `test_request`: nenhum init/alocação de test-support e
+   delta de tamanho binário registrado para decisão humana se não for nulo ou
+   claramente explicado.
 
 Sequência, dentro do PR do WP3, em **commits separados**:
 
@@ -259,8 +268,9 @@ Sequência, dentro do PR do WP3, em **commits separados**:
 5. Só então `planning/22-opus-wp3-agent-prompt.md` (revisado por humano) pode
    ser escrito e usado.
 6. O PR do WP3, em commits separados: TESTS-FIRST eleva o checker ao contrato
-   dual-ledger e registra RED; a implementação adiciona a fachada e a
-   maquinaria e devolve GREEN.
+   dual-ledger, porta C1–C5, adiciona os testes de duas respostas/lifetime e a
+   medição do binário sem uso, e registra RED; a implementação adiciona a
+   fachada e a maquinaria e devolve GREEN.
 7. O WP3 cria `planning/23-wp3-gate.md`.
 
 **Renumeração vs. handoff.** O handoff WP3 numerava o prompt como `planning/21`

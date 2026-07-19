@@ -117,6 +117,14 @@ separate "Testing" section, states the `Recorded_Response` lifetime and the
 absence of sockets/ports/transport types, and promises no direct import of
 `web/testing`. Growth of either ledger still carries G-09 evidence.
 
+Because package `web` imports the test machinery, WP3 must measure a minimal
+application that never calls `test_request`. Lazy runtime allocation alone is
+not sufficient evidence: the gate also verifies no test-support package init
+side effect and records the binary-size delta. Any unexplained shipped cost is
+a human-review item before WP3 can be marked complete. The package probes from
+the pre-WP3 amendment must become committed, executable checks; an external
+scratch prototype is supporting evidence, not the permanent ratification.
+
 ## False-positive rules
 
 - Do not flag `ok`/`created` when exact delegation remains proven.
@@ -134,7 +142,7 @@ absence of sockets/ports/transport types, and promises no direct import of
 |---|---|
 | WP1 | exact exported-symbol inventory; no aliases, future surfaces, untyped context fields, or transport types |
 | WP2 | view invalidation/copy tests; single commit; Context shape assertion |
-| WP3 | dual-ledger surface (32 application + 2 test-support = 34); `web/testing` imports neither `uruquim:web` nor `core:testing`; `Recorded_Response` lifetime owned by App test-support state (G-11) |
+| WP3 | dual-ledger surface (32 application + 2 test-support = 34); committed one-way/cycle probes; `web/testing` imports neither `uruquim:web` nor `core:testing`; unused-facade binary/init measurement; two-response lifetime and destroy cleanup (G-11) |
 | WP5 | extractor errors commit once; canonical examples return immediately; plain result forces `ok` capture |
 | WP6 | exact responder delegation; marshal logging; no partial/double response; private typed error path |
 | WP8 | adapter dependency inventory; backend-type export scan; core remains usable through test transport |
