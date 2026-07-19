@@ -47,6 +47,7 @@ bash -n "$URUQUIM_ROOT/build/check.sh"
 bash -n "$URUQUIM_ROOT/build/check_test.sh"
 bash -n "$URUQUIM_ROOT/build/check_public_api.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
+bash -n "$URUQUIM_ROOT/build/check_g11_teardown.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -280,6 +281,12 @@ echo "--- WP4 public surface contract: routing, 404, 405, bare (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp4-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp4-public-surface"
+
+# G-11 — the test-support teardown must not ship in applications that never
+# test. Promised by planning/public-api-guardrails.md and, until now, never
+# actually asserted.
+echo "--- G-11 test-support teardown cost (nm) ---"
+env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_g11_teardown.sh"
 
 echo "--- Phase-1 public API anti-accretion contract ---"
 bash "$URUQUIM_ROOT/build/check_public_api.sh"

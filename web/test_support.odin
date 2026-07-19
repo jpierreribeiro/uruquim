@@ -51,10 +51,20 @@ Recorded_Response :: struct {
 //
 // The App's test-support state is created LAZILY here, on the first call, using
 // `context.allocator`. An application that never calls `test_request` allocates
-// no recorder and runs no initializer. Every copy the recorder makes is released
-// by `web.destroy(&app)`.
+// no recorder, runs no initializer, and does not even LINK the recorder
+// teardown — this procedure registers it, so eliminating this procedure
+// eliminates it too (planning/public-api-guardrails.md G-11). Every copy the
+// recorder makes is released by `web.destroy(&app)`.
 test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response {
 	transport := &a.private.test_transport
+
+	// Register the teardown on first use. This assignment is the ONLY reference
+	// to `testing.destroy` in the whole package, which is precisely the point:
+	// an application that never calls `test_request` never mentions the
+	// machinery teardown, so the linker drops it along with this procedure
+	// (planning/public-api-guardrails.md G-11). `web.destroy` calls through the
+	// pointer and does nothing when it is nil.
+	a.private.test_teardown = testing.destroy
 
 	// 1. The machinery constructs the neutral inbound request.
 	req := testing.build_request(method_token(method), path)
