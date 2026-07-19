@@ -5,9 +5,10 @@ not use GitHub Actions and does not receive GitHub credentials: the Uruquim
 repository is public and fetched read-only.
 
 The verifier runs as the unprivileged `uruquim-ci` user. Every five minutes it
-fetches `codex/phase-1-bootstrap`, archives a new commit into a fresh temporary
-directory, runs `build/check.sh`, and records an atomic status plus the latest
-log under `/var/lib/uruquim-ci`.
+fetches `main` (override with `URUQUIM_CI_BRANCH`, e.g. to verify a PR
+branch), archives a new commit into a fresh temporary directory, runs
+`build/check.sh`, and records an atomic status plus the latest log under
+`/var/lib/uruquim-ci`.
 
 Installation outline for Ubuntu/Debian x86_64:
 
@@ -23,7 +24,7 @@ Installation outline for Ubuntu/Debian x86_64:
 Optional `/etc/uruquim-ci.env` overrides:
 
 ```text
-URUQUIM_CI_BRANCH=codex/phase-1-bootstrap
+URUQUIM_CI_BRANCH=main
 URUQUIM_CI_REPO_URL=https://github.com/jpierreribeiro/uruquim.git
 URUQUIM_ODIN_BIN=/opt/uruquim-odin/odin
 ```

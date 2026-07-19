@@ -137,11 +137,13 @@ runs on the pinned toolchain.
 - **Deps.** WP2. **Rollback.** test-only package.
 
 ## WP4 — Minimal route registration and dispatch
-- **Execution status.** **IMPLEMENTED; GATE GREEN ON PR #13; NOT YET MERGED.**
+- **Execution status.** **COMPLETE** (merged to `main` as commit `3726912`;
+  this line previously read "NOT YET MERGED" and was corrected during the
+  WP11 audit — the commit is an ancestor of `origin/main`).
   Registration, `:param` matching, order-independent static precedence,
   per-method isolation, the automatic 404, and the 405 with its exact `Allow`
   header are implemented and test-pinned (40 internal + 13 public-surface
-  tests). This entry becomes COMPLETE when PR #13 merges. The public surface did not move: 32
+  tests). The public surface did not move: 32
   application + 2 test-support = 34. Measured cost of routing on a minimal
   two-route application: 47,880 -> 58,072 bytes (+10,192); an application that
   registers no route pays +240 bytes (`routes_destroy` plus its
@@ -713,6 +715,19 @@ runs on the pinned toolchain.
   escaping view, or unowned public dependency.
 - **Risks.** freezing something un-ratified → forbidden by discipline.
 - **Deps.** WP0-WP10 + executed experiments. **Rollback.** un-freeze pre-1.0.
+- **Execution status.** **COMPLETE** as a candidate pending human
+  acceptance. Delivered: `planning/phase-1-freeze.md` (normative manifest
+  with the 34-row evidence matrix, behavioral contracts, dependency/vendor
+  audit, G-01..G-11 results and routed limitations),
+  `build/phase1-public-signatures.txt` and
+  `build/phase1-direct-dependencies.txt` (compiler-derived snapshots), and
+  `build/check_phase1_freeze.sh` wired as the final step of
+  `build/check.sh`. RED was demonstrated on the real absence of the
+  inventories before GREEN; fourteen mutation probes against repository
+  copies were each rejected. Zero production change: `git diff` against the
+  WP10 base over `web/`, `vendor/`, `examples/`, `tests/` is empty.
+  Acceptance completes when a human merges the WP11 PR and the merged
+  commit passes the VPS verifier on `main`.
 
 ---
 

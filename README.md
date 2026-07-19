@@ -97,7 +97,10 @@ examples/                Compiling Phase-1 programs (built by the gate)
 
 ## Status
 
-Phase 1 is implemented and gated, and is finishing its final review.
+Phase 1 is complete: WP0 through WP11 are done, and the public surface is
+frozen by an executable gate. The freeze manifest and its per-symbol
+evidence live in `planning/phase-1-freeze.md`; the gate that enforces it is
+`build/check_phase1_freeze.sh`, run as the final step of `build/check.sh`.
 
 **What works today**
 
@@ -128,8 +131,10 @@ count is enforced by the build gate.
 - Request header lookup — Phase 2.
 
 Phase 1 is usable for building and testing a JSON API. It is not yet hardened
-for unattended production exposure, and Phase 1 is not formally frozen: that is
-the WP11 gate.
+for unattended production exposure. Frozen means: the Phase-1 contracts are
+protected by the gate and changing one now requires a spec amendment;
+internals stay replaceable; a tag or release remains a separate human
+decision by the owner.
 
 ## Where to start
 

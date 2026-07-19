@@ -2,7 +2,7 @@
 set -euo pipefail
 
 URUQUIM_CI_REPO_URL="${URUQUIM_CI_REPO_URL:-https://github.com/jpierreribeiro/uruquim.git}"
-URUQUIM_CI_BRANCH="${URUQUIM_CI_BRANCH:-codex/phase-1-bootstrap}"
+URUQUIM_CI_BRANCH="${URUQUIM_CI_BRANCH:-main}"
 URUQUIM_CI_ROOT="${URUQUIM_CI_ROOT:-/opt/uruquim-ci}"
 URUQUIM_CI_STATE_DIR="${URUQUIM_CI_STATE_DIR:-/var/lib/uruquim-ci}"
 URUQUIM_ODIN_BIN="${URUQUIM_ODIN_BIN:-/opt/uruquim-odin/odin}"
