@@ -43,10 +43,27 @@ App_Internal :: struct {
 	// WP3 test-support state (the in-memory `web.test_request` transport). It is
 	// LAZY: this zero value holds no allocation, so `app()`/`bare()` allocate
 	// nothing and an application that never calls `test_request` never creates a
-	// recorder. `destroy` frees it if it was used. The type belongs to the
-	// machinery package `web/testing`; `web` names it but the machinery never
-	// names a `web` type, keeping the dependency one-way.
+	// recorder. The type belongs to the machinery package `web/testing`; `web`
+	// names it but the machinery never names a `web` type, keeping the
+	// dependency one-way.
 	test_transport: testing.Test_Transport,
+
+	// The test-support teardown, registered LAZILY by `test_request` on first
+	// use (planning/public-api-guardrails.md G-11).
+	//
+	// This indirection exists to eliminate a shipped cost, not to be clever.
+	// `web.destroy` runs in EVERY application, so calling `testing.destroy`
+	// directly from it creates a STATIC call edge into the machinery — and that
+	// edge links the recorder teardown, plus its `delete_dynamic_array` and
+	// `delete_slice` instantiations, into binaries that never test anything.
+	// Through a proc pointer the only reference lives inside `test_request`, so
+	// when `test_request` is dead-code-eliminated the teardown goes with it.
+	//
+	// The permitted residual is exactly this pointer field — one word of struct
+	// and its nil initialization — never the teardown routine itself. Asserted
+	// by `build/check_g11_teardown.sh`, which fails if `nm` finds any
+	// `web/testing` teardown symbol in an application that never tests.
+	test_teardown: proc(t: ^testing.Test_Transport),
 }
 
 // app creates an application with the progressive Phase-1 defaults.
@@ -85,12 +102,28 @@ bare :: proc() -> App {
 // no route.
 //
 // WP3: releases the test-support state if `test_request` was ever used, exactly
-// once. It remains a no-op for an application that never called `test_request`
-// — the recorder is inactive and frees nothing.
+// once.
+//
+// WP4: releases the route table and every pattern the App cloned at
+// registration.
+//
+// WP3/G-11: releases the test-support state by calling the teardown that
+// `test_request` registered on its first call. For an application that never
+// called `test_request` the pointer is nil and this is a genuine no-op — and,
+// because the pointer is the only reference to it, the teardown routine is not
+// even linked into that binary (planning/public-api-guardrails.md G-11).
+//
+// Calling `testing.destroy` directly here instead would be a static edge from
+// every application's `destroy` into the machinery, linking the recorder
+// teardown into binaries that never test. That is the cost this indirection
+// exists to remove.
 //
 // There is still no production transport or allocator to release; those arrive
 // in WP7/WP8.
 destroy :: proc(a: ^App) {
 	routes_destroy(a)
-	testing.destroy(&a.private.test_transport)
+
+	if a.private.test_teardown != nil {
+		a.private.test_teardown(&a.private.test_transport)
+	}
 }

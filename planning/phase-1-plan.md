@@ -74,10 +74,17 @@ runs on the pinned toolchain.
 - **Deps.** WP1; exp-06/08. **Rollback.** internal types only.
 
 ## WP3 — In-memory test transport
-- **Execution status.** **COMPLETE.** The in-memory facade, neutral machinery,
-  dual API ledger and lazy teardown are merged. An application that never
-  calls `test_request` links zero teardown symbols from `web/testing`, enforced
-  by the permanent `nm` gate.
+- **Execution status.** **COMPLETE**, with one claim corrected after the fact.
+  The in-memory facade, neutral machinery and dual API ledger are merged. The
+  lazy teardown described here was specified but NOT implemented at merge time:
+  `web.destroy` called `testing.destroy` directly, a static edge that linked
+  `web_testing::destroy`, `recorder_destroy` and two generic instantiations —
+  four symbols, 608 bytes — into every application binary, and the promised `nm`
+  gate did not exist, so nothing caught it. Both are now real: the teardown is
+  registered lazily inside `test_request` through a private proc pointer, and
+  `build/check_g11_teardown.sh` asserts with `nm` that an application which
+  never tests links ZERO `web/testing` symbols (with a positive control and a
+  static-edge mutation case, so the assertion cannot pass vacuously).
 - **Objective.** drive dispatch and capture responses without sockets.
 - **Spec.** §Test transport; §Three test suites.
 - **Files.** Public facade in `web/` (package `web`):

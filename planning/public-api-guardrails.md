@@ -134,7 +134,20 @@ forbidden: the recorder teardown MUST be registered lazily — a private
 proc-pointer set only inside `test_request` — so that when `test_request` is
 dead-code-eliminated the teardown goes with it. The gate asserts this with
 `nm`: a minimal application that never calls `test_request` links ZERO
-`web/testing` teardown symbols. The only permitted residual is the proc-pointer
+`web/testing` teardown symbols.
+
+**Enforcement history (corrected).** This paragraph described the mechanism and
+the gate before either existed. The merged WP3 code had `web.destroy` calling
+`testing.destroy` directly — the static edge this rule forbids — and no `nm`
+gate was ever written, so the guardrail went unenforced and the code drifted
+from it. Measured on `819fdc7`: four linked symbols (`web_testing::destroy`,
+`recorder_destroy`, and the `delete_dynamic_array`/`delete_slice`
+instantiations), 608 bytes, in an application that never tests. Both halves are
+now real — the proc pointer is registered inside `test_request`, and
+`build/check_g11_teardown.sh` measures the claim on every gate run, with a
+positive control and a static-edge mutation case so it cannot pass vacuously.
+The lesson generalizes: a guardrail that names a gate MUST ship that gate in the
+same change, or it is documentation of an intention rather than a constraint. The only permitted residual is the proc-pointer
 field on `App` (a few hundred bytes of struct/init delta), never the teardown
 routine. Ratified by the teardown prototype (variant A 47576 B with the
 static teardown edge vs variant B 42952 B with lazy registration; `nm`: 4
