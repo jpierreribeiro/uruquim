@@ -381,8 +381,45 @@ runs on the pinned toolchain.
 
 ## WP7 — JSON body binding
 - **Objective.** `body(ctx,&dst)->bool`, request allocator, fixed 4 MiB body cap.
-- **Spec.** §body; ADR-006; proposed ADR-012; scope-review body-limit decision.
-- **Files.** `web/extract.odin` (`body`), `web/internal/memory/request_arena.odin`.
+- **Spec.** §body; ADR-006; ADR-012 (accepted); scope-review body-limit decision.
+- **Files.** `web/extract.odin` (`body`), `web/request_arena.odin` (the private
+  arena machinery).
+- **Decisions ratified in WP7.**
+  - **D1 — path correction, `web/request_arena.odin` not
+    `web/internal/memory/`.** The plan proposed a `web/internal/memory/`
+    subpackage. In Odin a subdirectory is a SEPARATE package, and the arena
+    machinery must reach `Context_Internal` and the private report — so a
+    subpackage would have to import `uruquim:web` (the back-edge WP3 ratified as
+    a compile cycle, probe C5) or expose an importable auxiliary surface. This
+    is the same refutation WP4 recorded for the dispatcher. The machinery is
+    therefore a top-level package-private file, and `build/check_public_api.sh`
+    permits exactly this one additional file name.
+  - **D2 — single body consumer (ADR-012 A).** `Context_Internal` carries a
+    `Body_State` (`.Fresh` zero value, `.Consumed`). The first `web.body` call
+    sets `.Consumed` before the limit check and before the parser, so a failed
+    first attempt still consumes the capability. A second call parses nothing,
+    logs a private typed diagnostic, and produces `internal_error`/500 only when
+    no response is committed yet; a response the first call already committed is
+    left byte-for-byte intact. Never a double commit, no replay, no cache.
+  - **D3 — the 4 MiB cap is checked before the arena and before the parser.**
+    `BODY_LIMIT :: 4 * 1024 * 1024`. Exactly 4 MiB is allowed; only a strictly
+    larger body is rejected, with HTTP 413 and the `body_too_large` envelope. An
+    empty or over-limit body NEVER initializes the arena. 413 is emitted through
+    a private status value — `web.Status` gains NO public member.
+  - **D4 — request-lifetime arena (ADR-006).** Decoded nested data lives in a
+    `mem.Dynamic_Arena`, initialized lazily with `context.allocator` on the
+    first valid, within-limit bind, and freed exactly once at request end by the
+    driver — after it has captured/written the Response, exactly as WP6's
+    response teardown is driven. The arena belongs to the REQUEST, never the App
+    or the Response, and WP6's Response-owned buffers are NOT migrated into it.
+    A partial parse may leave allocations in the arena; they are freed together
+    at teardown.
+  - **D5 — error categorization.** Empty body, malformed JSON and rejected JSON5
+    are the client's fault → 400 `invalid_json`. A destination the decoder
+    cannot fill, a nil/non-pointer destination, or any other decoder failure is
+    NOT shown to the client → the typed report logs it and the response is
+    `internal_error`/500. After `web.body` returns false, `dst` holds
+    undefined partial content and must be discarded.
 - **API.** `body`.
 - **Tests first.** before production code, run a disposable repeated-binding
   prototype covering successful first bind, invalid first bind, empty body,
