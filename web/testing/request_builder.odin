@@ -11,6 +11,7 @@
 // never `core:testing`; the machinery ships in application binaries exactly like
 // `web/`, so it must not drag the test runner in.
 package web_testing
+// uruquim:file test-machinery
 
 // Request is the neutral, in-memory inbound request the facade hands to the
 // transport. `method` is the on-the-wire method TOKEN (e.g. "GET"); `path` is

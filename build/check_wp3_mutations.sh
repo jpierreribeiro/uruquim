@@ -20,11 +20,16 @@ fail() {
 
 # Run the copied checker on a mutated tree; require a non-zero exit AND the
 # expected diagnostic. A wrong-reason failure is itself a failure.
+#
+# Every sed-based mutation goes through `mutate_sed` below, so by the time
+# expect_reject runs, the edit is KNOWN to have applied — an "accepted" result
+# here therefore really is a guardrail that stopped rejecting the state, not a
+# probe that silently failed to create it.
 expect_reject() { # tree label expected-substring
   local tree="$1" label="$2" expected="$3" out
   if out="$(bash "$tree/build/check_public_api.sh" 2>&1)"; then
     echo "$out" >&2
-    fail "'$label' was ACCEPTED; the guardrail does not reject it"
+    fail "the mutated tree for '$label' PASSED the checker. The mutation was verified applied, so the guardrail that is supposed to reject this state no longer does."
   fi
   if ! grep -qF "$expected" <<<"$out"; then
     echo "$out" >&2
@@ -33,11 +38,41 @@ expect_reject() { # tree label expected-substring
   echo "PASS (mutation): $label -> rejected"
 }
 
+# The mirror image: an edit that is a legal refactor must be ACCEPTED. These
+# controls are what keep the checker pinned to CONTRACT rather than to the
+# current spelling of the source (WP16).
+expect_accept() { # tree label
+  local tree="$1" label="$2" out
+  if ! out="$(bash "$tree/build/check_public_api.sh" 2>&1)"; then
+    echo "$out" >&2
+    fail "the legal refactor '$label' was REJECTED. The checker is pinning implementation text instead of contract; a behaviour-preserving edit must pass without a gate change."
+  fi
+  echo "PASS (refactor control): $label -> accepted"
+}
+
+# Apply a sed mutation and PROVE it changed the file. A probe whose edit never
+# applied exercises an unmutated tree and proves nothing — and the report it
+# produced used to accuse the guardrail instead of the probe. BROKEN PROBE is
+# its own failure, distinct from a broken guardrail.
+mutate_sed() { # label file sed-args...
+  local label="$1" file="$2" before after
+  shift 2
+  before="$(md5sum "$file" | cut -d' ' -f1)"
+  sed -i "$@" "$file"
+  after="$(md5sum "$file" | cut -d' ' -f1)"
+  if test "$before" = "$after"; then
+    fail "BROKEN PROBE ('$label'): the mutation edit left ${file##*/} unchanged. The probe's pattern no longer matches the source, so this case would exercise an UNMUTATED tree and prove nothing. Fix the probe before trusting the suite."
+  fi
+}
+
 fresh_tree() {
   local t
   t="$(mktemp -d -t uruquim-wp3-mutation-XXXXXXXX)"
   mkdir -p "$t/build" "$t/web/testing" "$t/web/internal/transport" "$t/tests" "$t/vendor"
   cp "$URUQUIM_ROOT"/build/check_public_api.sh "$t/build/"
+  # The checker's 11f section reads its caller to prove every socket suite
+  # runs under an external timeout, so the caller travels with it.
+  cp "$URUQUIM_ROOT"/build/check.sh "$t/build/"
   cp "$URUQUIM_ROOT"/web/*.odin "$t/web/"
   cp "$URUQUIM_ROOT"/web/testing/*.odin "$t/web/testing/"
   cp "$URUQUIM_ROOT"/web/internal/transport/*.odin "$t/web/internal/transport/"
@@ -100,7 +135,9 @@ python3 - "$T/web/test_support.odin" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-s = s.replace("\tstatus: Status,\n\tbody:   string,\n}",
+old = "\tstatus: Status,\n\tbody:   string,\n}"
+assert old in s, "BROKEN PROBE: the Recorded_Response field block was not found; the probe no longer matches the source"
+s = s.replace(old,
               "\tstatus:  Status,\n\tbody:    string,\n\theaders: int,\n}", 1)
 open(p, "w").write(s)
 PY
@@ -131,24 +168,26 @@ printf '\nserve :: proc(a: ^App, port: int) {}\n' >>"$T/web/dispatch_match.odin"
 expect_reject "$T" "ratified symbol exported from a dispatch file" \
   "the WP4 dispatch files export a symbol"
 
-# 10. `dispatch` losing its explicit App parameter (D3).
+# 10. `dispatch` losing its explicit App parameter (D3). The probe is
+#     parameter-NAME agnostic, matching the checker: renaming dispatch's
+#     private parameters is legal, dropping the ^App argument is not.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/^dispatch :: proc(a: \^App, ctx: \^Context) {$/dispatch :: proc(ctx: ^Context) {/' \
-  "$T/web/dispatch_match.odin"
+mutate_sed "dispatch without the explicit App parameter" "$T/web/dispatch_match.odin" \
+  -E 's/^dispatch :: proc\([a-z_]+: \^App, ([a-z_]+: \^Context)\) \{$/dispatch :: proc(\1) {/'
 expect_reject "$T" "dispatch without the explicit App parameter" \
-  "dispatch does not have the ratified internal signature"
+  "dispatch does not take (^App, ^Context) explicitly"
 
 # 11. A non-canonical `Allow` header name.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/^ALLOW_HEADER_NAME :: "Allow"$/ALLOW_HEADER_NAME :: "allow"/' \
-  "$T/web/dispatch_table.odin"
+mutate_sed "lowercase Allow header name" "$T/web/dispatch_table.odin" \
+  's/^ALLOW_HEADER_NAME :: "Allow"$/ALLOW_HEADER_NAME :: "allow"/'
 expect_reject "$T" "lowercase Allow header name" \
   "the 405 header name is not exactly"
 
 # 12. A scrambled `Allow` method order — the value must not depend on it.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/^ALLOW_METHOD_ORDER :: .*$/ALLOW_METHOD_ORDER :: [5]Method{.DELETE, .PATCH, .PUT, .POST, .GET}/' \
-  "$T/web/dispatch_table.odin"
+mutate_sed "non-canonical Allow method order" "$T/web/dispatch_table.odin" \
+  's/^ALLOW_METHOD_ORDER :: .*$/ALLOW_METHOD_ORDER :: [5]Method{.DELETE, .PATCH, .PUT, .POST, .GET}/'
 expect_reject "$T" "non-canonical Allow method order" \
   "the Allow method order is not the canonical"
 
@@ -165,11 +204,15 @@ printf '\n@(private)\nwp4_extra_status :: proc(res: ^Response) {\n\tresponse_com
 expect_reject "$T" "dispatcher deciding a status outside 404/405" \
   "decides a status outside 404/405"
 
-# 15. A missing WP4 dispatch file.
+# 15. A missing WP4 dispatch file. With the file set derived rather than
+#     enumerated (WP16), the rejection comes from the section-9 structural
+#     check that names the missing contract, not from a filename diff.
 T="$(fresh_tree)"; TREES+=("$T")
+test -f "$T/web/dispatch_match.odin" ||
+  fail "BROKEN PROBE ('missing WP4 dispatch file'): the copied tree has no dispatch_match.odin to remove"
 rm -f "$T/web/dispatch_match.odin"
 expect_reject "$T" "missing WP4 dispatch file" \
-  "web/ file set does not match the Phase-1 contract"
+  "web/dispatch_match.odin is missing"
 
 echo "PASS: WP4 mutation checks (8 forbidden dispatch states all rejected)"
 
@@ -187,8 +230,8 @@ echo "PASS: WP4 mutation checks (8 forbidden dispatch states all rejected)"
 
 # 16. `#optional_ok` re-added to a value-producing extractor.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/^path_int :: proc(ctx: \^Context, name: string) -> (value: int, ok: bool) {$/path_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool) #optional_ok {/' \
-  "$T/web/extract.odin"
+mutate_sed "#optional_ok on path_int" "$T/web/extract.odin" \
+  's/^path_int :: proc(ctx: \^Context, name: string) -> (value: int, ok: bool) {$/path_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool) #optional_ok {/'
 grep -q '#optional_ok' "$T/web/extract.odin" ||
   fail "MUTATION-SETUP: #optional_ok was not injected into the copied extract.odin"
 expect_reject "$T" "#optional_ok re-added to path_int" \
@@ -197,8 +240,8 @@ expect_reject "$T" "#optional_ok re-added to path_int" \
 # 16b. The same directive on `query_int_or` — the extractor most likely to be
 #      mistaken for a total function and "simplified" with the directive.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/^query_int_or :: proc(ctx: \^Context, name: string, default_value: int) -> (value: int, ok: bool) {$/query_int_or :: proc(ctx: ^Context, name: string, default_value: int) -> (value: int, ok: bool) #optional_ok {/' \
-  "$T/web/extract.odin"
+mutate_sed "#optional_ok on query_int_or" "$T/web/extract.odin" \
+  's/^query_int_or :: proc(ctx: \^Context, name: string, default_value: int) -> (value: int, ok: bool) {$/query_int_or :: proc(ctx: ^Context, name: string, default_value: int) -> (value: int, ok: bool) #optional_ok {/'
 grep -q '#optional_ok' "$T/web/extract.odin" ||
   fail "MUTATION-SETUP: #optional_ok was not injected into query_int_or"
 expect_reject "$T" "#optional_ok re-added to query_int_or" \
@@ -208,8 +251,8 @@ expect_reject "$T" "#optional_ok re-added to query_int_or" \
 #     name is still present and the count is still 32, but the public contract
 #     changed.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/^query_int_or :: proc(ctx: \^Context, name: string, default_value: int) -> (value: int, ok: bool) {$/query_int_or :: proc(ctx: ^Context, name: string, default_value: i64) -> (value: i64, ok: bool) {/' \
-  "$T/web/extract.odin"
+mutate_sed "altered query_int_or signature" "$T/web/extract.odin" \
+  's/^query_int_or :: proc(ctx: \^Context, name: string, default_value: int) -> (value: int, ok: bool) {$/query_int_or :: proc(ctx: ^Context, name: string, default_value: i64) -> (value: i64, ok: bool) {/'
 expect_reject "$T" "altered query_int_or signature" \
   "the ratified web.query_int_or signature is not exactly"
 
@@ -226,7 +269,8 @@ expect_reject "$T" "altered query_int_or signature" \
 # 22. A misspelled error code. Clients match on `code`, so a typo is a silent
 #     compatibility break rather than a visible failure.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/invalid_query_parameter/invalid_query_param/g' "$T/web/errors.odin"
+mutate_sed "misspelled invalid_query_parameter" "$T/web/errors.odin" \
+  's/invalid_query_parameter/invalid_query_param/g'
 expect_reject "$T" "misspelled invalid_query_parameter code" \
   "the ratified error code 'invalid_query_parameter' is missing"
 
@@ -258,7 +302,7 @@ expect_reject "$T" "encoder used by the interim dispatcher" \
 T="$(fresh_tree)"; TREES+=("$T")
 printf '\nimport _ "core:encoding/json"\n' >>"$T/web/dispatch_match.odin"
 expect_reject "$T" "encoder imported into the dispatcher" \
-  "the JSON encoder is imported outside"
+  "a WP4 dispatch file imports the JSON encoder"
 
 # 25. Response teardown exported. Response lifetime is framework business; an
 #     application must never be handed a cleanup call (ADR-014 D1).
@@ -299,22 +343,23 @@ expect_reject "$T" "field added to the general envelope" \
 # 27. `omitempty` used to omit `field`. It decides on EMPTINESS, so it would also
 #     drop a field legitimately named "" — a different contract from AMEND-2.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's|`json:"message"`|`json:"message,omitempty"`|' "$T/web/errors.odin"
+mutate_sed "omitempty in the envelope" "$T/web/errors.odin" \
+  's|`json:"message"`|`json:"message,omitempty"`|'
 expect_reject "$T" "omitempty in the envelope" \
   "omitempty is used in web/"
 
 # 28. A wrong Content-Type. Clients dispatch on it, so a silent change here is a
 #     compatibility break rather than a visible failure.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's|^CONTENT_TYPE_JSON :: "application/json"$|CONTENT_TYPE_JSON :: "text/json"|' \
-  "$T/web/response.odin"
+mutate_sed "non-canonical JSON Content-Type" "$T/web/response.odin" \
+  's|^CONTENT_TYPE_JSON :: "application/json"$|CONTENT_TYPE_JSON :: "text/json"|'
 expect_reject "$T" "non-canonical JSON Content-Type" \
   "the JSON Content-Type is not exactly"
 
 # 29. The text Content-Type losing its charset.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's|^CONTENT_TYPE_TEXT :: "text/plain; charset=utf-8"$|CONTENT_TYPE_TEXT :: "text/plain"|' \
-  "$T/web/response.odin"
+mutate_sed "text Content-Type without charset" "$T/web/response.odin" \
+  's|^CONTENT_TYPE_TEXT :: "text/plain; charset=utf-8"$|CONTENT_TYPE_TEXT :: "text/plain"|'
 expect_reject "$T" "text Content-Type without charset" \
   "the text Content-Type is not exactly"
 
@@ -361,7 +406,8 @@ expect_reject "$T" "4 MiB cap removed" \
 
 # 33. `>` weakened to `>=`, which would reject exactly 4 MiB.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/len(raw) > BODY_LIMIT/len(raw) >= BODY_LIMIT/' "$T/web/extract.odin"
+mutate_sed "cap comparison weakened to >=" "$T/web/extract.odin" \
+  's/len(raw) > BODY_LIMIT/len(raw) >= BODY_LIMIT/'
 expect_reject "$T" "cap comparison weakened to >=" \
   "exactly 4 MiB would be rejected"
 
@@ -388,13 +434,15 @@ expect_reject "$T" "parse before the cap" \
 
 # 35. Decoding with context.allocator instead of the request arena.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/request_arena_allocator(ctx)/context.allocator/' "$T/web/extract.odin"
+mutate_sed "unmarshal into context.allocator" "$T/web/extract.odin" \
+  's/request_arena_allocator(ctx)/context.allocator/'
 expect_reject "$T" "unmarshal into context.allocator" \
   "does not decode into the request arena allocator"
 
 # 36. Dropping strict .JSON mode (defaulting to JSON5).
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/unmarshal(raw, dst, .JSON, /unmarshal(raw, dst, /' "$T/web/extract.odin"
+mutate_sed "strict JSON mode dropped" "$T/web/extract.odin" \
+  's/unmarshal(raw, dst, .JSON, /unmarshal(raw, dst, /'
 expect_reject "$T" "strict JSON mode dropped" \
   "does not unmarshal in strict .JSON mode"
 
@@ -402,13 +450,15 @@ expect_reject "$T" "strict JSON mode dropped" \
 #     down through the shared `driver_cleanup`, so the mutation removes THAT
 #     call rather than the arena call it contains.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i '/driver_cleanup(&ctx)/d' "$T/web/test_support.odin"
+mutate_sed "teardown removed from the in-memory driver" "$T/web/test_support.odin" \
+  '/driver_cleanup(&ctx)/d'
 expect_reject "$T" "teardown removed from the in-memory driver" \
   "does not call driver_cleanup"
 
 # 37b. The arena release removed from inside the shared cleanup.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i '/request_arena_destroy(ctx)/d' "$T/web/serve.odin"
+mutate_sed "arena release removed" "$T/web/serve.odin" \
+  '/request_arena_destroy(ctx)/d'
 expect_reject "$T" "arena release removed from driver_cleanup" \
   "driver_cleanup does not release the request arena"
 
@@ -431,8 +481,8 @@ expect_reject "$T" "capability consumed after parse" \
 
 # 39. A public member added to the Status enum for 413.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/^\tMethod_Not_Allowed    = 405,/\tMethod_Not_Allowed    = 405,\n\tPayload_Too_Large     = 413,/' \
-  "$T/web/respond.odin"
+mutate_sed "public 413 Status member" "$T/web/respond.odin" \
+  's/^\tMethod_Not_Allowed    = 405,/\tMethod_Not_Allowed    = 405,\n\tPayload_Too_Large     = 413,/'
 expect_reject "$T" "public 413 Status member" \
   "a 413 member was added to the public Status enum"
 
@@ -468,7 +518,7 @@ expect_reject "$T" "transport importing uruquim:web" \
 T="$(fresh_tree)"; TREES+=("$T")
 printf '\nimport _ "uruquim:vendor/odin-http"\n' >>"$T/web/serve.odin"
 expect_reject "$T" "backend imported into web/" \
-  "the vendored backend is imported outside"
+  "the vendored backend must be imported by exactly one file"
 
 # 44. A backend type in an EXPORTED signature. G-06 already bans
 #     transport-shaped names in exported declarations; this proves it fires.
@@ -485,8 +535,8 @@ expect_reject "$T" "serve_with added to the public surface" \
 
 # 46. A public member added to Status for 413 — still banned after WP8.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/^\tMethod_Not_Allowed    = 405,/\tMethod_Not_Allowed    = 405,\n\tPayload_Too_Large     = 413,/' \
-  "$T/web/respond.odin"
+mutate_sed "public 413 Status member" "$T/web/respond.odin" \
+  's/^\tMethod_Not_Allowed    = 405,/\tMethod_Not_Allowed    = 405,\n\tPayload_Too_Large     = 413,/'
 expect_reject "$T" "public 413 Status member after WP8" \
   "a 413 member was added to the public Status enum"
 
@@ -535,43 +585,114 @@ expect_reject "$T" "transport importing uruquim:web (WP9)" \
   "web/internal/transport imports uruquim:web"
 
 # 52. HEAD->GET re-enabled. The backend must not rewrite a method before the
-#     core decides (WP9 D7).
+#     core decides (WP9 D7). The adapter is addressed the way the checker
+#     addresses it — as the one file importing the backend — so renaming it
+#     breaks neither the guardrail nor this probe.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/opts.redirect_head_to_get = false/opts.redirect_head_to_get = true/' \
-  "$T/web/internal/transport/odin_http_adapter.odin"
+T_ADAPTER="$(grep -rlE '"uruquim:vendor/odin-http"' "$T/web/internal/transport" | head -1)"
+test -n "$T_ADAPTER" || fail "BROKEN PROBE ('HEAD->GET re-enabled'): no adapter found in the copied tree"
+mutate_sed "HEAD->GET re-enabled" "$T_ADAPTER" \
+  's/opts.redirect_head_to_get = false/opts.redirect_head_to_get = true/'
 expect_reject "$T" "HEAD->GET re-enabled" \
   "redirect_head_to_get must stay false"
 
 # 53. The backend's automatic 100-continue re-enabled, which would make the
 #     server answer "continue" and then wait for a body (WP9 D5).
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i 's/opts.auto_expect_continue = false/opts.auto_expect_continue = true/' \
-  "$T/web/internal/transport/odin_http_adapter.odin"
+T_ADAPTER="$(grep -rlE '"uruquim:vendor/odin-http"' "$T/web/internal/transport" | head -1)"
+test -n "$T_ADAPTER" || fail "BROKEN PROBE ('automatic 100-continue re-enabled'): no adapter found in the copied tree"
+mutate_sed "automatic 100-continue re-enabled" "$T_ADAPTER" \
+  's/opts.auto_expect_continue = false/opts.auto_expect_continue = true/'
 expect_reject "$T" "automatic 100-continue re-enabled" \
   "auto_expect_continue must stay false"
 
-# 54. The CL+TE rejection reverted to upstream's silent repair.
-T="$(fresh_tree)"; TREES+=("$T")
-python3 - "$T/web/../vendor/odin-http/request.odin" <<'PY2'
-import sys
-p = sys.argv[1]; s = open(p).read()
-old = 'if headers_has_unsafe(headers^, "transfer-encoding") && headers_has_unsafe(headers^, "content-length") {\n\t\treturn false\n\t}'
-assert old in s, "MUTATION-SETUP: the CL+TE rejection was not found"
-open(p, "w").write(s.replace(old, 'if headers_has_unsafe(headers^, "transfer-encoding") && headers_has_unsafe(headers^, "content-length") {\n\t\theaders_delete_unsafe(headers, "content-length")\n\t}', 1))
-PY2
-expect_reject "$T" "CL+TE silently repaired instead of rejected" \
-  "CL+TE must be rejected"
+# 54-55. (RETIRED IN WP16.) These asserted the vendor patches by grepping the
+#     vendor sources for their exact code shape — the same over-specification
+#     audit A-10 flagged: a correct re-application spelled differently failed,
+#     while an unrelated matching line elsewhere passed. The patches are now
+#     held by EXECUTABLE evidence: reverting one fails the raw-wire corpus run
+#     in build/check.sh (two of the reversions crash the server, which is what
+#     the corpus observes), and deleting the corpus case that observes it is
+#     rejected statically — case 56 below proves that rejection fires.
 
-# 55. The Content-Length digit check removed, which reinstates the negative-
-#     length crash.
+# 56. A vendor-patch corpus case deleted from the wire corpus. The static half
+#     of the WP16 vendor-patch evidence: the corpus must keep carrying a named
+#     case per patch, or a reversion would go unobserved.
 T="$(fresh_tree)"; TREES+=("$T")
-python3 - "$T/vendor/odin-http/body.odin" <<'PY2'
-import sys
-p = sys.argv[1]; s = open(p).read()
-assert "_is_plain_decimal" in s, "MUTATION-SETUP: the digit guard was not found"
-open(p, "w").write(s.replace("_is_plain_decimal", "_removed_guard"))
-PY2
-expect_reject "$T" "Content-Length digit validation removed" \
-  "Content-Length must be validated as plain decimal"
+mutate_sed "vendor-patch corpus case deleted" \
+  "$T/tests/support/transport_conformance/corpus.odin" \
+  '/name = "CL+TE is rejected (smuggling vector)",/d'
+expect_reject "$T" "vendor-patch corpus case deleted" \
+  "the raw-wire corpus no longer carries the case"
 
-echo "PASS: WP9 mutation checks (7 forbidden conformance states all rejected)"
+echo "PASS: WP9 mutation checks (6 forbidden conformance states all rejected; the two vendor code-shape cases are retired to the executable corpus)"
+
+# ---------------------------------------------------------------------------
+# WP16 mutation checks — the DERIVED contracts must still reject what the old
+# enumerated ones rejected, and legal refactors must now be ACCEPTED. Both
+# directions are contract: a gate that fails honest refactors gets bypassed,
+# and a gate that stops rejecting strays has quietly died.
+# ---------------------------------------------------------------------------
+
+# 57. A stray file that declares no ledger. This is what replaces the old
+#     filename list: legitimacy travels with the file, and a file that does
+#     not declare itself does not ship.
+T="$(fresh_tree)"; TREES+=("$T")
+printf 'package web\n\n@(private)\noops :: proc() {}\n' >"$T/web/oops.odin"
+expect_reject "$T" "stray web/oops.odin with no ledger marker" \
+  "declares no ledger"
+
+# 57b. A stray file in the machinery, equally unclassified.
+T="$(fresh_tree)"; TREES+=("$T")
+printf 'package web_testing\n\n@(private)\noops :: proc() {}\n' >"$T/web/testing/oops.odin"
+expect_reject "$T" "stray web/testing/oops.odin with no machinery marker" \
+  "markers; exactly one is required"
+
+# 57c. A file carrying BOTH ledger markers — the two counts must never overlap.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '// uruquim:file test-support\n' >>"$T/web/serve.odin"
+expect_reject "$T" "web/serve.odin marked with both ledgers" \
+  "ledger markers; exactly one is required"
+
+# 58. REFACTOR CONTROL: renaming response_commit's private parameters. This is
+#     the WP16 point — the commit primitive's SHAPE is contract, its private
+#     parameter names are not.
+T="$(fresh_tree)"; TREES+=("$T")
+#     (This suite is static text analysis, so only the declaration line needs
+#     the rename for the control to mean what it claims.)
+mutate_sed "private parameter rename in response_commit" "$T/web/response.odin" \
+  -E 's/^response_commit :: proc\(res: \^Response, status: Status, headers: \[\]Header_Pair, body: \[\]u8\) -> bool \{$/response_commit :: proc(target: ^Response, code: Status, header_pairs: []Header_Pair, payload: []u8) -> bool {/'
+expect_accept "$T" "private parameter rename in response_commit"
+
+# 58b. REFACTOR CONTROL: renaming dispatch's private parameters.
+T="$(fresh_tree)"; TREES+=("$T")
+mutate_sed "private parameter rename in dispatch" "$T/web/dispatch_match.odin" \
+  -E 's/^dispatch :: proc\(a: \^App, ctx: \^Context\) \{$/dispatch :: proc(the_app: ^App, request_ctx: ^Context) {/'
+expect_accept "$T" "private parameter rename in dispatch"
+
+# 59. REFACTOR CONTROL: a vendor patch re-applied in a different but equivalent
+#     spelling. The evidence for the patch is the wire corpus, not the byte
+#     shape of the fix, so `if len(token) != 0 {` rewritten as
+#     `if len(token) > 0 {` must pass the static gate.
+T="$(fresh_tree)"; TREES+=("$T")
+mutate_sed "vendor patch respelled equivalently" "$T/vendor/odin-http/body.odin" \
+  's/if len(token) != 0 {/if len(token) > 0 {/'
+expect_accept "$T" "vendor patch respelled equivalently"
+
+# 60. REFACTOR CONTROL: a marked application file split out of an existing one.
+#     The derived file set accepts a new file that declares its ledger; the
+#     ledger diffs still bound what it may export.
+T="$(fresh_tree)"; TREES+=("$T")
+printf 'package web\n// uruquim:file application\n\n@(private)\nwp16_split_helper :: proc() {}\n' \
+  >"$T/web/errors_split.odin"
+expect_accept "$T" "new marked application file (a split), exporting nothing"
+
+# 61. A ratified symbol deleted from the package. The ledger is exact in BOTH
+#     directions: losing a frozen symbol is as much a break as gaining one.
+T="$(fresh_tree)"; TREES+=("$T")
+mutate_sed "ratified symbol deleted from the package" "$T/web/errors.odin" \
+  '/^unauthorized :: proc/d'
+expect_reject "$T" "ratified symbol deleted from the package" \
+  "web/ is missing part of the ratified Phase-1 surface"
+
+echo "PASS: WP16 mutation checks (5 stray/overlap/deletion states rejected, 4 refactor controls accepted)"

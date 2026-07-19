@@ -13,6 +13,7 @@
 // package-private file and `build/check_public_api.sh` permits this one extra
 // name (WP7 D1).
 package web
+// uruquim:file application
 
 import "core:mem"
 

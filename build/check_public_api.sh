@@ -34,46 +34,35 @@ fail() {
 }
 
 # ---------------------------------------------------------------------------
-# Expected web/ files: the seven WP1 files plus the three WP2 files. Anything
-# else under web/ is scope creep or a later work package starting early.
+# The web/ file-set contract — DERIVED, not enumerated (WP16, audit A-6).
 #
-# NO TEST FILE APPEARS HERE, and none ever may: see section 0.
+# Phase 1 pinned an exact filename list here, which made every honest refactor
+# (splitting errors.odin, adding a ratified Phase-2 file) a gate edit. The
+# contract was never really "these thirteen names": it is that every file in
+# the shipped package DECLARES WHICH LEDGER IT BELONGS TO, so the two ledgers
+# can be scanned without a hand-maintained list and a stray file cannot slide
+# in unclassified. Each top-level web/*.odin therefore carries exactly one
+# marker line, directly under its package declaration:
 #
-# WP2 adds request.odin, response.odin and headers.odin (planning/phase-1-plan.md §WP2).
-# It does NOT add a transport, a dispatch table, or a testing subpackage.
+#     // uruquim:file application     (application-ledger surface + internals)
+#     // uruquim:file test-support    (the G-11 test-support facade)
 #
-# WP3 adds exactly one top-level file, `test_support.odin` (the public
-# test-support facade), and exactly one subdirectory, `web/testing/` (the
-# machinery). No other top-level file and no other subdirectory is permitted.
-# ---------------------------------------------------------------------------
+# and each web/testing/*.odin carries:
 #
-# WP4 adds exactly TWO top-level files, `dispatch_table.odin` and
-# `dispatch_match.odin`, and NO subdirectory. Every declaration in them is
-# package-private, so the application ledger stays at exactly 32.
+#     // uruquim:file test-machinery
 #
-# The original plan proposed `web/internal/dispatch/*.odin`. That is refuted by
-# the language: in Odin a subdirectory is a separate package, and the dispatcher
-# must name `App`, `Handler`, `Context`, `Method` and the internal `Response` —
-# so a subpackage would have to import `uruquim:web`, the back-edge WP3 already
-# ratified as a compile cycle (probe C5). The checker is therefore extended by
-# exactly two file names; it is NOT relaxed to accept subdirectories or
-# arbitrary files (planning/phase-1-plan.md §WP4 D2).
-URUQUIM_TEST_SUPPORT_FILE="test_support.odin"
-URUQUIM_EXPECTED_APP_FILES="app.odin
-context.odin
-dispatch_match.odin
-dispatch_table.odin
-errors.odin
-extract.odin
-headers.odin
-request.odin
-request_arena.odin
-respond.odin
-response.odin
-routing.odin
-serve.odin"
-URUQUIM_EXPECTED_FILES="$URUQUIM_EXPECTED_APP_FILES
-$URUQUIM_TEST_SUPPORT_FILE"
+# A file with no marker, two markers, or a marker foreign to its directory
+# fails this gate: legitimacy travels WITH the file, so splitting a file or
+# adding a ratified one needs no build/ edit, while web/oops.odin dropped in
+# without declaring itself is still rejected. What keeps this honest is that
+# the marker never decides what may be EXPORTED — the two-way ledger diffs
+# below still pin every public symbol exactly, in both directions.
+#
+# NO TEST FILE may appear in the shipped package regardless of marker: see
+# section 0. Subdirectory structure stays exact: only web/testing/ (WP3) and
+# web/internal/transport/ (WP8) exist.
+URUQUIM_FILE_MARKER_RE='// uruquim:file (application|test-support)'
+URUQUIM_MACHINERY_MARKER='// uruquim:file test-machinery'
 
 # ---------------------------------------------------------------------------
 # Expected Phase-1 exported surface after WP2 — 7 types + 25 procedures = 32.
@@ -142,6 +131,34 @@ destroy"
 
 test -d "$URUQUIM_WEB" || fail "web/ does not exist; WP1 has not created the public package"
 URUQUIM_TESTING="$URUQUIM_WEB/testing"
+
+# ---------------------------------------------------------------------------
+# Derive the ledger membership of every shipped file from its own marker.
+# A file that declares nothing is rejected here, before any content scan runs:
+# an unclassified file would otherwise be scanned under a ledger it never
+# claimed, and a stray file would be scanned under none.
+# ---------------------------------------------------------------------------
+URUQUIM_TS_FILES=()
+URUQUIM_APP_FILES=()
+while IFS= read -r URUQUIM_FILE; do
+  URUQUIM_MARKS="$(grep -cxE "$URUQUIM_FILE_MARKER_RE" "$URUQUIM_FILE" || true)"
+  if test "$URUQUIM_MARKS" -eq 0; then
+    fail "web/$(basename "$URUQUIM_FILE") declares no ledger. Every shipped top-level file must carry exactly one marker line — '// uruquim:file application' or '// uruquim:file test-support' — directly under its package declaration, so the two G-11 ledgers can be derived without a hand-maintained file list. A file that does not declare itself does not ship."
+  fi
+  if test "$URUQUIM_MARKS" -gt 1; then
+    fail "web/$(basename "$URUQUIM_FILE") carries $URUQUIM_MARKS ledger markers; exactly one is required, because a file scanned under both ledgers would let the two counts overlap"
+  fi
+  if grep -qx '// uruquim:file test-support' "$URUQUIM_FILE"; then
+    URUQUIM_TS_FILES+=("$URUQUIM_FILE")
+  else
+    URUQUIM_APP_FILES+=("$URUQUIM_FILE")
+  fi
+done < <(find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -name '*.odin' -type f | LC_ALL=C sort)
+
+test "${#URUQUIM_TS_FILES[@]}" -gt 0 ||
+  fail "no web/*.odin file is marked '// uruquim:file test-support'; the G-11 test-support facade is missing"
+test "${#URUQUIM_APP_FILES[@]}" -gt 0 ||
+  fail "no web/*.odin file is marked '// uruquim:file application'; the shipped package has no application surface"
 
 # Every structural scan below reads CODE, not comments: a comment that names a
 # forbidden construct in order to prohibit it must not be reported as that
@@ -217,8 +234,8 @@ if grep -lE '"core:testing"' "$URUQUIM_TESTING"/*.odin; then
   fail "web/testing/ imports core:testing; the machinery ships in every application binary and must not link the test runner"
 fi
 
-if grep -lE '"core:testing"' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE"; then
-  fail "web/$URUQUIM_TEST_SUPPORT_FILE imports core:testing; the facade ships in every application binary"
+if grep -lE '"core:testing"' "${URUQUIM_TS_FILES[@]}"; then
+  fail "the test-support facade imports core:testing; the facade ships in every application binary"
 fi
 
 if grep -nE '"uruquim:web"' "$URUQUIM_TESTING"/*.odin; then
@@ -227,7 +244,7 @@ fi
 
 # `@(init)` (with or without a run-order argument) is banned in both the facade
 # and the machinery: it would run unconditionally in every binary.
-if grep -nE '^@\(init' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" "$URUQUIM_TESTING"/*.odin; then
+if grep -nE '^@\(init' "${URUQUIM_TS_FILES[@]}" "$URUQUIM_TESTING"/*.odin; then
   fail "an @(init) proc appears in the test-support facade or machinery; the state must be zero/lazy (planning/public-api-guardrails.md G-11)"
 fi
 
@@ -244,19 +261,25 @@ fi
 # path. Neither the facade nor the machinery may import a networking package.
 # This makes "no sockets" a static property, not just a runtime observation.
 if grep -nE '"core:(net|nbio|sys)' \
-  "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" "$URUQUIM_TESTING"/*.odin; then
+  "${URUQUIM_TS_FILES[@]}" "$URUQUIM_TESTING"/*.odin; then
   fail "the test-support facade or machinery imports a networking/syscall package; the test transport must be in-memory (KB §Test transport)"
 fi
 
-# The WP3 machinery file set is exactly these three files.
-URUQUIM_TESTING_ACTUAL_FILES="$(cd "$URUQUIM_TESTING" && find . -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
-URUQUIM_TESTING_EXPECTED_FILES="$(printf 'recorder.odin\nrequest_builder.odin\ntest_transport.odin\n')"
-if test "$URUQUIM_TESTING_ACTUAL_FILES" != "$URUQUIM_TESTING_EXPECTED_FILES"; then
-  echo "--- expected web/testing/ files ---" >&2
-  echo "$URUQUIM_TESTING_EXPECTED_FILES" >&2
-  echo "--- actual web/testing/ files ---" >&2
-  echo "$URUQUIM_TESTING_ACTUAL_FILES" >&2
-  fail "web/testing/ file set does not match the WP3 machinery contract"
+# The machinery file set is DERIVED like the top-level one: every
+# web/testing/*.odin declares itself with '// uruquim:file test-machinery'.
+# The bridge-export lock below is what actually bounds the machinery's
+# surface; the marker is what keeps an unclassified stray file out.
+while IFS= read -r URUQUIM_TF; do
+  URUQUIM_TF_MARKS="$(grep -cxF "$URUQUIM_MACHINERY_MARKER" "$URUQUIM_TF" || true)"
+  if test "$URUQUIM_TF_MARKS" -ne 1; then
+    fail "web/testing/$(basename "$URUQUIM_TF") carries $URUQUIM_TF_MARKS '$URUQUIM_MACHINERY_MARKER' markers; exactly one is required — machinery files declare themselves, so a stray file cannot ship unclassified"
+  fi
+  if grep -qxE "$URUQUIM_FILE_MARKER_RE" "$URUQUIM_TF"; then
+    fail "web/testing/$(basename "$URUQUIM_TF") carries a top-level ledger marker; machinery files are '$URUQUIM_MACHINERY_MARKER' only"
+  fi
+done < <(find "$URUQUIM_TESTING" -mindepth 1 -maxdepth 1 -name '*.odin' -type f | LC_ALL=C sort)
+if find "$URUQUIM_TESTING" -mindepth 1 -maxdepth 1 -type f ! -name '*.odin' -print -quit | grep -q .; then
+  fail "web/testing/ contains a non-Odin file; the machinery ships as Odin source only"
 fi
 if test -n "$(find "$URUQUIM_TESTING" -mindepth 1 -maxdepth 1 -type d -print -quit)"; then
   fail "web/testing/ has subdirectories; the machinery is flat"
@@ -281,7 +304,7 @@ while IFS= read -r URUQUIM_FILE; do
   if head -n 20 "$URUQUIM_FILE" | grep -qx '#+private'; then
     continue
   fi
-  if test "$(basename "$URUQUIM_FILE")" = "$URUQUIM_TEST_SUPPORT_FILE"; then
+  if grep -qx '// uruquim:file test-support' "$URUQUIM_FILE"; then
     continue
   fi
   URUQUIM_PUBLIC_FILES+=("$URUQUIM_FILE")
@@ -293,25 +316,23 @@ uruquim_public_code_only() {
   sed -E 's://.*$::' "${URUQUIM_PUBLIC_FILES[@]}"
 }
 
-test -f "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" ||
-  fail "web/$URUQUIM_TEST_SUPPORT_FILE is missing; WP3 has not created the test-support facade"
-
 uruquim_testsupport_code_only() {
-  sed -E 's://.*$::' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE"
+  sed -E 's://.*$::' "${URUQUIM_TS_FILES[@]}"
 }
 
 # ---------------------------------------------------------------------------
-# 1. File set
+# 1. File set — every file classified (derived above), no non-Odin strays.
+#
+# The ledger-marker scan at the top of this script already rejected any
+# top-level *.odin file that does not declare its ledger. What remains here is
+# that nothing else ships at the top level: a stray non-Odin file in the
+# package directory is either build debris or scope creep.
 # ---------------------------------------------------------------------------
-URUQUIM_ACTUAL_FILES="$(cd "$URUQUIM_WEB" && find . -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
-URUQUIM_EXPECTED_FILES_SORTED="$(LC_ALL=C sort <<<"$URUQUIM_EXPECTED_FILES")"
-if test "$URUQUIM_ACTUAL_FILES" != "$URUQUIM_EXPECTED_FILES_SORTED"; then
-  echo "--- expected web/ files ---" >&2
-  echo "$URUQUIM_EXPECTED_FILES_SORTED" >&2
-  echo "--- actual web/ files ---" >&2
-  echo "$URUQUIM_ACTUAL_FILES" >&2
-  fail "web/ file set does not match the Phase-1 contract (WP1 seven + WP2 three + WP3 facade + WP4 two + WP7 request_arena)"
+if find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -type f ! -name '*.odin' -print -quit | grep -q .; then
+  find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -type f ! -name '*.odin' -printf '    %f\n' >&2
+  fail "web/ contains a non-Odin top-level file; the shipped package is Odin source only"
 fi
+echo "public API contract: every web/*.odin file declares its ledger (${#URUQUIM_APP_FILES[@]} application + ${#URUQUIM_TS_FILES[@]} test-support)"
 
 # WP3 added `web/testing/`; WP8 adds `web/internal/` (the private transport
 # boundary and adapter). No other subdirectory is permitted. Both are internal:
@@ -342,19 +363,27 @@ if test -d "$URUQUIM_WEB_INTERNAL"; then
     fail "web/internal/transport imports uruquim:web; the transport boundary is one-way (ADR-009 / WP8 D1)"
   fi
 
-  # Exactly ONE file may name the vendored backend: the adapter. The backend
-  # lives in the `uruquim:` collection, so the general dependency rule below
-  # cannot catch this — an import anywhere else would put a replaceable
-  # third-party type on the wrong side of the boundary (G-06 / WP8 D1).
-  URUQUIM_BACKEND_USERS="$(grep -rlE '"uruquim:vendor/odin-http"' "$URUQUIM_WEB" |
-    xargs -r -n1 basename | LC_ALL=C sort -u)"
-  if test "$URUQUIM_BACKEND_USERS" != "odin_http_adapter.odin"; then
-    echo "--- expected backend importers ---" >&2
-    echo "odin_http_adapter.odin" >&2
-    echo "--- actual ---" >&2
-    echo "$URUQUIM_BACKEND_USERS" >&2
-    fail "the vendored backend is imported outside web/internal/transport/odin_http_adapter.odin (ADR-009 / WP8 D1)"
+  # Exactly ONE file may name the vendored backend, and it must live inside
+  # web/internal/transport/ — that file IS the adapter, whatever it is named.
+  # The backend lives in the `uruquim:` collection, so the general dependency
+  # rule below cannot catch this — an import anywhere else would put a
+  # replaceable third-party type on the wrong side of the boundary
+  # (G-06 / WP8 D1). The adapter's NAME is not contract: renaming it is the
+  # first step of swapping the backend, and must not need a gate edit.
+  URUQUIM_BACKEND_USERS="$(grep -rlE '"uruquim:vendor/odin-http"' "$URUQUIM_WEB" | LC_ALL=C sort -u)"
+  URUQUIM_BACKEND_USER_COUNT="$(grep -c . <<<"$URUQUIM_BACKEND_USERS" || true)"
+  if test "$URUQUIM_BACKEND_USER_COUNT" -ne 1; then
+    echo "--- files importing the vendored backend (exactly one is permitted) ---" >&2
+    echo "${URUQUIM_BACKEND_USERS:-<none>}" >&2
+    fail "the vendored backend must be imported by exactly one file — the adapter — and it is imported by $URUQUIM_BACKEND_USER_COUNT (ADR-009 / WP8 D1)"
   fi
+  case "$URUQUIM_BACKEND_USERS" in
+    "$URUQUIM_TRANSPORT"/*.odin) : ;;
+    *)
+      fail "the vendored backend is imported outside web/internal/transport/ (by ${URUQUIM_BACKEND_USERS#"$URUQUIM_ROOT/"}); only the adapter behind the boundary may name it (ADR-009 / WP8 D1)"
+      ;;
+  esac
+  URUQUIM_ADAPTER="$URUQUIM_BACKEND_USERS"
 fi
 
 # ---------------------------------------------------------------------------
@@ -421,12 +450,12 @@ URUQUIM_TS_MISSING="$(LC_ALL=C comm -23 <(echo "$URUQUIM_TESTSUPPORT_EXPECTED_SO
 if test -n "$URUQUIM_TS_EXTRA"; then
   echo "--- unexpected test-support exports ---" >&2
   echo "$URUQUIM_TS_EXTRA" >&2
-  fail "web/$URUQUIM_TEST_SUPPORT_FILE exports outside the 2-symbol test-support ledger (planning/public-api-guardrails.md G-11)"
+  fail "the test-support facade exports outside the 2-symbol test-support ledger (planning/public-api-guardrails.md G-11)"
 fi
 if test -n "$URUQUIM_TS_MISSING"; then
   echo "--- missing test-support exports ---" >&2
   echo "$URUQUIM_TS_MISSING" >&2
-  fail "web/$URUQUIM_TEST_SUPPORT_FILE is missing part of the test-support ledger"
+  fail "the test-support facade is missing part of the test-support ledger"
 fi
 
 # `Recorded_Response` exposes exactly `status` and `body`, in that order, and NO
@@ -701,10 +730,12 @@ if test "$URUQUIM_RESPONSE_FIELDS" != "$URUQUIM_RESPONSE_EXPECTED"; then
 fi
 
 # The commit primitive records all three together, so a rejected attempt
-# cannot replace one of them while the guard blocks the others.
-grep -qE '^response_commit :: proc\(res: \^Response, status: Status, headers: \[\]Header_Pair, body: \[\]u8\) -> bool \{$' \
+# cannot replace one of them while the guard blocks the others. The parameter
+# NAMES are private and not contract (WP16): what is pinned is the shape —
+# one ^Response, one Status, one []Header_Pair, one []u8, returning bool.
+grep -qE '^response_commit :: proc\([a-z_]+: \^Response, [a-z_]+: Status, [a-z_]+: \[\]Header_Pair, [a-z_]+: \[\]u8\) -> bool \{$' \
   <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
-  fail "response_commit does not take status, headers and body together; the commit must be atomic across all three"
+  fail "response_commit does not take a Status, a []Header_Pair and a []u8 together and return bool; the commit must be atomic across all three (its private parameter names are free to change — the shape is not)"
 
 # 8e. The internal model stayed internal. Each of these must be declared, and
 #     each must be preceded by @(private) — the inventory in section 2 already
@@ -760,8 +791,10 @@ fi
 
 # 9b. `dispatch` takes the App EXPLICITLY (D3). The WP3 stub `dispatch(ctx)` had
 #     no access to the App-owned table; no pointer to App is stored on Context.
-grep -qE '^dispatch :: proc\(a: \^App, ctx: \^Context\) \{$' <<<"$URUQUIM_WP4_CODE" ||
-  fail "dispatch does not have the ratified internal signature 'dispatch :: proc(a: ^App, ctx: ^Context)' (planning/phase-1-plan.md §WP4 D3)"
+#     Its private parameter names are free to change (WP16); the shape —
+#     (^App, ^Context), in that order — is the D3 contract.
+grep -qE '^dispatch :: proc\([a-z_]+: \^App, [a-z_]+: \^Context\) \{$' <<<"$URUQUIM_WP4_CODE" ||
+  fail "dispatch does not take (^App, ^Context) explicitly, in that order; the dispatcher reaches the route table through the App argument, never through a stored back-pointer (planning/phase-1-plan.md §WP4 D3)"
 
 # 9c. The App holds no back-pointer inside the Context. A stored `^App` would
 #     make the request context outlive-sensitive and is not how dispatch reaches
@@ -812,9 +845,8 @@ grep -qx 'package web' "$URUQUIM_WP4_TESTS"/*.odin ||
 # see: the exact signatures, the absence of `#optional_ok`, and the fact that
 # neither WP6 nor WP7 started early.
 # ---------------------------------------------------------------------------
-URUQUIM_EXTRACT="$URUQUIM_WEB/extract.odin"
-test -f "$URUQUIM_EXTRACT" || fail "web/extract.odin is missing"
-URUQUIM_EXTRACT_CODE="$(sed -E 's://.*$::' "$URUQUIM_EXTRACT")"
+# The extractor checks below match the WHOLE public package rather than one
+# filename (WP16): the contract is what the code says, not which file says it.
 
 # 10a. `#optional_ok` appears NOWHERE in the shipped package (ADR-002 option B,
 #      R-07).
@@ -840,9 +872,14 @@ fi
 #
 #      A signature change is a public API change even when the symbol count is
 #      unmoved, which is precisely what the 32-symbol ledger cannot detect.
+#
+#      These match the WHOLE public package, not one filename (WP16): the
+#      signature is the contract — including its public parameter and result
+#      names, which the freeze snapshot pins too — but WHERE it is declared is
+#      an internal layout choice, free to change in a refactor.
 uruquim_expect_signature() { # exact-declaration-line label
   local decl="$1" label="$2"
-  grep -qxF "$decl {" <<<"$URUQUIM_EXTRACT_CODE" ||
+  grep -qxF "$decl {" <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
     fail "the ratified $label signature is not exactly '$decl' (planning/phase-1-plan.md §WP5)"
 }
 
@@ -866,19 +903,18 @@ uruquim_expect_signature \
 #      WP5 are GONE: keeping them would assert the absence of a delivered
 #      feature. What replaces them pins the WP6 contract instead.
 #
-#      The JSON encoder may be imported, but only by the files that render or
-#      decode: respond.odin and errors.odin marshal responses (WP6), and
-#      extract.odin decodes the request body (WP7). The dispatcher must stay
-#      encoder-free so that an application which never renders or binds a payload
-#      does not drag the marshaller in.
-URUQUIM_ENCODER_USERS="$(grep -lE '"core:encoding/json"' "$URUQUIM_WEB"/*.odin | xargs -r -n1 basename | LC_ALL=C sort)"
-URUQUIM_ENCODER_EXPECTED="$(printf 'errors.odin\nextract.odin\nrespond.odin\n')"
-if test "$URUQUIM_ENCODER_USERS" != "$URUQUIM_ENCODER_EXPECTED"; then
-  echo "--- expected core:encoding/json importers ---" >&2
-  echo "$URUQUIM_ENCODER_EXPECTED" >&2
-  echo "--- actual ---" >&2
-  echo "$URUQUIM_ENCODER_USERS" >&2
-  fail "the JSON encoder is imported outside web/{respond,errors,extract}.odin; the dispatcher must stay encoder-free (WP6 D5 / WP7)"
+#      The real WP6 D5 contract is that the DISPATCHER stays encoder-free —
+#      its automatic 404/405 bodies are compile-time constants. The old form
+#      additionally pinned the encoder-importing files by NAME
+#      (errors/extract/respond), which made splitting errors.odin a gate edit
+#      while proving nothing extra: in Odin an import anywhere in the package
+#      links the encoder regardless, so which non-dispatch file writes the
+#      `import` line is layout, not contract (WP16). What is asserted is the
+#      contract itself, on the dispatch files by name — they ARE contract
+#      (planning/phase-1-plan.md §WP4 D2) — first the import, then any
+#      marshal call (the check below).
+if grep -lE '"core:encoding/json"' "$URUQUIM_DISPATCH_TABLE" "$URUQUIM_DISPATCH_MATCH"; then
+  fail "a WP4 dispatch file imports the JSON encoder; the dispatcher stays encoder-free so the automatic 404/405 path never marshals (WP6 D5)"
 fi
 
 # The interim dispatcher must not marshal. Its 404/405 bodies are compile-time
@@ -964,17 +1000,17 @@ fi
 grep -qE '^BODY_LIMIT :: 4 \* 1024 \* 1024$' <<<"$URUQUIM_ARENA_CODE" ||
   fail "BODY_LIMIT is not exactly '4 * 1024 * 1024' (WP7 D3)"
 # The over-limit test uses `>`, never `>=`: exactly 4 MiB must be accepted.
-if grep -nE 'len\(raw\) >= BODY_LIMIT' <<<"$URUQUIM_EXTRACT_CODE"; then
+if grep -nE 'len\([a-z_]+\) >= BODY_LIMIT' <<<"$URUQUIM_WEB_PUBLIC_CODE"; then
   fail "the body cap uses '>=', so exactly 4 MiB would be rejected; it must be '>' (WP7 D3)"
 fi
-grep -qE 'len\(raw\) > BODY_LIMIT' <<<"$URUQUIM_EXTRACT_CODE" ||
+grep -qE 'len\([a-z_]+\) > BODY_LIMIT' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
   fail "web.body does not compare the body length against BODY_LIMIT with '>' (WP7 D3)"
 
 # 10d-iii. The cap is checked BEFORE the parser. `unmarshal` must appear AFTER
 #          the `len(raw) > BODY_LIMIT` guard in the source of `body`, so an
 #          over-limit body is never handed to the decoder (WP7 D3).
-URUQUIM_BODY_SRC="$(awk '/^body :: proc/{f=1} f{print} f && /^}/{exit}' <<<"$URUQUIM_EXTRACT_CODE")"
-URUQUIM_LIMIT_LINE="$(grep -nE 'len\(raw\) > BODY_LIMIT' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
+URUQUIM_BODY_SRC="$(awk '/^body :: proc/{f=1} f{print} f && /^}/{exit}' <<<"$URUQUIM_WEB_PUBLIC_CODE")"
+URUQUIM_LIMIT_LINE="$(grep -nE 'len\([a-z_]+\) > BODY_LIMIT' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
 URUQUIM_PARSE_LINE="$(grep -nE 'unmarshal\(' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
 test -n "$URUQUIM_LIMIT_LINE" -a -n "$URUQUIM_PARSE_LINE" ||
   fail "web.body must contain both the BODY_LIMIT guard and the unmarshal call (WP7 D3)"
@@ -984,15 +1020,15 @@ test "$URUQUIM_LIMIT_LINE" -lt "$URUQUIM_PARSE_LINE" ||
 # 10d-iv. Decoding is STRICT JSON. The pinned encoder's default spec is JSON5,
 #         which would accept unquoted keys, comments and single-quoted strings,
 #         so the unmarshal call must pass `.JSON` explicitly (WP7 D5).
-grep -qE 'unmarshal\(raw, dst, \.JSON,' <<<"$URUQUIM_EXTRACT_CODE" ||
+grep -qE 'unmarshal\([a-z_]+, dst, \.JSON,' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
   fail "web.body does not unmarshal in strict .JSON mode; JSON5 would be accepted (WP7 D5)"
 
 # 10d-v. Body data is decoded into the ARENA, never context.allocator directly.
 #        The unmarshal allocator must be the request arena, or nested data would
 #        outlive nothing and leak (ADR-006).
-grep -qE 'request_arena_allocator\(ctx\)' <<<"$URUQUIM_EXTRACT_CODE" ||
+grep -qE 'request_arena_allocator\(ctx\)' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
   fail "web.body does not decode into the request arena allocator (ADR-006 / WP7 D4)"
-if grep -nE 'unmarshal\([^)]*context\.allocator' <<<"$URUQUIM_EXTRACT_CODE"; then
+if grep -nE 'unmarshal\([^)]*context\.allocator' <<<"$URUQUIM_WEB_PUBLIC_CODE"; then
   fail "web.body unmarshals with context.allocator; decoded data must live in the request arena (ADR-006)"
 fi
 
@@ -1011,11 +1047,11 @@ test "$URUQUIM_CONSUME_LINE" -lt "$URUQUIM_PARSE_LINE" ||
 # (which calls response_destroy then request_arena_destroy in the D4 order), so
 # the assertion is that each driver invokes that cleanup — not that each one
 # repeats the arena call literally.
-grep -qE 'driver_cleanup\(' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" ||
-  fail "web/$URUQUIM_TEST_SUPPORT_FILE does not call driver_cleanup; the driver must free the response and the arena (WP7 D4)"
+grep -qE 'driver_cleanup\(' "${URUQUIM_TS_FILES[@]}" ||
+  fail "the test-support facade does not call driver_cleanup; the driver must free the response and the arena (WP7 D4)"
 grep -qE 'driver_cleanup\(' "$URUQUIM_WEB/serve.odin" ||
   fail "web/serve.odin does not call driver_cleanup; the real transport must free the response and the arena (WP7 D4)"
-grep -qE 'request_arena_destroy\(ctx\)' "$URUQUIM_WEB/serve.odin" ||
+sed -E 's://.*$::' "$URUQUIM_WEB/serve.odin" | grep -qE 'request_arena_destroy\([a-z_]+\)' ||
   fail "driver_cleanup does not release the request arena (WP7 D4)"
 
 # 10d-viii. NO configurable body limit, replay, or cache entered the package.
@@ -1068,7 +1104,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
     fail "the WP5 negative probe '$URUQUIM_PROBE_FILE.odin' is missing; ADR-002 would be unenforced"
 done
 
-echo "public API contract: web/ file set matches the Phase-1 contract through WP3"
+echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
 echo "public API contract: application ledger 32 + test-support ledger 2 = union 34"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
@@ -1078,7 +1114,7 @@ echo "public API contract: WP4 dispatch files export nothing; dispatch takes the
 echo "public API contract: Allow is exactly 'Allow' in canonical GET, POST, PUT, PATCH, DELETE order"
 echo "public API contract: no radix/wildcard/middleware construct entered the interim dispatcher"
 echo "public API contract: the five extractor signatures are exact and carry no #optional_ok"
-echo "public API contract: the JSON encoder is imported only by respond.odin and errors.odin"
+echo "public API contract: the dispatcher neither imports the JSON encoder nor marshals"
 echo "public API contract: response ownership and the envelope machinery stayed internal"
 echo "public API contract: Content-Type values are exact and 'field' is omitted by type"
 # ---------------------------------------------------------------------------
@@ -1087,8 +1123,10 @@ echo "public API contract: Content-Type values are exact and 'field' is omitted 
 # WP9 is test-only work plus a hardened adapter. These pin the properties the
 # conformance suites rely on but cannot themselves observe.
 # ---------------------------------------------------------------------------
-URUQUIM_ADAPTER="$URUQUIM_WEB/internal/transport/odin_http_adapter.odin"
-test -f "$URUQUIM_ADAPTER" || fail "the WP8 adapter is missing"
+# The adapter was DERIVED in section 1 as the single file that imports the
+# vendored backend; its filename is not contract (WP16).
+test -n "${URUQUIM_ADAPTER:-}" ||
+  fail "no adapter was derived; no file under web/internal/transport/ imports the vendored backend, so the WP8 adapter is missing"
 URUQUIM_ADAPTER_CODE="$(sed -E 's://.*$::' "$URUQUIM_ADAPTER")"
 
 # 11a. The backend must not rewrite a method before the core decides (D7), and
@@ -1098,19 +1136,46 @@ grep -qE 'opts\.redirect_head_to_get = false' <<<"$URUQUIM_ADAPTER_CODE" ||
 grep -qE 'opts\.auto_expect_continue = false' <<<"$URUQUIM_ADAPTER_CODE" ||
   fail "auto_expect_continue must stay false; Expect is refused with 417, never auto-continued (WP9 D5)"
 
-# 11b. The vendored framing patches must stay applied. Each corresponds to a
-#      raw-wire corpus case that FAILED before it, and two of them fix remote
-#      denial-of-service crashes.
-URUQUIM_VENDOR="$URUQUIM_ROOT/vendor/odin-http"
-grep -qE '_is_plain_decimal' "$URUQUIM_VENDOR/body.odin" ||
-  fail "Content-Length must be validated as plain decimal; without it a negative length crashes the server (WP9 D2)"
-grep -qE 'if len\(token\) != 0 \{' "$URUQUIM_VENDOR/body.odin" ||
-  fail "a chunk without CRLF must be rejected, not asserted; the assertion crashes the server (WP9 D3)"
-if grep -qE 'headers_delete_unsafe\(headers, "content-length"\)' "$URUQUIM_VENDOR/request.odin"; then
-  fail "CL+TE must be rejected, not repaired by deleting Content-Length; repairing it is a smuggling vector (WP9 D2)"
-fi
-grep -qE 'method_raw' "$URUQUIM_VENDOR/http.odin" ||
-  fail "the original method token must be preserved so an unknown method reaches the core (WP9 D7)"
+# 11b. The five vendored framing patches are held by EXECUTABLE evidence, not
+#      by the shape of their code (WP16, audit A-10).
+#
+#      The old form of this section grepped the vendor sources for the exact
+#      spelling of each patch — so a correct re-application written as
+#      `if len(token) > 0 {` failed the gate, while an unrelated line that
+#      happened to match passed it. Code-shape greps prove spelling, not
+#      behaviour. The real evidence is the raw-wire corpus: every one of the
+#      five patches exists because a corpus case FAILED before it, and the
+#      corpus runs against the real adapter on every gate run
+#      (build/check.sh, the wp9-wire step). Reverting a patch therefore fails
+#      the gate BEHAVIOURALLY — two of the reversions crash the server
+#      process, which is exactly what the corpus observes.
+#
+#      What a behavioural check cannot see is the corpus case being DELETED
+#      together with the reversion. So the static assertion that remains is
+#      coverage: the corpus must keep carrying a named case for each of the
+#      five patches (vendor/odin-http/VENDOR.md §Local patches). Deleting the
+#      case is caught here; reverting the patch is caught by the run.
+URUQUIM_WIRE_CORPUS="$URUQUIM_ROOT/tests/support/transport_conformance/corpus.odin"
+test -f "$URUQUIM_WIRE_CORPUS" ||
+  fail "tests/support/transport_conformance/corpus.odin is missing; the raw-wire corpus is the executable evidence behind the five vendor patches"
+uruquim_expect_wire_case() { # case-name patch-description
+  grep -qF "name = \"$1\"," "$URUQUIM_WIRE_CORPUS" ||
+    fail "the raw-wire corpus no longer carries the case \"$1\" — the executable evidence for the vendor patch '$2' (vendor/odin-http/VENDOR.md §Local patches). The patch is held by this case failing before it and passing after it; without the case, reverting the patch would go unobserved."
+}
+uruquim_expect_wire_case "negative Content-Length is rejected" \
+  "Content-Length must be a whole non-negative decimal (patch 1, remote DoS)"
+uruquim_expect_wire_case "chunk without CRLF is rejected" \
+  "a malformed chunk is rejected, not asserted (patch 2, remote DoS)"
+uruquim_expect_wire_case "CL+TE is rejected (smuggling vector)" \
+  "Content-Length + Transfer-Encoding is rejected, not repaired (patch 3)"
+uruquim_expect_wire_case "duplicate identical Content-Length is rejected" \
+  "any repeated Content-Length is rejected (patch 4)"
+uruquim_expect_wire_case "valid unknown method reaches the core, not a backend 501" \
+  "an unknown method token is preserved for the core to decide (patch 5)"
+# And the wp9-wire suite must actually execute that corpus data, or the five
+# cases above are dead text.
+grep -rqE 'wire_corpus' "$URUQUIM_ROOT/tests/wp9-wire"/*.odin ||
+  fail "tests/wp9-wire/ no longer runs the shared wire corpus; the five vendor-patch cases would be dead data"
 
 # 11c. The conformance harness is TEST-ONLY and never reaches the shipped
 #      package (WP9 D1 — this is why it is not in web/testing/).
@@ -1139,13 +1204,29 @@ grep -rqE 'transport_contract_test' "$URUQUIM_ROOT/tests/wp9-semantic-internal"/
 grep -rqE 'transport_contract_test' "$URUQUIM_ROOT/tests/wp9-semantic"/*.odin ||
   fail "the real-HTTP factory does not run the shared semantic matrix (WP9 D1)"
 
-# 11f. The socket suites must keep their timeouts: a hang is a failure, never a
-#      stalled gate.
-grep -qE 'timeout [0-9]+ env' "$URUQUIM_ROOT/build/check.sh" ||
-  fail "the socket suites lost their external timeout; a hanging adapter would stall the gate"
+# 11f. Every SOCKET suite runs under an external timeout: a hang is a failure,
+#      never a stalled gate.
+#
+#      The old form grepped its caller for the substring 'timeout [0-9]+ env',
+#      which proved only that SOME command somewhere used a timeout. This form
+#      names the contract per suite: for each socket-binding test directory,
+#      the check.sh command that invokes it (continuation lines joined) must
+#      begin under `timeout N`. wp9-semantic-internal is deliberately absent —
+#      it is the in-memory factory and binds nothing.
+URUQUIM_CHECK_SH_JOINED="$(awk '{ if (sub(/\\$/, "")) { buf = buf $0; next } print buf $0; buf = "" }' \
+  "$URUQUIM_ROOT/build/check.sh")"
+for URUQUIM_SOCKET_SUITE in wp8-socket wp9-semantic wp9-wire; do
+  URUQUIM_SUITE_INVOCATIONS="$(grep -E "\" test \".*tests/$URUQUIM_SOCKET_SUITE\"" <<<"$URUQUIM_CHECK_SH_JOINED" || true)"
+  test -n "$URUQUIM_SUITE_INVOCATIONS" ||
+    fail "build/check.sh no longer invokes the socket suite tests/$URUQUIM_SOCKET_SUITE; the transport contract it proves would go unexercised"
+  if grep -vqE 'timeout [0-9]+ ' <<<"$URUQUIM_SUITE_INVOCATIONS"; then
+    echo "$URUQUIM_SUITE_INVOCATIONS" >&2
+    fail "the socket suite tests/$URUQUIM_SOCKET_SUITE runs without an external 'timeout N' wrapper in build/check.sh; a hanging adapter would stall the gate instead of failing it"
+  fi
+done
 
 echo "public API contract: WP9 harness is test-only; both factories run the shared matrix"
-echo "public API contract: the adapter keeps HEAD and Expect under core control; framing patches are applied"
+echo "public API contract: the adapter keeps HEAD and Expect under core control; the wire corpus covers all five vendor patches"
 
 echo "public API contract: WP7 arena is private; the 4 MiB cap gates the parser; strict JSON; 413 is a private Status value"
 echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4 + WP5 + WP6 + WP7)"

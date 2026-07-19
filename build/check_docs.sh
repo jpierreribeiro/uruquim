@@ -260,8 +260,10 @@ grep -qiE '4 MiB' "$URUQUIM_AI" ||
 # 6c. The Quick Start must be real, not the WP10 placeholder.
 grep -qiE '^> Placeholder' "$URUQUIM_DOCS/quick-start.md" &&
   fail "docs/quick-start.md is still the placeholder (WP10 must replace it)"
-grep -qE 'web\.serve\(&app, 8080\)' "$URUQUIM_DOCS/quick-start.md" ||
-  fail "docs/quick-start.md does not show a runnable server"
+# The contract is "shows a runnable server", not "uses port 8080" — the
+# port number is a teaching choice, free to change without a gate edit (WP16).
+grep -qE 'web\.serve\(&app, [0-9]{1,5}\)' "$URUQUIM_DOCS/quick-start.md" ||
+  fail "docs/quick-start.md does not show a runnable server (a web.serve(&app, <port>) call)"
 
 # 6d. The Quick Start teaches no internals.
 for URUQUIM_INTERNAL in 'allocator' 'odin-http' 'radix' 'arena' 'Advanced API' \

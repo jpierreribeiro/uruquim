@@ -7,6 +7,7 @@
 // backend — the one-way boundary of ADR-009. `serve_with` and `serve_transport`
 // are Advanced API and remain absent from Phase 1.
 package web
+// uruquim:file application
 
 import "core:mem"
 import transport "uruquim:web/internal/transport"
