@@ -71,13 +71,33 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp1-public-api" \
   "-collection:uruquim=$URUQUIM_ROOT"
 
-# WP2 — the request/response model. The internal tests live inside the package
-# because `Response`, `response_commit`, `method_from_token` and `Header_Pair`
-# are package-private; the public-surface contract is checked from outside.
-echo "--- WP2 request/response model, internal behavior (odin test) ---"
+# WP2 — the request/response model.
+#
+# `Response`, `response_commit`, `method_from_token` and `Header_Pair` are
+# package-private, and on the pinned toolchain an `@(test)` procedure must be
+# compiled as part of the package it tests. Compiling those tests inside `web/`
+# would link `core:testing` into every application binary (+41,592 bytes,
+# measured on 819fdc7), so the shipped package contains no test file at all.
+#
+# Instead the gate assembles a THROWAWAY package: the real sources from `web/`
+# plus `tests/wp2-internal/`, copied into a fresh `mktemp -d` directory. The
+# tests therefore run against the genuine sources, not a stand-in. The
+# directory is removed afterwards, including when the test run fails — the trap
+# fires on the `set -e` exit. `build/check_public_api.sh` permanently forbids
+# `*_test.odin` and `core:testing` under `web/`, so this cannot regress.
+echo "--- WP2 request/response model, internal behavior (throwaway package) ---"
+URUQUIM_TMP_PKG="$(mktemp -d -t uruquim-wp2-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_TMP_PKG"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_TMP_PKG/"
+cp "$URUQUIM_ROOT"/tests/wp2-internal/*.odin "$URUQUIM_TMP_PKG/"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
-  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/web" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_TMP_PKG" \
   "-collection:uruquim=$URUQUIM_ROOT"
+rm -rf "$URUQUIM_TMP_PKG"
+trap - EXIT
+test ! -d "$URUQUIM_TMP_PKG" ||
+  fail "the throwaway internal-test package was not removed"
+echo "PASS: internal tests ran against the real sources; throwaway package removed"
 
 echo "--- WP2 public surface contract (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \

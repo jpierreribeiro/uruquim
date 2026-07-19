@@ -26,9 +26,10 @@ fail() {
 }
 
 # ---------------------------------------------------------------------------
-# Expected web/ files: the seven WP1 files, the three WP2 files, and the WP2
-# internal test file. Anything else under web/ is scope creep or a later work
-# package starting early.
+# Expected web/ files: the seven WP1 files plus the three WP2 files. Anything
+# else under web/ is scope creep or a later work package starting early.
+#
+# NO TEST FILE APPEARS HERE, and none ever may: see section 0.
 #
 # WP2 adds request.odin, response.odin and headers.odin (planning/05 §WP2).
 # It does NOT add a transport, a dispatch table, or a testing subpackage.
@@ -42,8 +43,7 @@ request.odin
 respond.odin
 response.odin
 routing.odin
-serve.odin
-wp2_internal_test.odin"
+serve.odin"
 
 # ---------------------------------------------------------------------------
 # Expected Phase-1 exported surface after WP2 — 7 types + 25 procedures = 32.
@@ -99,48 +99,55 @@ uruquim_code_only() {
 }
 
 # ---------------------------------------------------------------------------
-# 0. Test files inside the public package (WP2)
+# 0. The shipped package carries NO test code (permanent)
 #
 # `Response`, `response_commit`, `method_from_token` and `Header_Pair` are
 # package-private, and on the pinned toolchain an `@(test)` procedure must be
-# compiled as part of the package it tests, so WP2's internal tests live in
-# web/. Two properties are asserted here so that this never becomes a hole in
-# the exported-surface contract:
+# compiled as part of the package it tests. Doing that inside `web/` would link
+# `core:testing` into EVERY application binary — measured on 819fdc7 at +41,592
+# bytes for a minimal consumer (42,624 -> 84,216), against +248 bytes for
+# `core:strings`. That is exactly the hidden cost
+# `knowledge-base/02-odin-idioms-guidelines.md` forbids.
 #
-#   a. every `*_test.odin` file under web/ declares `#+private`, which makes
-#      the compiler treat ALL of its declarations as package-private. Without
-#      the directive, a test procedure is an ordinary exported symbol of `web`
-#      (measured on 819fdc7: an external package can name a declaration from a
-#      plain `*_test.odin` file, exit 0);
-#   b. `core:testing` is imported ONLY by those files, so it can never creep
-#      into a production file of the public package.
+# The internal tests therefore live in `tests/wp2-internal/`, still declaring
+# `package web`, and `build/check.sh` compiles them against the real sources in
+# a throwaway `mktemp -d` package. Both halves of that arrangement are asserted
+# here:
 #
-# The export inventory below then reads only files that are NOT `#+private`,
-# which is exactly what the compiler exports. This narrows the scan to match
-# the language; it never widens what may be exported.
+#   a. web/ contains no `*_test.odin` file and imports no `core:testing`;
+#   b. the out-of-tree internal test package exists and really is `package web`
+#      — otherwise the harness would be silently testing nothing.
+#
+# These are permanent bans, not WP2 conveniences. A future work package that
+# needs internal tests adds them to `tests/wp2-internal/` (or its own sibling),
+# never to the shipped package.
 # ---------------------------------------------------------------------------
+if find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -name '*_test.odin' -print -quit | grep -q .; then
+  fail "web/ contains a test file; internal tests belong in tests/wp2-internal/ and are compiled by build/check.sh in a throwaway package (core:testing must never reach an application binary)"
+fi
+
+if grep -lE '"core:testing"' "$URUQUIM_WEB"/*.odin; then
+  fail "web/ imports core:testing; it would be linked into every application binary (+41,592 bytes measured on 819fdc7)"
+fi
+
+URUQUIM_INTERNAL_TESTS="$URUQUIM_ROOT/tests/wp2-internal"
+test -d "$URUQUIM_INTERNAL_TESTS" ||
+  fail "tests/wp2-internal/ is missing; the internal-behavior tests have no home outside the shipped package"
+grep -qx 'package web' "$URUQUIM_INTERNAL_TESTS"/*.odin ||
+  fail "tests/wp2-internal/ does not declare 'package web'; it could not reach the package-private declarations it exists to test"
+
+# The export inventory below reads only files that are NOT `#+private`, which
+# is exactly what the compiler exports. This narrows the scan to match the
+# language; it never widens what may be exported.
 URUQUIM_PUBLIC_FILES=()
 while IFS= read -r URUQUIM_FILE; do
   if head -n 20 "$URUQUIM_FILE" | grep -qx '#+private'; then
-    case "$URUQUIM_FILE" in
-      *_test.odin) ;;
-      *) fail "$(basename "$URUQUIM_FILE") is marked '#+private' but is not a test file; production files of the public package must be readable as public API" ;;
-    esac
     continue
   fi
-  case "$URUQUIM_FILE" in
-    *_test.odin)
-      fail "$(basename "$URUQUIM_FILE") is a test file inside the public package without '#+private'; its declarations would be exported by web/"
-      ;;
-  esac
   URUQUIM_PUBLIC_FILES+=("$URUQUIM_FILE")
 done < <(find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -name '*.odin' -type f | LC_ALL=C sort)
 
 test "${#URUQUIM_PUBLIC_FILES[@]}" -gt 0 || fail "web/ contains no public production file"
-
-if grep -lE '^import[[:space:]]+.*"core:testing"' "${URUQUIM_PUBLIC_FILES[@]}"; then
-  fail "a production file of the public package imports core:testing; test-only dependencies belong in a '#+private' *_test.odin file"
-fi
 
 uruquim_public_code_only() {
   sed -E 's://.*$::' "${URUQUIM_PUBLIC_FILES[@]}"
@@ -366,6 +373,31 @@ if test "$URUQUIM_CONTEXT_FIELDS" != "$URUQUIM_CONTEXT_EXPECTED"; then
   echo "$URUQUIM_CONTEXT_FIELDS" >&2
   fail "Context must expose exactly 'request' and the private slot: no public response, params or route (ADR-008, planning/18 P-1)"
 fi
+
+# 8e-pre. The internal Response carries the minimum state WP4 depends on.
+#
+# WP4's TESTS-FIRST contract requires "405-when-other-method with exact Allow
+# header", and WP4 depends on WP2/WP3 — it lands BEFORE WP6. Without internal
+# header storage, WP4 could not express or test its own ratified contract, so
+# `headers` is WP2 state, not deferred work. `Response` does not own that
+# storage yet: headers and body are views until WP6 defines the concrete
+# allocation and lifetime of a rendered response.
+URUQUIM_RESPONSE_FIELDS="$(awk '/^Response :: struct \{/{f=1;next} /^\}/{f=0} f' \
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" | sed -E 's/^[[:space:]]*([a-z_]+):.*/\1/' | grep -v '^$')"
+URUQUIM_RESPONSE_EXPECTED="$(printf 'status\nheaders\nbody\ncommitted\n')"
+if test "$URUQUIM_RESPONSE_FIELDS" != "$URUQUIM_RESPONSE_EXPECTED"; then
+  echo "--- expected internal Response fields ---" >&2
+  echo "$URUQUIM_RESPONSE_EXPECTED" >&2
+  echo "--- actual internal Response fields ---" >&2
+  echo "$URUQUIM_RESPONSE_FIELDS" >&2
+  fail "the internal Response must carry status, headers, body and committed (planning/05 §WP2; WP4 needs the Allow header)"
+fi
+
+# The commit primitive records all three together, so a rejected attempt
+# cannot replace one of them while the guard blocks the others.
+grep -qE '^response_commit :: proc\(res: \^Response, status: Status, headers: \[\]Header_Pair, body: \[\]u8\) -> bool \{$' \
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "response_commit does not take status, headers and body together; the commit must be atomic across all three"
 
 # 8e. The internal model stayed internal. Each of these must be declared, and
 #     each must be preceded by @(private) — the inventory in section 2 already

@@ -1,16 +1,22 @@
 // WP2 internal behavior tests.
 //
-// `#+private` makes every declaration in this file package-private, so nothing
-// here enlarges the exported surface of `web`: the public inventory stays at
-// exactly 32 symbols. `build/check_public_api.sh` asserts that this directive
-// is present on every `*_test.odin` file under web/.
+// This file declares `package web` but does NOT live in `web/`, and it must
+// never be moved there. The declarations it covers — `Response`,
+// `response_commit`, `method_from_token`, `Header_Pair` — are package-private,
+// and on the pinned toolchain an `@(test)` procedure must be compiled as part
+// of the package it tests. Compiling it inside the shipped package would link
+// `core:testing` into every application binary: measured at +41,592 bytes on
+// 819fdc7, against +248 for `core:strings`.
 //
-// These tests live inside the package because the declarations they cover —
-// `Response`, `response_commit`, `method_from_token`, `Header_Pair` — are
-// package-private, and on the pinned toolchain an `@(test)` procedure must be
-// compiled as part of the package it tests. See planning/20-wp2-gate.md,
-// "Cost of in-package tests", for the measured cost this choice imposes and
-// for the follow-up it proposes.
+// So `build/check.sh` assembles a THROWAWAY package instead: it copies the
+// real sources from `web/` plus this file into a `mktemp -d` directory, runs
+// `odin test` there, and deletes the directory afterwards — including on
+// failure. The tests see the genuine sources, and the shipped package ships no
+// test code. `build/check_public_api.sh` permanently forbids `*_test.odin`
+// files and `core:testing` under `web/`, so this cannot silently regress.
+//
+// `#+private` is kept as a defensive default: if this file were ever copied
+// back into the package, its declarations still would not be exported.
 #+private
 package web
 
@@ -141,23 +147,45 @@ wp2_explicit_copy_survives_buffer_reuse :: proc(t: ^testing.T) {
 // ---------------------------------------------------------------------------
 // 3. Single-commit guard, tested on the INTERNAL primitive (port of exp-08)
 //
-// Tested directly on `response_commit`, by observing the stored status — NOT
-// through `web.json`/`web.ok`. Those helpers are inert stubs until WP6, and
-// routing a WP2 test through them would start WP6 early and would prove
-// nothing about the guard.
+// Tested directly on `response_commit`, by observing the stored status,
+// headers and body — NOT through `web.json`/`web.ok`. Those helpers are inert
+// stubs until WP6, and routing a WP2 test through them would start WP6 early
+// and would prove nothing about the guard.
+//
+// The commit records status, headers and body ATOMICALLY: a rejected attempt
+// must leave all three exactly as the first commit left them. Partial
+// overwrite — a rejected commit that nevertheless replaced the headers — is
+// the specific bug these tests exist to make impossible.
+//
+// `headers` is NOT owned by Response at this stage: it is a view, like `body`.
+// WP6 defines the concrete allocation and lifetime of a rendered response.
 // ---------------------------------------------------------------------------
 
+@(private = "file")
+WP2_JSON_HEADERS := []Header_Pair{{name = "content-type", value = "application/json"}}
+
+// The 405 shape WP4 must be able to store and assert on. WP4's TESTS-FIRST
+// contract requires "405-when-other-method with exact Allow header", and WP4
+// depends on WP2/WP3 — it lands before WP6. Without internal header storage
+// here, WP4 could not express, let alone test, its own ratified contract.
+@(private = "file")
+WP2_ALLOW_HEADERS := []Header_Pair{{name = "allow", value = "GET, POST"}}
+
 @(test)
-wp2_first_commit_is_recorded :: proc(t: ^testing.T) {
+wp2_first_commit_records_status_headers_and_body :: proc(t: ^testing.T) {
 	res: Response
 
 	testing.expect(t, !res.committed, "a fresh Response must not be committed")
+	testing.expect_value(t, len(res.headers), 0)
 
-	accepted := response_commit(&res, .OK, transmute([]u8)string("first"))
+	accepted := response_commit(&res, .OK, WP2_JSON_HEADERS, transmute([]u8)string("first"))
 
 	testing.expect(t, accepted, "the first commit must be accepted")
 	testing.expect(t, res.committed, "the first commit must set the guard")
 	testing.expect_value(t, res.status, Status.OK)
+	testing.expect_value(t, len(res.headers), 1)
+	testing.expect_value(t, res.headers[0].name, "content-type")
+	testing.expect_value(t, res.headers[0].value, "application/json")
 	testing.expect_value(t, string(res.body), "first")
 }
 
@@ -165,22 +193,72 @@ wp2_first_commit_is_recorded :: proc(t: ^testing.T) {
 wp2_second_commit_is_rejected_and_changes_nothing :: proc(t: ^testing.T) {
 	res: Response
 
-	testing.expect(t, response_commit(&res, .Bad_Request, transmute([]u8)string("envelope")))
+	testing.expect(
+		t,
+		response_commit(&res, .Bad_Request, WP2_JSON_HEADERS, transmute([]u8)string("envelope")),
+	)
 
 	// Continued handler code tries to respond again — the exact shape of the
 	// bug the guard exists to make impossible on the supported paths.
-	rejected := response_commit(&res, .OK, transmute([]u8)string("overwrite"))
+	rejected := response_commit(
+		&res,
+		.OK,
+		WP2_ALLOW_HEADERS,
+		transmute([]u8)string("overwrite"),
+	)
 
 	testing.expect(t, !rejected, "a second commit must be rejected")
-	testing.expect_value(t, res.status, Status.Bad_Request)
-	testing.expect_value(t, string(res.body), "envelope")
 	testing.expect(t, res.committed, "the guard must stay set after a rejected commit")
 
-	// A third attempt behaves identically: the guard is not a one-shot latch
-	// that opens again after it fires.
-	testing.expect(t, !response_commit(&res, .Internal_Server_Error, nil))
+	// All three survive together. A guard that kept the status but let the
+	// headers through would still be a double-write.
 	testing.expect_value(t, res.status, Status.Bad_Request)
+	testing.expect_value(t, len(res.headers), 1)
+	testing.expect_value(t, res.headers[0].name, "content-type")
+	testing.expect_value(t, res.headers[0].value, "application/json")
 	testing.expect_value(t, string(res.body), "envelope")
+
+	// A third attempt behaves identically: the guard is not a one-shot latch
+	// that opens again after it fires. Committing nil headers and a nil body
+	// must not clear what is stored either.
+	testing.expect(t, !response_commit(&res, .Internal_Server_Error, nil, nil))
+	testing.expect_value(t, res.status, Status.Bad_Request)
+	testing.expect_value(t, len(res.headers), 1)
+	testing.expect_value(t, res.headers[0].value, "application/json")
+	testing.expect_value(t, string(res.body), "envelope")
+}
+
+@(test)
+wp2_commit_stores_headers_a_405_needs :: proc(t: ^testing.T) {
+	// WP2 stores the header; it does NOT decide that a 405 is warranted. The
+	// decision, the Allow value, and the dispatch that produces them are WP4.
+	res: Response
+
+	testing.expect(
+		t,
+		response_commit(&res, .Method_Not_Allowed, WP2_ALLOW_HEADERS, nil),
+	)
+
+	testing.expect_value(t, res.status, Status.Method_Not_Allowed)
+	testing.expect_value(t, res.headers[0].name, "allow")
+	testing.expect_value(t, res.headers[0].value, "GET, POST")
+	testing.expect_value(t, len(res.body), 0)
+}
+
+@(test)
+wp2_commit_headers_are_views_not_copies :: proc(t: ^testing.T) {
+	// Response does not own the header storage at this stage: it aliases what
+	// the caller supplied, exactly as `body` does. WP6 defines the concrete
+	// allocation and lifetime of a rendered response.
+	pairs := make([]Header_Pair, 1)
+	defer delete_slice(pairs)
+	pairs[0] = Header_Pair{name = "content-type", value = "text/plain"}
+
+	res: Response
+	testing.expect(t, response_commit(&res, .OK, pairs, nil))
+
+	pairs[0].value = "application/json"
+	testing.expect_value(t, res.headers[0].value, "application/json")
 }
 
 @(test)
@@ -188,10 +266,10 @@ wp2_commit_guard_is_per_response :: proc(t: ^testing.T) {
 	first: Response
 	second: Response
 
-	testing.expect(t, response_commit(&first, .OK, transmute([]u8)string("a")))
+	testing.expect(t, response_commit(&first, .OK, nil, transmute([]u8)string("a")))
 	testing.expect(
 		t,
-		response_commit(&second, .Created, transmute([]u8)string("b")),
+		response_commit(&second, .Created, nil, transmute([]u8)string("b")),
 		"one committed response must not block a different response",
 	)
 
@@ -206,9 +284,10 @@ wp2_context_carries_an_uncommitted_response :: proc(t: ^testing.T) {
 	// The response state reached through the Context is the same primitive,
 	// with the same guard. WP2 wires no public path onto it; WP6 does.
 	testing.expect(t, !ctx.private.response.committed)
-	testing.expect(t, response_commit(&ctx.private.response, .No_Content, nil))
-	testing.expect(t, !response_commit(&ctx.private.response, .OK, nil))
+	testing.expect(t, response_commit(&ctx.private.response, .No_Content, nil, nil))
+	testing.expect(t, !response_commit(&ctx.private.response, .OK, WP2_JSON_HEADERS, nil))
 	testing.expect_value(t, ctx.private.response.status, Status.No_Content)
+	testing.expect_value(t, len(ctx.private.response.headers), 0)
 }
 
 // ---------------------------------------------------------------------------
