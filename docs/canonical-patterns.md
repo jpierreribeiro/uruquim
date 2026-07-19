@@ -5,38 +5,19 @@ recommended form. Documentation, examples, tests, and generated code use only
 these forms. If a pattern here conflicts with any other document except
 `knowledge-base/01-architecture-spec.md`, this document wins.
 
-> Status: Phase-1 canonical forms ratified at the 2026-07-18 Spec Gate.
-> Later-phase sections are design targets and become available only at their
-> marked phase gates.
+> Status: Phase-1 canonical forms, ratified and implemented.
 >
-> WP1 has compiled the Phase-1 surface: every form below is valid Odin against
-> the real `web` package on the pinned toolchain. WP1 delivered a **compiling
-> public API skeleton, not a functional server** — the procedures are inert
-> stubs until WP2–WP9. The canonical *forms* are what this document fixes, and
-> they are unchanged.
+> Every Phase-1 form below works today against the real `web` package on the
+> pinned toolchain: routing, extractors, JSON bodies, responses, the error
+> envelopes, in-memory testing, and a real HTTP server.
 >
-> WP2 added the request/response model: `Request`, `Method` and `Header_View`
-> exist and behave as described below.
+> Sections marked **Phase 2**, **Phase 3** or **Phase 4** are design targets.
+> They are NOT available today and their code blocks are marked accordingly —
+> do not copy them.
 >
-> WP4 added routing: registration, `:param` matching, static-over-parametric
-> precedence, per-method isolation, and the automatic 404/405 of `web.app()`,
-> driven in memory by `web.test_request`.
->
-> WP5 added extraction, WP6 added responses, and WP7 added body binding:
-> `web.path*`/`web.query*`, every response helper, and `web.body` all work. The
-> full handler examples below execute.
->
-> WP8 made the server real: `web.serve(&app, port)` binds a port and answers
-> HTTP, using `laytan/odin-http` internally behind a private boundary — no
-> application imports it, and it is replaceable by the future `core:net/http`
-> without touching your code. Request bodies are buffered and capped at 4 MiB by
-> the transport, so an oversized request is a 413 before the handler runs, and a
-> handler that returns without responding is a logged 500 (HTTP has no zero
-> status).
->
-> Still ahead: full HTTP conformance (WP9), configurable timeouts (Phase 3) and
-> graceful-shutdown deadlines (Phase 4). The canonical *forms* are what this
-> document fixes, and they are unchanged.
+> Still ahead: middleware, route groups and typed state (Phase 2 and Phase 3);
+> panic recovery (Phase 2); configurable limits and read/write timeouts
+> (Phase 3); graceful shutdown with a deadline (Phase 4).
 
 ## The one rule
 
@@ -65,6 +46,7 @@ transport reused its buffer, while a copy taken beforehand still reads
 The canonical form is an explicit clone with an explicit allocator, taken
 BEFORE the request ends:
 
+<!-- fragment: phase1/copy-to-persist -->
 ```odin
 import "core:slice"
 import "core:strings"
@@ -99,6 +81,7 @@ guarantee").
 
 ## Reading the request
 
+<!-- pseudocode: the request field list -->
 ```odin
 handler :: proc(ctx: ^web.Context) {
 	if ctx.request.method == .GET {   // UPPERCASE: .GET, never .Get
@@ -134,6 +117,7 @@ a substitute by reaching into the view.
 
 ## Application skeleton
 
+<!-- fragment: phase1/app-lifecycle -->
 ```odin
 package main
 
@@ -159,8 +143,9 @@ main :: proc() {
 - `web.bare()` — no defaults (advanced; not for quick starts). It routes
   exactly like `web.app()` but installs neither the 404 nor the 405, so an
   unmatched request produces no response at all.
-- `web.serve(&app, port)` — canonical. Use `web.serve_with(&app,
-  web.Serve_Config{...})` only when you need host or other options.
+- `web.serve(&app, port)` — the canonical and only entry point. It validates
+  the port, binds IPv4 Any, and blocks while the server runs. Host selection
+  and other options are a later phase.
 
 `App` owns resources and is non-copyable by contract. Keep the value returned
 by `web.app()`, pass its address, and destroy that same value exactly once.
@@ -171,6 +156,7 @@ Do not copy an `App` or destroy a copy.
 One canonical registration form per method — `web.get`, `web.post`, `web.put`,
 `web.patch`, `web.delete` — taking the app, a pattern, and a handler:
 
+<!-- fragment: phase1/routing -->
 ```odin
 web.get(&app, "/users", list_users)       // static
 web.get(&app, "/users/:id", get_user)     // one :param segment
@@ -187,6 +173,7 @@ your patterns: a route that is never reached looks exactly like a 404.
 When a static and a parametric route both match, **the static one always
 wins**, independently of registration order:
 
+<!-- pseudocode: pattern grammar -->
 ```odin
 web.get(&app, "/users/:id", get_user)
 web.get(&app, "/users/me", get_current_user)   // /users/me reaches THIS one
@@ -223,6 +210,7 @@ same 404/405 rules; it never becomes a 501.
 
 ## Handler
 
+<!-- fragment: phase1/readme-taste -->
 ```odin
 Health :: struct {
 	status: string `json:"status"`,
@@ -248,6 +236,7 @@ errors in the application and map them explicitly at the HTTP boundary.
 Extractors respond on failure themselves. The handler checks the boolean and
 returns — nothing else. There are exactly two shapes:
 
+<!-- fragment: phase1/path-int -->
 ```odin
 // 1. Value-producing extractor: (value, ok)
 id, ok := web.path_int(ctx, "id")
@@ -264,6 +253,7 @@ if !web.body(ctx, &input) {
 
 Full handler:
 
+<!-- fragment: phase1/body -->
 ```odin
 get_user :: proc(ctx: ^web.Context) {
 	id, ok := web.path_int(ctx, "id")
@@ -301,6 +291,7 @@ responded.
 
 `web.body` fills a caller-owned destination and returns `bool`:
 
+<!-- fragment: phase1/body -->
 ```odin
 Create_User :: struct {
 	name:  string `json:"name"`,
@@ -345,6 +336,7 @@ WP7 rules you must not guess at:
 
 Three canonical procedures, explicit per-type names:
 
+<!-- fragment: phase1/query -->
 ```odin
 // Plain text lookup — no automatic error response.
 search, found := web.query(ctx, "search")
@@ -408,13 +400,13 @@ lifetime above).
 | 204 | `web.no_content(ctx)` |
 | other status + JSON | `web.json(ctx, status, payload)` |
 | plain text | `web.text(ctx, status, s)` |
-| raw bytes (later phase) | `web.bytes(ctx, status, content_type, data)` |
-| redirect (later phase) | `web.redirect(ctx, .Found, url)` |
+| raw bytes — Phase 3, unavailable | `web.bytes(...)` |
+| redirect — Phase 3, unavailable | `web.redirect(...)` |
 | 400 | `web.bad_request(ctx, msg)` |
 | 401 | `web.unauthorized(ctx, msg)` |
 | 403 | `web.forbidden(ctx, msg)` |
 | 404 | `web.not_found(ctx, resource)` |
-| 409 (later phase) | `web.conflict(ctx, msg)` |
+| 409 — Phase 3, unavailable | `web.conflict(...)` |
 | 500 | `web.internal_error(ctx)` |
 
 `web.ok` is exactly `web.json(ctx, .OK, value)` and `web.created` is exactly
@@ -422,6 +414,7 @@ lifetime above).
 
 Phase-1 JSON payloads are concrete values:
 
+<!-- fragment: phase1/responses -->
 ```odin
 user: User = load_user()
 web.ok(ctx, user)       // accepted: User value
@@ -441,10 +434,11 @@ is still uncommitted. It never returns a silent 500 or a partial body.
 `web.text` sets `text/plain; charset=utf-8`; `web.no_content` sets none. There
 is no public way to set a response header in Phase 1.
 
-## Application state
+## Application state (Phase 3 — unavailable in Phase 1)
 
 > Available from Phase 3 as an Advanced API. It does not exist in Phase 1.
 
+<!-- phase: 3; unavailable -->
 ```odin
 App_State :: struct {
 	db:     ^postgres.Pool,
@@ -455,9 +449,10 @@ state := App_State{db = db, config = config}
 app := web.app_with_state(&state)
 ```
 
-`app_with_state` rejects nil. `web.state` asserts that state was registered
+`app_with_state` rejects nil. `web.state` asserts that state was registered  *(Phase 2/3 — unavailable in Phase 1.)*
 and that the requested type matches before returning the typed pointer.
 
+<!-- phase: 3; unavailable -->
 ```odin
 list_users :: proc(ctx: ^web.Context) {
 	state := web.state(ctx, App_State)
@@ -472,13 +467,14 @@ list_users :: proc(ctx: ^web.Context) {
 }
 ```
 
-## Middleware
+## Middleware (Phase 2 — unavailable in Phase 1)
 
 > Available from Phase 2. It does not exist in Phase 1. CORS is a Phase-4
 > built-in.
 
 Attach:
 
+<!-- phase: 2; unavailable -->
 ```odin
 web.use(&app,
 	web.logger(),
@@ -489,8 +485,9 @@ web.use(&app,
 )
 ```
 
-Write (a gate: allow or reject, then `web.next`):
+Write (Phase 2, unavailable — a gate: allow or reject, then `web.next`):
 
+<!-- phase: 2; unavailable -->
 ```odin
 require_auth :: proc(ctx: ^web.Context) {
 	token, found := web.bearer_token(ctx)
@@ -508,13 +505,13 @@ require_auth :: proc(ctx: ^web.Context) {
 }
 ```
 
-Returning without calling `web.next` short-circuits the chain.
+Returning without calling `web.next` short-circuits the chain (Phase 2, unavailable).
 
 Middleware gates requests, logs, and sets response metadata. It does NOT hand
 values to handlers — there is no `ctx.user_data`, no `locals`, no
 `map[string]any`, by design.
 
-## Auth / dependencies
+## Auth / dependencies (Phase 2 — unavailable in Phase 1)
 
 > This example uses `web.bearer_token`, which becomes available in Phase 2.
 > It is architectural guidance only and cannot be copied into a Phase-1 app.
@@ -522,6 +519,7 @@ values to handlers — there is no `ctx.user_data`, no `locals`, no
 When the handler needs the user, call a typed extraction procedure directly
 (same contract as extractors) — no middleware involved:
 
+<!-- phase: 2; unavailable -->
 ```odin
 current_user :: proc(ctx: ^web.Context) -> (^User, bool) {
 	token, found := web.bearer_token(ctx)
@@ -552,6 +550,7 @@ get_profile :: proc(ctx: ^web.Context) {
 Use `require_auth` middleware only for routes that must be authenticated but
 do not need the user value (typically whole groups):
 
+<!-- phase: 2; unavailable -->
 ```odin
 admin := web.group(&app, "/admin")
 web.use(&admin, require_auth)
@@ -560,12 +559,13 @@ web.use(&admin, require_auth)
 Do not stack both on the same route — that duplicates validation. Pick the
 extractor when you need the user, the gate when you don't.
 
-## Route groups
+## Route groups (Phase 3 — unavailable in Phase 1)
 
 > Available from Phase 2. They do not exist in Phase 1.
 
 Explicit router values; no configuration callbacks:
 
+<!-- phase: 3; unavailable -->
 ```odin
 api := web.router("/api")
 
@@ -580,6 +580,7 @@ web.mount(&app, &api)
 
 ## Testing
 
+<!-- fragment: phase1/test-request -->
 ```odin
 res := web.test_request(&app, .GET, "/users/42")
 testing.expect(t, res.status == .OK)
@@ -590,6 +591,7 @@ testing.expect_value(t, res.body, `{"id":42}`)
 drives one request through the framework IN-MEMORY: no socket, no port, no
 network syscall. `Recorded_Response` has exactly two fields:
 
+<!-- fragment: phase1/test-request -->
 ```odin
 res.status  // web.Status — copied by value
 res.body    // string — a view over a copy the App owns

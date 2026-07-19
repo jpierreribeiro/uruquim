@@ -31,6 +31,7 @@ AI readability
 
 The target experience:
 
+<!-- fragment: phase1/readme-taste -->
 ```odin
 package main
 
@@ -82,24 +83,63 @@ knowledge-base/          Normative specification (read these first)
 └── 04-local-agent-system-prompt.txt
 
 docs/                    User- and agent-facing documentation
+├── quick-start.md          Start here
 ├── canonical-patterns.md   The one blessed way to do each common task
 ├── ai-context.md           Compact API reference for coding agents
-└── ...                     Remaining docs are produced by their phases
+├── errors.md               The error envelope and every Phase-1 code
+└── transport-conformance.md  How transports are proven correct
+
+examples/                Compiling Phase-1 programs (built by the gate)
+├── 01-hello-world/
+├── 02-json-api/
+└── 03-route-params/
 ```
 
 ## Status
 
-Phase-1 Spec Gate: **READY** (2026-07-18). The knowledge base is the governing
-specification; implementation follows one approved work package at a time as
-defined in `planning/phase-1-plan.md`.
+Phase 1 is implemented and gated, and is finishing its final review.
 
-WP0 is complete. GitHub Actions is not required: a tracked pre-push hook runs
-the mandatory gate, and the project VPS repeats it from a clean commit on an
-enabled systemd timer.
+**What works today**
 
-WP1 and WP2 are complete. The public package compiles with the exact
-32-symbol checkpoint and now carries the request-view and internal
-single-commit response model. It is still not a functional HTTP server:
-routing, extractors, JSON rendering, body binding and the real transport arrive
-in WP3–WP9. Current work-package status lives in
-`planning/phase-1-plan.md`.
+- A real HTTP server: `web.serve(&app, port)` binds a port and answers.
+- Routing with static and `:param` segments; static routes win over
+  parametric ones.
+- Path and query extractors that respond with a standardized `400` on bad
+  input, so handlers only check a bool and return.
+- JSON request bodies (`web.body`) with a fixed 4 MiB cap, decoded into a
+  value you own.
+- JSON, text and no-content responses, and the five error responders.
+- Standardized error envelopes, including the automatic `404` and the `405`
+  with an exact `Allow` header.
+- In-memory testing with `web.test_request` — real routing, no socket.
+- HTTP/1 conformance: ambiguous or malformed framing is rejected and the
+  connection closed, proven by a raw-wire corpus (see
+  `docs/transport-conformance.md`).
+
+**Public surface:** 32 application symbols + 2 test-support symbols = 34. That
+count is enforced by the build gate.
+
+**Not yet, and named honestly**
+
+- Middleware, route groups and typed application state — Phase 2 and Phase 3.
+- Panic recovery — Phase 2.
+- Configurable limits and read/write timeouts — Phase 3.
+- Graceful shutdown with a deadline — Phase 4.
+- Request header lookup — Phase 2.
+
+Phase 1 is usable for building and testing a JSON API. It is not yet hardened
+for unattended production exposure, and Phase 1 is not formally frozen: that is
+the WP11 gate.
+
+## Where to start
+
+- **`docs/quick-start.md`** — from nothing to a running API.
+- **`examples/01-hello-world`** — the smallest complete program.
+- **`examples/02-json-api`** — a CRUD-shaped JSON API.
+- **`examples/03-route-params`** — path params and query extractors.
+
+All three examples compile in the mandatory gate.
+
+GitHub Actions is not required: a tracked pre-push hook runs the mandatory
+gate, and the project VPS repeats it from a clean commit on an enabled systemd
+timer. Current work-package status lives in `planning/phase-1-plan.md`.

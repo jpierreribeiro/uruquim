@@ -198,18 +198,21 @@ echo "docs: no future-phase API appears in an active section"
 # 5. Canonical call-site rules, everywhere in the active docs.
 # ---------------------------------------------------------------------------
 for URUQUIM_DOC in "${URUQUIM_ACTIVE_DOCS[@]}"; do
-  URUQUIM_BODY="$(sed -E 's:^[[:space:]]*//.*::' "$URUQUIM_DOC")"
-  if grep -nE 'or_else[[:space:]]*\{' <<<"$URUQUIM_BODY"; then
-    fail "$(basename "$URUQUIM_DOC") shows an 'or_else { ... }' block, which is not valid Odin"
+  # Every rule here is scoped to CODE BLOCKS, never prose. The documents must be
+  # able to NAME a forbidden form in order to forbid it — "do not write
+  # `or_else { }`" is guidance, not a violation.
+  URUQUIM_CODE_ONLY="$(awk '/^```odin$/{inb=1;next} /^```$/{inb=0;next} inb' "$URUQUIM_DOC" |
+    sed -E 's://.*$::')"
+  if grep -nE 'or_else[[:space:]]*\{' <<<"$URUQUIM_CODE_ONLY"; then
+    fail "$(basename "$URUQUIM_DOC") shows an 'or_else { ... }' block in code, which is not valid Odin"
   fi
-  if grep -nE 'web\.(ok|created|json)\([^,)]+,[[:space:]]*&' <<<"$URUQUIM_BODY"; then
+  if grep -nE 'web\.(ok|created|json)\([^,)]+,[[:space:]]*&' <<<"$URUQUIM_CODE_ONLY"; then
     fail "$(basename "$URUQUIM_DOC") shows a POINTER payload; Phase-1 payloads are values (ADR-003)"
   fi
-  if grep -nE 'web\.(get|post|put|patch|delete)\(&app, "[^"]*", [^)]*\)\.(Get|Post)' <<<"$URUQUIM_BODY"; then
-    fail "$(basename "$URUQUIM_DOC") uses a mixed-case method member"
-  fi
-  if grep -nE '\.(Get|Post|Put|Patch|Delete)\b' <<<"$URUQUIM_BODY"; then
-    fail "$(basename "$URUQUIM_DOC") uses a mixed-case Method member; they are UPPERCASE (.GET)"
+  # Comments are stripped above, so a comment that teaches ".GET, never .Get"
+  # is not itself a violation.
+  if grep -nE '\.(Get|Post|Put|Patch|Delete)\b' <<<"$URUQUIM_CODE_ONLY"; then
+    fail "$(basename "$URUQUIM_DOC") uses a mixed-case Method member in code; they are UPPERCASE (.GET)"
   fi
 done
 echo "docs: canonical call-site rules hold in every active document"
@@ -230,7 +233,7 @@ for URUQUIM_DOC in "${URUQUIM_ACTIVE_DOCS[@]}"; do
     'body binding.*(does not work|is not implemented)' \
     'not a functional (HTTP )?server' \
     '(404|405).*(bodies are|body is) EMPTY' \
-    'zero status' \
+    '(returns|yields|is) the zero status' \
     'WP1 and WP2 are complete' \
     'production.ready'; do
     if grep -niE "$URUQUIM_STALE" <<<"$URUQUIM_BODY"; then

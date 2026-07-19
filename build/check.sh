@@ -525,6 +525,13 @@ env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_g11_tea
 
 # WP10 — the three Phase-1 examples are part of the compatibility contract:
 # they compile in this gate, or the documentation that teaches them is wrong.
+# WP10 — the documentation fragments compile. A `<!-- fragment: -->` marker in a
+# doc claims the snippet is real Phase-1 code; this is what makes that true.
+echo "--- WP10 documentation fragments (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp10-doc-fixtures" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp10-doc-fixtures"
+
 echo "--- WP10 example programs (odin build) ---"
 env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_examples.sh"
 
