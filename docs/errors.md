@@ -33,8 +33,13 @@ error. It is present for errors such as `invalid_path_parameter` and
 `invalid_query_parameter`; it is absent for general 404/405/500 responses.
 
 Initial code list: `invalid_path_parameter`, `invalid_query_parameter`,
-`invalid_json`, `body_too_large`, `not_found`, `method_not_allowed`,
-`unauthorized`, `forbidden`, `internal_error`.
+`invalid_json`, `body_too_large`, `bad_request`, `not_found`,
+`method_not_allowed`, `unauthorized`, `forbidden`, `internal_error`.
+
+> **Amendment (WP6, D4).** `bad_request` was added to the list above. The
+> public helper `web.bad_request(ctx, message)` was ratified in WP1 and needs a
+> wire code like every other error responder; the original list simply omitted
+> one. This adds no public symbol and changes no signature.
 
 Phase-1 policy:
 
