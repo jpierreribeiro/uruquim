@@ -17,11 +17,21 @@ Handler :: proc(ctx: ^Context)
 // (planning/15 G-03). Middleware-produced values reach handlers through typed
 // extraction procedures.
 //
-// WP1 declares only the private internal slot. `request`, `response`, `params`
-// and `route` are introduced by WP2 (request/response model) and WP4 (routing);
-// declaring them here would promise a lifetime and commit contract that does
-// not exist yet.
+// WP2 adds `request`. There is NO public `response` field and there never will
+// be one: the response object and its commit state are framework-internal, and
+// applications respond through the helpers (ADR-008, planning/18 P-1). Keeping
+// the API responder-only is what stops a hand-written status or `committed`
+// flag from becoming an ordinary thing for an application to do.
+//
+// `params: Params` and `route: Route_Info` are introduced by WP4 (routing);
+// declaring them here would promise a matching contract that does not exist.
+//
+// LIFETIME: `request` is a bundle of views over transport-owned storage, valid
+// only for the duration of this request. Copy explicitly to persist, and never
+// hand `ctx` or a request view to background work (planning/15 G-05).
 Context :: struct {
+	request: Request,
+
 	private: Context_Internal,
 }
 
@@ -29,11 +39,15 @@ Context :: struct {
 // It is encapsulated BY CONTRACT, not by the compiler — Odin has no per-field
 // privacy, and fields stay reachable through a public field. Do not rely on
 // this for safety guarantees (ADR-008, "Scope of the guarantee").
-// WP2 and WP4 give it real contents; WP1 contains only the contract-internal
-// slot. Request data is introduced by WP2.
+// WP2 gives it the response state, which is the only reason the slot exists
+// today. No allocator, chain cursor or transport hook is wired yet: those
+// belong to WP4, WP7 and WP8, and WP2 adds nothing it does not test.
 @(private)
 Context_Internal :: struct {
-	// WP1 skeleton marker. No allocator, chain cursor, or transport hook is
-	// wired yet; those belong to WP2, WP4 and WP8.
-	skeleton_only: bool,
+	// The single-commit guard's storage. It lives here, and not on Context,
+	// so that no application can address it as public API — reachability
+	// through `private` is accepted and is not a security boundary
+	// (ADR-008, "Scope of the guarantee"). WP6 wires the public responders
+	// onto `response_commit`; WP2 leaves it untouched by any public path.
+	response: Response,
 }
