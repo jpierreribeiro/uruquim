@@ -535,8 +535,61 @@ runs on the pinned toolchain.
 - **Objective.** semantic conformance for every transport plus wire/framing
   conformance for every real HTTP adapter.
 - **Spec.** §Three test suites; cross-phase invariant.
-- **Files.** `web/testing/conformance.odin`
-  (`transport_contract_test(t, factory)`); adapter-owned raw HTTP corpus.
+- **Files (AMENDED in WP9 — D1).** The harness lives in a TEST-ONLY area:
+  `tests/support/transport_conformance/` (the shared matrix, the
+  `Transport_Factory` and the raw-wire corpus), with the executable suites in
+  `tests/wp9-semantic/`, `tests/wp9-wire/` and `tests/wp9-public-surface/`.
+  The plan originally proposed `web/testing/conformance.odin`; that is REFUTED
+  by G-11, because the harness must import `core:testing` and `web/testing/`
+  ships inside every application binary. No `@(test)` procedure and no
+  `core:testing` import may enter `web/`, `web/testing/`,
+  `web/internal/transport/` or `vendor/`. `Transport_Factory` is test-only and
+  never joins the public `web` surface.
+- **Decisions ratified in WP9.**
+  - **D1 — three distinct layers.** The CONTRACT suite (WP1-WP8) runs on the
+    in-memory transport and is not duplicated per backend. SEMANTIC
+    conformance runs one shared matrix through two factories
+    (`memory_factory`, `odin_http_factory`) and proves the framework behaves
+    identically either way. RAW-WIRE conformance runs ONLY against real HTTP
+    adapters, because the in-memory transport has no TCP parser and therefore
+    cannot prove framing safety. The core gains no HTTP parser, no framing type
+    and no knowledge of odin-http.
+  - **D2 — strict framing (defensive HTTP/1).** The adapter REJECTS with 400
+    and closes the connection when framing is ambiguous or malformed:
+    `Content-Length` together with `Transfer-Encoding`; more than one
+    `Content-Length` EVEN IF the values are identical; a comma-list
+    `Content-Length`; a negative, `+`-signed, non-decimal or overflowing
+    length; any `Transfer-Encoding` other than a single `chunked`; `chunked`
+    that is not the final coding. Rejecting all duplicate lengths is
+    deliberately stricter than RFC-minimum: refusing is simpler and safer than
+    normalizing combinations, and Phase 1 has no reason to accept them.
+  - **D3 — chunked.** Exactly one `Transfer-Encoding: chunked`
+    (case-insensitive) is accepted. A non-hex or overflowing chunk size, a
+    truncated chunk, a missing CRLF, a missing zero terminator or a malformed
+    trailer is rejected and the connection is closed. A handler NEVER runs on a
+    partial body, and no trailing bytes are reinterpreted as a second request.
+  - **D4 — truncated fixed body.** If the connection ends before the declared
+    `Content-Length`, the handler does not run, the connection closes, no
+    second request is parsed, and cleanup happens exactly once.
+  - **D5 — `Expect: 100-continue` is rejected with 417 and the connection
+    closes.** Phase 1 implements no interim-response flow. The handler does not
+    run and the server never blocks waiting for a body. No public status or
+    helper is added, and the backend's automatic continue is disabled.
+  - **D6 — protocol errors before an Inbound exists may be answered by the
+    adapter.** This is a NARROW exception to WP8's rule that the core authors
+    every envelope: when the request line or headers are malformed there is no
+    framework-owned request yet, so the adapter may answer 400/417 (without a
+    JSON envelope) or close immediately. Whichever it does, no handler runs and
+    no later byte becomes a new request. The exact behavior is documented.
+  - **D7 — unknown methods reach the core as `.UNKNOWN`.** A valid but
+    non-Phase-1 method (`PROPFIND`) must be handed to the dispatcher, which
+    applies the ratified 404/405 policy. The backend must NOT answer 501 on its
+    own, and `HEAD`/`OPTIONS`/`PROPFIND` gain no public `Method` member.
+  - **D8 — header contract for Phase 1.** Names reach the core in ASCII
+    lowercase and values are preserved verbatim. Header ORDER is not part of
+    the contract, public header lookup remains out of Phase 1, and general
+    duplicate-header behavior is deliberately not frozen — only the
+    `Content-Length`/`Transfer-Encoding` safety rules above are.
 - **API.** internal test API.
 - **Tests first.** semantic matrix: request conversion, body lifetime, header
   normalization, response commit, connection close/stop (ports of exp-08 +
