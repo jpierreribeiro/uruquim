@@ -70,8 +70,8 @@ App_Internal :: struct {
 //
 // WP4 delivers two of them: a consistent 404 for an unmatched path, and a
 // minimal 405 — with an exact `Allow` header listing the methods registered for
-// that path — when the path exists under a different method. Both bodies are
-// EMPTY until WP6 defines the standardized error envelope.
+// that path — when the path exists under a different method. WP6 gave both the
+// standardized error envelope.
 //
 // Still NOT delivered, and not claimed: the fixed 4 MiB request-body cap (WP7),
 // panic recovery (Phase 2), configurable limits and read/write timeouts
@@ -101,12 +101,6 @@ bare :: proc() -> App {
 // registration, exactly once. It is a no-op for an application that registered
 // no route.
 //
-// WP3: releases the test-support state if `test_request` was ever used, exactly
-// once.
-//
-// WP4: releases the route table and every pattern the App cloned at
-// registration.
-//
 // WP3/G-11: releases the test-support state by calling the teardown that
 // `test_request` registered on its first call. For an application that never
 // called `test_request` the pointer is nil and this is a genuine no-op — and,
@@ -118,8 +112,8 @@ bare :: proc() -> App {
 // teardown into binaries that never test. That is the cost this indirection
 // exists to remove.
 //
-// There is still no production transport or allocator to release; those arrive
-// in WP7/WP8.
+// The request arena and the transport own no App-lifetime state, so there is
+// nothing further for `destroy` to release.
 destroy :: proc(a: ^App) {
 	routes_destroy(a)
 

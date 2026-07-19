@@ -10,8 +10,8 @@
 // commit -> stop. The record shapes here are private and may change freely when
 // a second adapter lands.
 //
-// WP8 RED: the types exist and `serve`/`request_stop` are stubs. The odin-http
-// adapter and the real event loop arrive with the VENDOR and BOOTSTRAP commits.
+// The odin-http adapter implements `serve` and `request_stop` behind these
+// types; see `odin_http_adapter.odin`.
 package transport
 
 import "core:mem"
