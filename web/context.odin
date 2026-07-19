@@ -25,7 +25,10 @@ Context :: struct {
 	private: Context_Internal,
 }
 
-// Context_Internal is package-private and unreachable from application code.
+// Context_Internal is package-private: application code cannot NAME this type.
+// It is encapsulated BY CONTRACT, not by the compiler — Odin has no per-field
+// privacy, and fields stay reachable through a public field. Do not rely on
+// this for safety guarantees (ADR-008, "Scope of the guarantee").
 // WP2 and WP4 give it real contents; in WP1 it exists only so that Context has
 // a stable shape with no public field.
 @(private)

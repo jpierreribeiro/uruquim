@@ -285,3 +285,10 @@ create_user :: proc(ctx: ^web.Context) {
   generic `query_or(ctx, name, type, default)`.
 - `web.ok(ctx, v)` == `web.json(ctx, .OK, v)`; `web.created(ctx, v)` ==
   `web.json(ctx, .Created, v)`.
+- There is no `ctx.response`. Respond only through the helpers above; the
+  response object and its commit state are framework-internal.
+- Request data is a temporary view valid only during the request. To keep a
+  string, header, param or body slice, copy it explicitly with an appropriate
+  allocator. Never hand a request view to background work.
+- There is no header lookup in Phase 1. `web.header(ctx, name)` is Phase 2 —
+  do not invent a Phase-1 substitute.

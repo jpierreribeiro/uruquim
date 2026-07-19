@@ -154,6 +154,14 @@ recommendation · documentation impact · reversibility.
 - **Decision.** **A** for buffered responses; revisit for streaming
   (out of MVP). Onion-after must not mutate a committed response — ties to
   ADR-005/C.
+- **Scope of the guarantee (amended, WP2 — planning/18).** The guard ensures
+  that the supported `web.*` response paths do not overwrite an
+  already-produced response. It is NOT a security boundary against deliberate
+  manipulation of framework internals: application and framework share one
+  program. Odin's `@(private)` hides a declaration's name, not the
+  reachability of fields through a public field, and per-field privacy is a
+  syntax error. Designs that add indirection (opaque handles, side tables) to
+  resist deliberate tampering are REJECTED as useless complexity.
 - **Doc impact.** spec §Response commit; test in WP6.
 - **Reversibility.** MEDIUM.
 

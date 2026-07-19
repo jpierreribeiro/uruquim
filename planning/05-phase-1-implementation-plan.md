@@ -60,11 +60,14 @@ runs on the pinned toolchain.
 - **Spec.** §Request/Response ownership; ADR-007/008; planning/15
   G-03/G-04/G-05.
 - **Files.** `web/request.odin`, `web/response.odin`, `web/headers.odin`.
-- **API.** `Request{method,path,query,headers,body}`, `Response{status,headers,
-  body,committed}`.
+- **API.** Public: `Request{method,path,query,headers,body}`, `Method`
+  (`UNKNOWN/GET/POST/PUT/PATCH/DELETE`), `Header_View`. Internal, NOT exported:
+  `Response{status,headers,body,committed}` and `Header_Pair`. Surface
+  checkpoint after WP2: exactly 32 symbols (29 + 3). See planning/18.
 - **Tests first.** view-aliasing + invalidation test (port of exp-06);
-  explicit persistent-copy test; single-commit test (port of exp-08); Context
-  shape test rejects dynamic/untyped storage.
+  explicit persistent-copy test; single-commit test on the INTERNAL commit
+  primitive (port of exp-08 — integration through `web.json`/`web.ok` belongs
+  to WP6); Context shape test rejects dynamic/untyped storage.
 - **Min impl.** views over a supplied buffer; `commit` guard.
 - **Done.** exp-06/08 behaviors pass as real tests.
 - **Risks.** allocator ownership wrong → R-04.
