@@ -28,6 +28,8 @@ for URUQUIM_CI_FILE in run.sh status.sh install-odin.sh; do
     fail "missing VPS verifier file: ops/ci/$URUQUIM_CI_FILE"
   bash -n "$URUQUIM_ROOT/ops/ci/$URUQUIM_CI_FILE"
 done
+grep -Fq 'cd "$URUQUIM_CI_WORK"' "$URUQUIM_ROOT/ops/ci/run.sh" ||
+  fail "VPS verifier does not compile from its clean writable archive"
 
 URUQUIM_REAL_OUTPUT="$(URUQUIM_ODIN_BIN="${URUQUIM_ODIN_BIN:-}" \
   bash "$URUQUIM_ROOT/.githooks/pre-push")" ||

@@ -40,6 +40,7 @@ git --git-dir="$URUQUIM_CI_MIRROR" archive "$URUQUIM_CI_COMMIT" |
   tar -x -C "$URUQUIM_CI_WORK"
 
 URUQUIM_CI_STARTED="$(date +%s)"
+cd "$URUQUIM_CI_WORK"
 set +e
 env URUQUIM_ODIN_BIN="$URUQUIM_ODIN_BIN" \
   bash "$URUQUIM_CI_WORK/build/check.sh" 2>&1 | tee "$URUQUIM_CI_LOG"
