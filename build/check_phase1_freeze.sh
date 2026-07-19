@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+#
+# WP11 — PHASE 1 SPEC FREEZE GATE.
+#
+# This is the gate that makes the Phase-1 freeze mean something. Every other
+# checker in build/ proves a behavior; this one proves that the SHAPE of the
+# public contract, the dependency set it rests on, and the evidence trail behind
+# it are all exactly what planning/phase-1-freeze.md says they are.
+#
+# It deliberately does NOT re-implement the checks that already exist. The
+# public-surface counter, the documentation-parity gate and the example gate are
+# invoked by build/check.sh in their own steps; duplicating their logic here
+# would create two sources of truth that can drift. What this gate adds is the
+# part nothing else covers:
+#
+#   * the FULL normalized signature of all 34 exported symbols, including every
+#     struct field, every enum member and every enum backing type, diffed
+#     against a committed snapshot;
+#   * the direct-import set of every first-party package, diffed against a
+#     committed snapshot;
+#   * the evidence matrix in the freeze manifest, with every cited file and
+#     every cited test identifier resolved against the working tree;
+#   * the absence of unfinished-work markers and future-phase vocabulary.
+#
+# A snapshot diff is the mutation probe: adding a symbol, changing an argument,
+# widening an enum, adding a field, moving a symbol between ledgers or renaming
+# anything all surface as a diff and fail the gate.
+#
+set -Eeuo pipefail
+
+URUQUIM_FREEZE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$URUQUIM_FREEZE_ROOT"
+
+URUQUIM_ODIN_BIN="${URUQUIM_ODIN_BIN:-odin}"
+URUQUIM_FREEZE_MANIFEST="planning/phase-1-freeze.md"
+URUQUIM_FREEZE_SIGNATURES="build/phase1-public-signatures.txt"
+URUQUIM_FREEZE_DEPENDENCIES="build/phase1-direct-dependencies.txt"
+
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+URUQUIM_FREEZE_TMP="$(mktemp -d -t uruquim-freeze-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_FREEZE_TMP"' EXIT
+
+# The two symbols that live in the SEPARATE test-support ledger (G-11). Every
+# other exported symbol belongs to the 32-symbol application ledger.
+URUQUIM_FREEZE_TEST_SUPPORT='^(Recorded_Response|test_request)$'
+
+# ---------------------------------------------------------------------------
+# 1-3. Public signature inventory, normalized and diffed against the snapshot.
+# ---------------------------------------------------------------------------
+#
+# The compiler is the source of truth, not a hand-maintained list. Two views are
+# needed: `-short` renders procedure signatures but collapses every type body to
+# `{...}`, while the full form expands struct fields and enum members. The
+# procedures come from the first, the types from the second.
+#
+# Normalization removes ONLY the unstable `/* file!offset */` position markers.
+# Names, types, arguments, results, genericity, field names, enum members and
+# enum backing types are all preserved verbatim: those are the contract.
+
+uruquim_freeze_generate_signatures() { # -> stdout
+  local short full
+  short="$URUQUIM_FREEZE_TMP/doc-short.txt"
+  full="$URUQUIM_FREEZE_TMP/doc-full.txt"
+
+  env -u ODIN_ROOT "$URUQUIM_ODIN_BIN" doc web -collection:uruquim=. -short \
+    >"$short" 2>"$URUQUIM_FREEZE_TMP/doc-short.err" ||
+    fail "odin doc web -short failed; see $URUQUIM_FREEZE_TMP/doc-short.err"
+  env -u ODIN_ROOT "$URUQUIM_ODIN_BIN" doc web -collection:uruquim=. \
+    >"$full" 2>"$URUQUIM_FREEZE_TMP/doc-full.err" ||
+    fail "odin doc web failed; see $URUQUIM_FREEZE_TMP/doc-full.err"
+
+  # Procedures: from the short view, body placeholder and position marker cut.
+  awk '/^\tprocedures$/{on=1;next} /^\ttypes$/{on=0} on&&/^\t\t[A-Za-z_]/{print}' "$short" \
+  | sed -E 's@ /\* [0-9]+![0-9]+ \*/@@; s@ \{\.\.\.\}$@@; s@^\t\t@@' \
+  | while IFS= read -r decl; do
+      name="${decl%% ::*}"
+      if [[ "$name" =~ $URUQUIM_FREEZE_TEST_SUPPORT ]]; then
+        printf 'test-support\tproc\t%s\n' "$decl"
+      else
+        printf 'application\tproc\t%s\n' "$decl"
+      fi
+    done
+
+  # Types: from the full view, which expands fields and enum members. The full
+  # view interleaves doc comments, so only the declaration lines are taken.
+  awk '/^\ttypes$/{on=1;next} /^\tfullpath:/{on=0} on&&/^\t\t[A-Z][A-Za-z_]* ::/{print}' "$full" \
+  | sed -E 's@ /\* [0-9]+![0-9]+ \*/@@; s@^\t\t@@' \
+  | while IFS= read -r decl; do
+      name="${decl%% ::*}"
+      if [[ "$name" =~ $URUQUIM_FREEZE_TEST_SUPPORT ]]; then
+        printf 'test-support\ttype\t%s\n' "$decl"
+      else
+        printf 'application\ttype\t%s\n' "$decl"
+      fi
+    done
+}
+
+URUQUIM_FREEZE_ACTUAL_SIG="$URUQUIM_FREEZE_TMP/signatures.actual"
+uruquim_freeze_generate_signatures | LC_ALL=C sort >"$URUQUIM_FREEZE_ACTUAL_SIG"
+
+[ -s "$URUQUIM_FREEZE_ACTUAL_SIG" ] ||
+  fail "the signature inventory came back empty; odin doc produced nothing parseable"
+
+[ -f "$URUQUIM_FREEZE_SIGNATURES" ] ||
+  fail "$URUQUIM_FREEZE_SIGNATURES is missing; the frozen signature snapshot must be committed"
+
+if ! diff -u "$URUQUIM_FREEZE_SIGNATURES" "$URUQUIM_FREEZE_ACTUAL_SIG" \
+     >"$URUQUIM_FREEZE_TMP/signatures.diff" 2>&1; then
+  echo "--- frozen signature snapshot vs. the compiler's actual output ---" >&2
+  sed 's/^/    /' "$URUQUIM_FREEZE_TMP/signatures.diff" >&2
+  fail "the exported surface no longer matches $URUQUIM_FREEZE_SIGNATURES. A symbol was added, removed, renamed, moved between ledgers, or its arguments, results, genericity, fields or enum members changed. Phase-1 contracts are frozen: this requires a spec amendment, not a snapshot refresh."
+fi
+
+# ---------------------------------------------------------------------------
+# 4. The ledgers still add up: 32 application + 2 test-support = 34.
+# ---------------------------------------------------------------------------
+URUQUIM_FREEZE_APP_COUNT="$(grep -c '^application	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"
+URUQUIM_FREEZE_TS_COUNT="$(grep -c '^test-support	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"
+URUQUIM_FREEZE_TOTAL="$(( URUQUIM_FREEZE_APP_COUNT + URUQUIM_FREEZE_TS_COUNT ))"
+
+[ "$URUQUIM_FREEZE_APP_COUNT" -eq 32 ] ||
+  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the frozen 32"
+[ "$URUQUIM_FREEZE_TS_COUNT" -eq 2 ] ||
+  fail "the test-support ledger holds $URUQUIM_FREEZE_TS_COUNT symbols, not the frozen 2"
+[ "$URUQUIM_FREEZE_TOTAL" -eq 34 ] ||
+  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the frozen 34"
+
+# ---------------------------------------------------------------------------
+# 5. Named assertions on the contracts most likely to be eroded quietly.
+# ---------------------------------------------------------------------------
+#
+# These are redundant with the snapshot diff by construction, and that is the
+# point: if someone regenerates the snapshot to make a change "pass", these
+# still fail, because they encode the DECISION rather than the current state.
+
+uruquim_freeze_expect_decl() { # description exact-line
+  grep -qxF "$2" "$URUQUIM_FREEZE_ACTUAL_SIG" ||
+    fail "$1 — expected this exact frozen declaration:
+    $2
+  It is not present in the compiler's output. See planning/phase-1-freeze.md."
+}
+
+uruquim_freeze_expect_decl "Method must stay a closed 6-member u8 enum" \
+  'application	type	Method :: enum u8 {UNKNOWN, GET, POST, PUT, PATCH, DELETE}'
+
+# 413 is a PRIVATE HTTP behavior (WP7): the transport emits it, but no public
+# Status member exists for it and none may be added.
+uruquim_freeze_expect_decl "Status must stay the closed 10-member int enum, with NO public 413" \
+  'application	type	Status :: enum int {OK = 200, Created = 201, Accepted = 202, No_Content = 204, Bad_Request = 400, Unauthorized = 401, Forbidden = 403, Not_Found = 404, Method_Not_Allowed = 405, Internal_Server_Error = 500}'
+
+uruquim_freeze_expect_decl "Handler must stay the single handler shape" \
+  'application	type	Handler :: proc(ctx: ^Context)'
+
+uruquim_freeze_expect_decl "Context must expose request only — never a response, params or extension bag" \
+  'application	type	Context :: struct {request: Request, private: Context_Internal}'
+
+uruquim_freeze_expect_decl "Request must stay the five-field view struct" \
+  'application	type	Request :: struct {method: Method, path: string, query: string, headers: Header_View, body: []u8}'
+
+uruquim_freeze_expect_decl "Header_View must stay opaque — Phase 1 ships no header lookup" \
+  'application	type	Header_View :: struct {private: Header_View_Internal}'
+
+uruquim_freeze_expect_decl "App must stay opaque" \
+  'application	type	App :: struct {private: App_Internal}'
+
+uruquim_freeze_expect_decl "Recorded_Response must carry status and body only" \
+  'test-support	type	Recorded_Response :: struct {status: Status, body: string}'
+
+# The extractors' named results are part of the contract: `value, ok` is what
+# the canonical pattern reads, and `query` returning `found` rather than `ok`
+# says presence, not validity.
+uruquim_freeze_expect_decl "path_int must keep its named (value, ok) results" \
+  'application	proc	path_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool)'
+uruquim_freeze_expect_decl "query must keep its named (value, found) results" \
+  'application	proc	query :: proc(ctx: ^Context, name: string) -> (value: string, found: bool)'
+uruquim_freeze_expect_decl "query_int must keep its named (value, ok) results" \
+  'application	proc	query_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool)'
+uruquim_freeze_expect_decl "query_int_or must keep its default argument and named results" \
+  'application	proc	query_int_or :: proc(ctx: ^Context, name: string, default_value: int) -> (value: int, ok: bool)'
+
+# Genericity is contract: these four are the only parametric procedures, and
+# `body` fills a destination while `json`/`ok`/`created` take a payload by value.
+uruquim_freeze_expect_decl "body must stay destination-filling and generic" \
+  'application	proc	body :: proc(ctx: ^Context, dst: ^$T) -> bool'
+uruquim_freeze_expect_decl "json must stay generic and take its payload by value" \
+  'application	proc	json :: proc(ctx: ^Context, status: Status, value: $T)'
+uruquim_freeze_expect_decl "ok must stay generic and take its payload by value" \
+  'application	proc	ok :: proc(ctx: ^Context, value: $T)'
+uruquim_freeze_expect_decl "created must stay generic and take its payload by value" \
+  'application	proc	created :: proc(ctx: ^Context, value: $T)'
+
+# `#optional_ok` would let a caller silently drop `ok` from a value-producing
+# extractor (ADR-002). odin doc renders the directive, so its absence is
+# checkable directly on the compiler's output.
+if grep -q '#optional_ok' "$URUQUIM_FREEZE_ACTUAL_SIG"; then
+  fail "an exported procedure carries #optional_ok. Value-producing HTTP extractors deliberately omit it (ADR-002) so that dropping \`ok\` is a compile error."
+fi
+
+# ---------------------------------------------------------------------------
+# 6-7. Direct dependency inventory, normalized and diffed against the snapshot.
+# ---------------------------------------------------------------------------
+#
+# Taken from the real import statements, per first-party package. The vendored
+# backend is inventoried as a unit rather than line by line: it is a pinned
+# third-party snapshot (vendor/odin-http/VENDOR.md), and its internal imports
+# are upstream's business, not a Uruquim contract.
+
+uruquim_freeze_generate_dependencies() { # -> stdout
+  local pkg
+  for pkg in web web/testing web/internal/transport \
+             examples/01-hello-world examples/02-json-api examples/03-route-params; do
+    # shellcheck disable=SC2012
+    grep -h -E '^[[:space:]]*import[[:space:]]' "$pkg"/*.odin 2>/dev/null \
+    | sed -E 's@^[[:space:]]*@@; s@[[:space:]]+@ @g' \
+    | sed -E 's@^import ([a-z_]+ )?"@import "@' \
+    | LC_ALL=C sort -u \
+    | while IFS= read -r imp; do printf '%s\t%s\n' "$pkg" "$imp"; done
+  done
+}
+
+URUQUIM_FREEZE_ACTUAL_DEP="$URUQUIM_FREEZE_TMP/dependencies.actual"
+uruquim_freeze_generate_dependencies >"$URUQUIM_FREEZE_ACTUAL_DEP"
+
+[ -s "$URUQUIM_FREEZE_ACTUAL_DEP" ] ||
+  fail "the dependency inventory came back empty; the import scan found nothing"
+
+[ -f "$URUQUIM_FREEZE_DEPENDENCIES" ] ||
+  fail "$URUQUIM_FREEZE_DEPENDENCIES is missing; the frozen dependency snapshot must be committed"
+
+if ! diff -u "$URUQUIM_FREEZE_DEPENDENCIES" "$URUQUIM_FREEZE_ACTUAL_DEP" \
+     >"$URUQUIM_FREEZE_TMP/dependencies.diff" 2>&1; then
+  echo "--- frozen dependency snapshot vs. the actual imports ---" >&2
+  sed 's/^/    /' "$URUQUIM_FREEZE_TMP/dependencies.diff" >&2
+  fail "the direct dependency set changed. Every dependency needs an owner and a license in planning/phase-1-freeze.md; update the manifest and the snapshot together, deliberately."
+fi
+
+# Structural invariants that must hold no matter what the snapshot says.
+grep -q '^web/testing	import "uruquim:web"' "$URUQUIM_FREEZE_ACTUAL_DEP" &&
+  fail "web/testing imports uruquim:web — that back-edge is a compile cycle (probe C5) and the one-way boundary must hold"
+grep -q '^web/internal/transport	import "uruquim:web"' "$URUQUIM_FREEZE_ACTUAL_DEP" &&
+  fail "web/internal/transport imports uruquim:web — the transport boundary is one-way (ADR-009)"
+if grep -E '^examples/' "$URUQUIM_FREEZE_ACTUAL_DEP" | grep -q 'vendor/'; then
+  fail "an example imports the vendored backend directly; applications reach HTTP only through uruquim:web"
+fi
+if grep -E '^web/(testing)?	' "$URUQUIM_FREEZE_ACTUAL_DEP" | grep -q '"core:testing"'; then
+  fail "core:testing is imported by a package that ships inside application binaries"
+fi
+if grep -q '^web/testing	import "core:net"' "$URUQUIM_FREEZE_ACTUAL_DEP"; then
+  fail "web/testing imports core:net; test_request must reach no socket at all"
+fi
+if grep -E '^web	' "$URUQUIM_FREEZE_ACTUAL_DEP" | grep -q 'vendor/'; then
+  fail "web imports the vendored backend directly; only web/internal/transport may name it (ADR-009)"
+fi
+
+# ---------------------------------------------------------------------------
+# 8. The freeze manifest, and every evidence reference it makes.
+# ---------------------------------------------------------------------------
+[ -f "$URUQUIM_FREEZE_MANIFEST" ] ||
+  fail "$URUQUIM_FREEZE_MANIFEST is missing; the Phase-1 freeze manifest is a required normative artifact"
+
+# Unfinished-work markers. A freeze manifest that still says TODO is not a
+# freeze. `\b` keeps this from firing on the sentence that defines the rule.
+for marker in TODO FIXME MISSING UNPROVEN TBD XXX; do
+  if grep -nE "(^|[^A-Za-z_\`])$marker([^A-Za-z_\`]|$)" "$URUQUIM_FREEZE_MANIFEST" \
+     | grep -vE '^\s*[0-9]+:.*forbidden marker' >"$URUQUIM_FREEZE_TMP/marker.hits"; then
+    if [ -s "$URUQUIM_FREEZE_TMP/marker.hits" ]; then
+      sed 's/^/    /' "$URUQUIM_FREEZE_TMP/marker.hits" >&2
+      fail "$URUQUIM_FREEZE_MANIFEST contains the unfinished-work marker '$marker'. A frozen contract cannot have open work in it."
+    fi
+  fi
+done
+
+# Every symbol must appear in the evidence matrix, and none may be NOT_FROZEN.
+while IFS=$'\t' read -r ledger kind decl; do
+  name="${decl%% ::*}"
+  grep -qE "(^|[^A-Za-z0-9_])\`?${name}\`?([^A-Za-z0-9_]|$)" "$URUQUIM_FREEZE_MANIFEST" ||
+    fail "the frozen symbol '$name' ($ledger) never appears in $URUQUIM_FREEZE_MANIFEST; every symbol needs its own evidence row, not blanket coverage"
+done <"$URUQUIM_FREEZE_ACTUAL_SIG"
+
+if grep -q 'NOT_FROZEN' "$URUQUIM_FREEZE_MANIFEST"; then
+  grep -n 'NOT_FROZEN' "$URUQUIM_FREEZE_MANIFEST" | sed 's/^/    /' >&2
+  fail "$URUQUIM_FREEZE_MANIFEST marks at least one symbol NOT_FROZEN. A signature without proven behavior is not frozen, and Phase 1 cannot close over it."
+fi
+
+# Every evidence citation resolves. The manifest cites evidence as
+# `path/to/file::identifier`; both halves are checked against the working tree,
+# so a deleted test or a renamed procedure fails the gate rather than rotting
+# silently into an unverifiable claim.
+URUQUIM_FREEZE_REFS="$URUQUIM_FREEZE_TMP/evidence.refs"
+grep -oE '(build|tests|examples|docs|experiments|web|planning|ops|vendor)/[A-Za-z0-9_./-]+::[A-Za-z0-9_.-]+' \
+  "$URUQUIM_FREEZE_MANIFEST" | LC_ALL=C sort -u >"$URUQUIM_FREEZE_REFS" || true
+
+URUQUIM_FREEZE_REF_COUNT="$(wc -l <"$URUQUIM_FREEZE_REFS" | tr -d ' ')"
+[ "$URUQUIM_FREEZE_REF_COUNT" -ge 34 ] ||
+  fail "$URUQUIM_FREEZE_MANIFEST carries only $URUQUIM_FREEZE_REF_COUNT resolvable evidence citations for 34 frozen symbols; the matrix is incomplete"
+
+URUQUIM_FREEZE_BAD_REFS=0
+while IFS= read -r ref; do
+  [ -n "$ref" ] || continue
+  refpath="${ref%%::*}"
+  refid="${ref##*::}"
+  if [ ! -f "$refpath" ]; then
+    echo "    broken evidence: $ref (no such file: $refpath)" >&2
+    URUQUIM_FREEZE_BAD_REFS=$(( URUQUIM_FREEZE_BAD_REFS + 1 ))
+    continue
+  fi
+  if ! grep -qF "$refid" "$refpath"; then
+    echo "    broken evidence: $ref (identifier '$refid' not found in $refpath)" >&2
+    URUQUIM_FREEZE_BAD_REFS=$(( URUQUIM_FREEZE_BAD_REFS + 1 ))
+  fi
+done <"$URUQUIM_FREEZE_REFS"
+
+[ "$URUQUIM_FREEZE_BAD_REFS" -eq 0 ] ||
+  fail "$URUQUIM_FREEZE_BAD_REFS evidence citation(s) in $URUQUIM_FREEZE_MANIFEST do not resolve. Evidence that points at a test which does not exist is worse than no evidence."
+
+# ---------------------------------------------------------------------------
+# 10. No future-phase vocabulary on the public surface.
+# ---------------------------------------------------------------------------
+#
+# Checked against the compiler's exported inventory, not the sources: a private
+# helper may legitimately be called `middleware_free`, but nothing EXPORTED may
+# carry Phase-2+ vocabulary, because that is how a future feature gets
+# accidentally promised.
+URUQUIM_FREEZE_FUTURE='middleware|group|mount|router|radix|wildcard|user_data|locals|typed_state|use_|next_|upload|static_file|openapi|websocket|stream|recover|timeout|serve_with|serve_transport|header_lookup|bearer_token'
+if cut -f3 "$URUQUIM_FREEZE_ACTUAL_SIG" | sed -E 's@ ::.*@@' \
+   | grep -qiE "^($URUQUIM_FREEZE_FUTURE)"; then
+  cut -f3 "$URUQUIM_FREEZE_ACTUAL_SIG" | sed -E 's@ ::.*@@' \
+    | grep -iE "^($URUQUIM_FREEZE_FUTURE)" | sed 's/^/    /' >&2
+  fail "an exported symbol carries future-phase vocabulary. Phase 1 must not promise a Phase 2+ feature by name."
+fi
+
+# ---------------------------------------------------------------------------
+# 11. No open blocker is still assigned to Phase 1.
+# ---------------------------------------------------------------------------
+#
+# The risk register and open-questions log are the record. An item that is still
+# a live Phase-1 obligation blocks the freeze; deferral to a later phase does
+# not, and neither does an accepted limitation.
+for planfile in planning/risk-register.md planning/open-questions.md; do
+  [ -f "$planfile" ] || fail "$planfile is missing; the freeze audit reads it"
+  if grep -nE 'OPEN_BLOCKER|BLOCKER[[:space:]]*:?[[:space:]]*(OPEN|PHASE[ -]?1)|READY_WITH_BLOCKER' "$planfile" \
+     >"$URUQUIM_FREEZE_TMP/blockers.hits" 2>/dev/null; then
+    if [ -s "$URUQUIM_FREEZE_TMP/blockers.hits" ]; then
+      sed 's/^/    /' "$URUQUIM_FREEZE_TMP/blockers.hits" >&2
+      fail "$planfile still records an open blocker assigned to Phase 1. Phase 1 cannot be frozen over an unmet Phase-1 obligation."
+    fi
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# Report.
+# ---------------------------------------------------------------------------
+echo "freeze: signatures      -> $URUQUIM_FREEZE_APP_COUNT application + $URUQUIM_FREEZE_TS_COUNT test-support = $URUQUIM_FREEZE_TOTAL, byte-identical to the snapshot"
+echo "freeze: fields/enums    -> Method(u8, 6), Status(int, 10, no 413), Handler, Context, Request, Header_View, App, Recorded_Response pinned"
+echo "freeze: extractors      -> named results pinned, no #optional_ok on any exported procedure"
+echo "freeze: dependencies    -> $(wc -l <"$URUQUIM_FREEZE_ACTUAL_DEP" | tr -d ' ') direct imports match the snapshot; boundaries one-way"
+echo "freeze: evidence matrix -> $URUQUIM_FREEZE_REF_COUNT citations resolved, all 34 symbols present, none NOT_FROZEN"
+echo "freeze: no future-phase vocabulary exported; no open Phase-1 blocker"
+echo "PASS: Phase 1 freeze gate"
