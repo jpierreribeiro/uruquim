@@ -52,6 +52,17 @@ transport_contract_test :: proc(t: ^testing.T, factory: Transport_Factory) {
 
 @(private)
 run_scenario :: proc(t: ^testing.T, factory: Transport_Factory, s: Scenario) {
+	// Give every scenario a fresh temp budget. The factories build the request,
+	// the response and the parsed headers in `context.temp_allocator`, and the
+	// default temp allocator is a RING: left to accumulate across 20 scenarios
+	// it wraps, and an earlier scenario's still-referenced headers quietly
+	// become garbage. That produced an intermittent, ~1-in-3 "header allow not
+	// found" on the real transport — a test-harness defect, not a framework one,
+	// and exactly the kind of flake that teaches people to re-run until green.
+	// Nothing from a previous scenario is needed here, so reclaiming up front is
+	// both safe and sufficient.
+	free_all(context.temp_allocator)
+
 	res := factory.exchange(factory.user, s.request)
 	if !res.ok {
 		testing.expectf(t, false, "[%s] %s: no response", factory.name, s.name)

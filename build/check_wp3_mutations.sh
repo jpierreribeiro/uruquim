@@ -398,11 +398,19 @@ sed -i 's/unmarshal(raw, dst, .JSON, /unmarshal(raw, dst, /' "$T/web/extract.odi
 expect_reject "$T" "strict JSON mode dropped" \
   "does not unmarshal in strict .JSON mode"
 
-# 37. The arena teardown removed from the driver.
+# 37. The teardown removed from a driver. AMENDED IN WP9: both drivers now tear
+#     down through the shared `driver_cleanup`, so the mutation removes THAT
+#     call rather than the arena call it contains.
 T="$(fresh_tree)"; TREES+=("$T")
-sed -i '/request_arena_destroy(&ctx)/d' "$T/web/test_support.odin"
-expect_reject "$T" "arena teardown removed from the driver" \
-  "does not call request_arena_destroy"
+sed -i '/driver_cleanup(&ctx)/d' "$T/web/test_support.odin"
+expect_reject "$T" "teardown removed from the in-memory driver" \
+  "does not call driver_cleanup"
+
+# 37b. The arena release removed from inside the shared cleanup.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i '/request_arena_destroy(ctx)/d' "$T/web/serve.odin"
+expect_reject "$T" "arena release removed from driver_cleanup" \
+  "driver_cleanup does not release the request arena"
 
 # 38. The body capability consumed AFTER the parse (allowing a second decode).
 T="$(fresh_tree)"; TREES+=("$T")
@@ -497,3 +505,73 @@ expect_reject "$T" "rawptr in an exported declaration" \
   "exports symbols outside the ratified Phase-1 surface"
 
 echo "PASS: WP8 mutation checks (7 forbidden transport states all rejected)"
+
+# ---------------------------------------------------------------------------
+# WP9 mutation checks — the conformance guardrails must REJECT the states they
+# claim to forbid. Several are structural greps over the harness and the
+# adapter; a grep that passes on a bad tree would be worse than no grep.
+# ---------------------------------------------------------------------------
+
+# 49. `core:testing` inside the SHIPPED package. The whole reason the harness
+#     lives under tests/ (WP9 D1) is that web/testing/ ships in every binary.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nimport _ "core:testing"\n' >>"$T/web/testing/recorder.odin"
+expect_reject "$T" "core:testing in the shipped test-support machinery" \
+  "web/testing/ imports core:testing"
+
+# 50. Networking added to web/testing/. The in-memory transport must never grow
+#     a socket; that is what keeps the contract suite honest about being
+#     socket-free.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nimport _ "core:net"\n' >>"$T/web/testing/recorder.odin"
+expect_reject "$T" "networking added to web/testing" \
+  "test transport must be in-memory"
+
+# 51. The transport importing web — the one-way boundary again, now that WP9
+#     added a second importer of the transport package.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nimport _ "uruquim:web"\n' >>"$T/web/internal/transport/boundary.odin"
+expect_reject "$T" "transport importing uruquim:web (WP9)" \
+  "web/internal/transport imports uruquim:web"
+
+# 52. HEAD->GET re-enabled. The backend must not rewrite a method before the
+#     core decides (WP9 D7).
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/opts.redirect_head_to_get = false/opts.redirect_head_to_get = true/' \
+  "$T/web/internal/transport/odin_http_adapter.odin"
+expect_reject "$T" "HEAD->GET re-enabled" \
+  "redirect_head_to_get must stay false"
+
+# 53. The backend's automatic 100-continue re-enabled, which would make the
+#     server answer "continue" and then wait for a body (WP9 D5).
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/opts.auto_expect_continue = false/opts.auto_expect_continue = true/' \
+  "$T/web/internal/transport/odin_http_adapter.odin"
+expect_reject "$T" "automatic 100-continue re-enabled" \
+  "auto_expect_continue must stay false"
+
+# 54. The CL+TE rejection reverted to upstream's silent repair.
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/../vendor/odin-http/request.odin" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+old = 'if headers_has_unsafe(headers^, "transfer-encoding") && headers_has_unsafe(headers^, "content-length") {\n\t\treturn false\n\t}'
+assert old in s, "MUTATION-SETUP: the CL+TE rejection was not found"
+open(p, "w").write(s.replace(old, 'if headers_has_unsafe(headers^, "transfer-encoding") && headers_has_unsafe(headers^, "content-length") {\n\t\theaders_delete_unsafe(headers, "content-length")\n\t}', 1))
+PY2
+expect_reject "$T" "CL+TE silently repaired instead of rejected" \
+  "CL+TE must be rejected"
+
+# 55. The Content-Length digit check removed, which reinstates the negative-
+#     length crash.
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/vendor/odin-http/body.odin" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+assert "_is_plain_decimal" in s, "MUTATION-SETUP: the digit guard was not found"
+open(p, "w").write(s.replace("_is_plain_decimal", "_removed_guard"))
+PY2
+expect_reject "$T" "Content-Length digit validation removed" \
+  "Content-Length must be validated as plain decimal"
+
+echo "PASS: WP9 mutation checks (7 forbidden conformance states all rejected)"

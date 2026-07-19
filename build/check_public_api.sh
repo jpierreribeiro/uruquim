@@ -1081,5 +1081,71 @@ echo "public API contract: the five extractor signatures are exact and carry no 
 echo "public API contract: the JSON encoder is imported only by respond.odin and errors.odin"
 echo "public API contract: response ownership and the envelope machinery stayed internal"
 echo "public API contract: Content-Type values are exact and 'field' is omitted by type"
+# ---------------------------------------------------------------------------
+# 11. WP9 transport conformance (planning/phase-1-plan.md §WP9 D1-D7)
+#
+# WP9 is test-only work plus a hardened adapter. These pin the properties the
+# conformance suites rely on but cannot themselves observe.
+# ---------------------------------------------------------------------------
+URUQUIM_ADAPTER="$URUQUIM_WEB/internal/transport/odin_http_adapter.odin"
+test -f "$URUQUIM_ADAPTER" || fail "the WP8 adapter is missing"
+URUQUIM_ADAPTER_CODE="$(sed -E 's://.*$::' "$URUQUIM_ADAPTER")"
+
+# 11a. The backend must not rewrite a method before the core decides (D7), and
+#      must not answer 100-continue on its own (D5).
+grep -qE 'opts\.redirect_head_to_get = false' <<<"$URUQUIM_ADAPTER_CODE" ||
+  fail "redirect_head_to_get must stay false; HEAD must not be silently converted to GET (WP9 D7)"
+grep -qE 'opts\.auto_expect_continue = false' <<<"$URUQUIM_ADAPTER_CODE" ||
+  fail "auto_expect_continue must stay false; Expect is refused with 417, never auto-continued (WP9 D5)"
+
+# 11b. The vendored framing patches must stay applied. Each corresponds to a
+#      raw-wire corpus case that FAILED before it, and two of them fix remote
+#      denial-of-service crashes.
+URUQUIM_VENDOR="$URUQUIM_ROOT/vendor/odin-http"
+grep -qE '_is_plain_decimal' "$URUQUIM_VENDOR/body.odin" ||
+  fail "Content-Length must be validated as plain decimal; without it a negative length crashes the server (WP9 D2)"
+grep -qE 'if len\(token\) != 0 \{' "$URUQUIM_VENDOR/body.odin" ||
+  fail "a chunk without CRLF must be rejected, not asserted; the assertion crashes the server (WP9 D3)"
+if grep -qE 'headers_delete_unsafe\(headers, "content-length"\)' "$URUQUIM_VENDOR/request.odin"; then
+  fail "CL+TE must be rejected, not repaired by deleting Content-Length; repairing it is a smuggling vector (WP9 D2)"
+fi
+grep -qE 'method_raw' "$URUQUIM_VENDOR/http.odin" ||
+  fail "the original method token must be preserved so an unknown method reaches the core (WP9 D7)"
+
+# 11c. The conformance harness is TEST-ONLY and never reaches the shipped
+#      package (WP9 D1 — this is why it is not in web/testing/).
+URUQUIM_HARNESS="$URUQUIM_ROOT/tests/support/transport_conformance"
+test -d "$URUQUIM_HARNESS" ||
+  fail "tests/support/transport_conformance/ is missing; the shared conformance harness has no home"
+grep -qE 'transport_contract_test :: proc' "$URUQUIM_HARNESS"/*.odin ||
+  fail "the harness does not define transport_contract_test(t, factory) (architecture spec §Three test suites)"
+grep -qE 'Transport_Factory :: struct' "$URUQUIM_HARNESS"/*.odin ||
+  fail "the harness does not define Transport_Factory"
+if grep -rn 'transport_conformance' "$URUQUIM_WEB" 2>/dev/null; then
+  fail "the shipped package references the test-only conformance harness"
+fi
+grep -qx "Transport_Factory" <<<"$URUQUIM_ACTUAL_EXPORTS" &&
+  fail "Transport_Factory became a public symbol; it is test-only (WP9 D1)"
+
+# 11d. The raw-wire corpus must NOT be pointed at the in-memory transport: it
+#      has no TCP parser, so that would be meaningless green (WP9 D1).
+if grep -rn 'wire_corpus' "$URUQUIM_ROOT/tests/wp9-semantic" "$URUQUIM_ROOT/tests/wp9-semantic-internal" 2>/dev/null; then
+  fail "the raw-wire corpus is referenced by a SEMANTIC suite; it runs only against real adapters (WP9 D1)"
+fi
+
+# 11e. The semantic matrix must run on BOTH factories — one suite each.
+grep -rqE 'transport_contract_test' "$URUQUIM_ROOT/tests/wp9-semantic-internal"/*.odin ||
+  fail "the in-memory factory does not run the shared semantic matrix (WP9 D1)"
+grep -rqE 'transport_contract_test' "$URUQUIM_ROOT/tests/wp9-semantic"/*.odin ||
+  fail "the real-HTTP factory does not run the shared semantic matrix (WP9 D1)"
+
+# 11f. The socket suites must keep their timeouts: a hang is a failure, never a
+#      stalled gate.
+grep -qE 'timeout [0-9]+ env' "$URUQUIM_ROOT/build/check.sh" ||
+  fail "the socket suites lost their external timeout; a hanging adapter would stall the gate"
+
+echo "public API contract: WP9 harness is test-only; both factories run the shared matrix"
+echo "public API contract: the adapter keeps HEAD and Expect under core control; framing patches are applied"
+
 echo "public API contract: WP7 arena is private; the 4 MiB cap gates the parser; strict JSON; 413 is a private Status value"
 echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4 + WP5 + WP6 + WP7)"

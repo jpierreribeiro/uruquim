@@ -532,6 +532,23 @@ runs on the pinned toolchain.
   test transport still proves the core.
 
 ## WP9 — Transport conformance baseline
+- **Execution status.** **COMPLETE** — verified by a full green `build/check.sh`
+  on dev-2026-07-nightly:819fdc7: the 20-scenario semantic matrix passes on BOTH
+  factories, and the 25-case raw-wire corpus passes against the real adapter.
+  Ledgers unchanged at 32 + 2 = 34.
+- **What the corpus found (and WP9 fixed).** Two REMOTE DENIAL-OF-SERVICE
+  crashes in the vendored backend — `Content-Length: -1` reached
+  `scanner.max_token_size` and tripped an assertion, and a chunk without a
+  trailing CRLF hit `assert(len(token) == 0)`; either killed the server process
+  from one unauthenticated request. Two silently-accepted framing ambiguities —
+  CL+TE was "repaired" by deleting the Content-Length (a smuggling vector), and
+  a duplicate identical Content-Length was merged into a comma list. One
+  semantic divergence — a valid unknown method (`PROPFIND`) was answered 501 by
+  the backend before the core's 404/405 policy ran. All five are fixed with
+  minimal, documented vendor patches (`vendor/odin-http/VENDOR.md`).
+- **Cost.** Test-only: `nm` reports ZERO conformance-harness, corpus and
+  `core:testing` symbols in every production binary. The vendor patches add
+  +128 B (no serve), +480 B (test_request) and +240 B (serve) over WP8.
 - **Objective.** semantic conformance for every transport plus wire/framing
   conformance for every real HTTP adapter.
 - **Spec.** §Three test suites; cross-phase invariant.

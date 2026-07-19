@@ -303,11 +303,23 @@ parse_response :: proc(raw: string) -> tc.Exchange_Response {
 		if colon <= 0 {
 			continue
 		}
+		// CLONE both. `line` is a view into `raw`, which the caller frees the
+		// moment `http_exchange` returns — returning views would hand the
+		// assertions freed memory. That was a real use-after-free here: it read
+		// correctly most of the time and lost the `Allow` header roughly one run
+		// in three, which is exactly how a harness bug disguises itself as a
+		// flaky framework.
 		append(
 			&headers,
 			tc.Header {
-				name = strings.trim_space(line[:colon]),
-				value = strings.trim_space(line[colon + 1:]),
+				name = strings.clone(
+					strings.trim_space(line[:colon]),
+					context.temp_allocator,
+				),
+				value = strings.clone(
+					strings.trim_space(line[colon + 1:]),
+					context.temp_allocator,
+				),
 			},
 		)
 	}
