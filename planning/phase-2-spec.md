@@ -1,7 +1,14 @@
 # Phase 2 — Specification (the WP15 Spec Gate)
 
-**Status: PRESENTED FOR OWNER APPROVAL. Nothing in this document that was not
-already accepted becomes accepted by its existence here.**
+**Status: APPROVED (owner, 2026-07-19, PR #30 review).** ADR-022, -023, -024,
+-026 and -027 were accepted as recommended. **ADR-025 was decided as option
+B** — route-level middleware is a one-route `Router`, the five Phase-1
+registration signatures stay frozen — against the WP15 recommendation; the
+clauses below are updated to the decided state. The owner's review also
+independently re-verified the §9.1 ledger correction and ran the full gate
+green on `9f7e64a` + the WP15 commit (`GATE_EXIT=0`, `PASS=10 FAIL=0 SKIP=0`,
+126s). The PROPOSED/NORMATIVE labels below are retained with their outcomes so
+the decision trail stays readable.
 
 This document turns the WP12, WP13 and WP14 evidence into normative Phase-2
 text. It has two kinds of clause, and every clause is labelled:
@@ -10,12 +17,12 @@ text. It has two kinds of clause, and every clause is labelled:
   accepted (ADR-005, ADR-019, ADR-020, ADR-021 and their sub-decisions). It is
   written as specification because the decision exists; this document adds only
   the exact wording, the owning work package, and the test that will prove it.
-* **PROPOSED (owner decision required)** — the clause depends on a decision the
-  owner has not yet made. Each such clause points at a PROPOSED ADR in
-  `planning/adrs.md` (ADR-022 … ADR-027) that presents the question, the
-  options, a recommendation, the strongest argument against that
-  recommendation, the public impact and the reversibility. **None of these is
-  marked accepted anywhere.**
+* **PROPOSED (owner decision required)** — the clause depended on a decision
+  the owner had not yet made when this document was first presented. Each such
+  clause points at an ADR in `planning/adrs.md` (ADR-022 … ADR-027) that
+  presents the question, the options, a recommendation, the strongest argument
+  against that recommendation, the public impact and the reversibility. **All
+  six are now decided (2026-07-19); each clause below records its outcome.**
 
 Every clause names the work package that implements it and the test or
 measurement that will prove it, because G-08 forbids claiming a behaviour
@@ -24,9 +31,10 @@ WP12/WP13/WP14 evidence (`planning/phase-2-prototype-middleware.md`,
 `planning/phase-2-prototype-recovery.md`, `planning/phase-1-freeze.md`
 amendments 1–2), which carries the verbatim commands and outputs.
 
-On approval, §9 of this document supersedes `planning/phase-2-plan.md` §3 as
-the ledger of record, and the amendment texts in §10 are applied to
-`knowledge-base/03-development-phases.md`. Until approval, neither happens.
+§9 of this document now supersedes `planning/phase-2-plan.md` §3 as the ledger
+of record, and the amendment texts in §10 have been applied to
+`knowledge-base/03-development-phases.md` (§10.2 in its option-B form, per the
+ADR-025 outcome).
 
 ---
 
@@ -42,7 +50,7 @@ forms, zero recovery symbols (ADR-020), and zero dispatch-time allocations
 
 ---
 
-## 2. Execution order — NORMATIVE (settled by ADR-005 + ADR-019; nesting order PROPOSED via ADR-024)
+## 2. Execution order — NORMATIVE (ADR-005 + ADR-019; nesting order settled by ADR-024, ACCEPTED)
 
 ### 2.1 The order
 
@@ -54,12 +62,13 @@ this order, and unwind in exactly the reverse order:
    route — a partially-wrapped route table is not a state a legal program can
    reach.
 2. **Each enclosing `Router`'s middleware, outermost router first**, each
-   router's own list in its `use` order. (Applies only if ADR-024 is accepted;
-   a route registered directly on the App has no enclosing router and skips
-   this step.)
-3. **Route-level middleware**, in argument order. (Applies only if ADR-025 is
-   accepted.)
-4. **The handler.**
+   router's own list in its `use` order (ADR-024, ACCEPTED). A route
+   registered directly on the App has no enclosing router and skips this
+   step. Under ADR-025 option B (ACCEPTED) there is no separate route-level
+   position: a route needing its own guard is a one-route `Router` mounted at
+   the path, so "route-level middleware" is simply the innermost router's
+   `use` list — one ordering rule, not two.
+3. **The handler.**
 
 Short-circuit is returning without calling `next` (frozen vocabulary from the
 phases doc): everything downstream — later middleware *and* the handler — does
@@ -67,11 +76,12 @@ not run, and every already-entered middleware still unwinds. Evidence shape:
 WP12 P3 measured `A>STOP<A` with no `C>` and no `H`, and the short-circuiting
 middleware's own response is what the client receives.
 
-* Implementation: WP17 (steps 1, 4), WP18 (steps 2, 3).
+* Implementation: WP17 (steps 1, 3), WP18 (step 2).
 * Proof: WP17 RED test asserting the exact order string `A>B>C>H<C<B<A` across
   three globals (P2's measurement made permanent); WP18 RED test for nested
-  routers (outer `use` before inner `use` before route-level before handler);
-  a short-circuit test asserting the downstream middleware count is zero and
+  routers (outer `use` before inner `use` before handler, including the
+  one-route-Router guard shape ADR-025 option B makes canonical); a
+  short-circuit test asserting the downstream middleware count is zero and
   the committed response is the short-circuiter's.
 
 ### 2.2 Registration-time flattening
@@ -114,14 +124,12 @@ hand-rolled pointer the compiler cannot check.
 
 ---
 
-## 3. The post-`next` promise — PROPOSED (ADR-022; recommendation B1)
+## 3. The post-`next` promise — NORMATIVE (ADR-022 ACCEPTED: B1)
 
-B2 ("leave it unspecified") is rejected on sight, as the plan already rejected
-it: a mechanism whose behaviour is observable but undocumented is the worst of
-both. The owner chooses **B1** (specified and tested) or **B3** (documented as
-forbidden, untested). ADR-022 presents the choice; the recommendation is B1.
-
-If B1 is accepted, the normative text is:
+B2 ("leave it unspecified") was rejected on sight, as the plan already
+rejected it: a mechanism whose behaviour is observable but undocumented is the
+worst of both. The owner accepted **B1** (specified and tested). The normative
+text:
 
 1. **Code after `next(ctx)` runs**, exactly once per middleware, as that
    middleware's frame resumes; the unwind order is the exact reverse of entry
@@ -151,16 +159,12 @@ If B1 is accepted, the normative text is:
   handler running twice (the integrator's counter-example made permanent), and
   P5's byte-identity assertion on both commit paths.
 
-If B3 is accepted instead: item 1 is replaced by "code after `next` is
-documented as forbidden and its behaviour carries no promise"; items 2–4 are
-retained (they guard the framework, not the application), and WP22's
-latency-measuring logger is **descoped**, because a logger that reads the
-final status requires post-`next` execution — this coupling is stated here so
-B3 is chosen with its real price visible.
+(The rejected B3 alternative and its hidden price — descoping WP22's
+latency-measuring logger — are recorded in ADR-022.)
 
 ---
 
-## 4. Miss-chain behaviour for 404/405 — PROPOSED (ADR-023; recommendation: middleware observe misses, in `bare()` too)
+## 4. Miss-chain behaviour for 404/405 — NORMATIVE (ADR-023 ACCEPTED: middleware observe misses, in `bare()` too)
 
 D-12.4 asks: do app-level middleware observe a request that matches no route
 (404) or no method (405)? WP12 P13 prototyped the answer "yes" via a second
@@ -168,10 +172,11 @@ flattened chain — the app-level globals terminating in the automatic 404/405
 responder — and measured `A>B><B<A` around both the 404 and the 405, with the
 standard envelopes byte-identical and the 405 `Allow` header intact.
 
-ADR-023 presents the decision with its full cost sheet (P13 measured a real
-wart: the terminal-as-Handler design needs an App back-pointer on the Context
-that `context.odin` documents as deliberately absent). If accepted, the
-normative text is:
+ADR-023 carries the full cost sheet (P13 measured a real wart: the
+terminal-as-Handler design needs an App back-pointer on the Context that
+`context.odin` documents as deliberately absent; WP17 may instead special-case
+the miss terminal in the dispatcher at the cost of a branch in `next`). The
+normative text:
 
 1. App-level middleware run on every miss, in `use` order, with the automatic
    404/405 as the terminal step. Route-level and router-level middleware do
@@ -180,7 +185,7 @@ normative text is:
    invisible" is exactly the hole an attacker probes.)
 2. **`bare()` runs the same miss chain with a no-op terminal.** P13 measured
    the inconsistency: under `bare()` the prototype's middleware observed
-   nothing on a miss. The recommendation extends ADR-019's own principle —
+   nothing on a miss. The accepted rule extends ADR-019's own principle —
    "`bare()` means no default policy, not no safety": the *policy* (what a
    miss answers) stays absent; the *mechanism* (middleware observe the
    request) stays on. The driver's existing 500 finalization then applies
@@ -189,11 +194,12 @@ normative text is:
    P13's invalidation cost — `use()` after any registration is already a boot
    failure, so the set of globals is fixed before any route exists. One edge
    remains: `use()` after a *dispatch* but before any registration (an app
-   that serves a miss in a test, then registers). ADR-023 sub-decision:
-   recommend **the fail-closed guard also rejects `use()` after the first
-   dispatch**, closing the stale-chain edge with the same mechanism; the
-   alternative (rebuild-on-invalidation, as prototyped, bounded by the number
-   of `use` calls) is presented alongside.
+   that serves a miss in a test, then registers). ADR-023's accepted
+   sub-decision closes it: **the fail-closed guard also rejects `use()` after
+   the first dispatch**, with the same mechanism and diagnostic family as
+   ADR-019. The miss chain is therefore built at most once per App and never
+   invalidated — P13's rebuild-on-invalidation pool growth (`[3, 6, 10, 15]`)
+   does not ship.
 
 * Implementation: WP17.
 * Proof: WP17 RED tests — a global middleware observes a 404 and a 405 with
@@ -204,7 +210,7 @@ normative text is:
 
 ---
 
-## 5. Fail-closed registration order — NORMATIVE (settled by ADR-019), diagnostic text PROPOSED here
+## 5. Fail-closed registration order — NORMATIVE (settled by ADR-019; diagnostic text below owner-approved 2026-07-19)
 
 ADR-019 and all four sub-decisions are settled and are not reopened: `use()`
 after any registered route is a boot failure; the rule applies inside a
@@ -222,10 +228,9 @@ mechanism must satisfy the three settled properties:
 
 Poison-the-App versus a cured abort remains a WP17 prototype, per ADR-019.
 
-**Proposed diagnostic text** (WP15's contribution; exact wording is owner-
-approvable here, mechanism is not decided here). On the offending `use()` call,
-through the existing static-message report path (`context.logger`, no
-`core:fmt`, no `core:log` — the WP6 measured rule):
+**Approved diagnostic text.** On the offending `use()` call, through the
+existing static-message report path (`context.logger`, no `core:fmt`, no
+`core:log` — the WP6 measured rule):
 
 > `uruquim: web.use was called after a route was already registered; ordered
 > middleware cannot protect routes registered before it (ADR-019). Register
@@ -253,16 +258,16 @@ manual encoding.
 
 ---
 
-## 6. Typed framework-error observer — PROPOSED (ADR-026)
+## 6. Typed framework-error observer — NORMATIVE (ADR-026 ACCEPTED)
 
 ADR-011 promised a Phase-2 typed observer: one closed event, never `any`, no
-change to the handler shape. ADR-026 presents the field set. The proposed
-normative text:
+change to the handler shape. ADR-026 fixes the field set. The normative text:
 
 ### 6.1 Surface (+3: `observe`, `Framework_Event`, `Framework_Error`)
 
 ```odin
-// PROPOSED — not frozen. Framework_Error is today's private closed enum
+// ACCEPTED for Phase 2 (ADR-026); frozen only at WP25. Framework_Error is
+// today's private closed enum
 // (None, Response_Marshal_Failed, Body_Decode_Failed, Body_Consumed_Twice,
 // No_Response_Committed, Invalid_Serve_Port, Serve_Listen_Failed), made
 // public; it grows only when a work package ratifies a new member.
@@ -316,9 +321,9 @@ supply it, and the URI path cannot substitute for it. Concretely:
 
 ---
 
-## 7. Request-ID trust policy — PROPOSED (ADR-027; security boundary, owner approval required)
+## 7. Request-ID trust policy — NORMATIVE (ADR-027 ACCEPTED; a security boundary, decided by the owner)
 
-ADR-027 presents the boundary. The proposed normative text:
+ADR-027 fixes the boundary. The normative text:
 
 1. A client-supplied `X-Request-Id` is **accepted only if** it matches the
    charset `[A-Za-z0-9._-]` and length 1..64. Otherwise a fresh ID is
@@ -330,16 +335,15 @@ ADR-027 presents the boundary. The proposed normative text:
    unguessable** — a request ID is not a secret and must never be treated as
    authentication.
 3. The middleware writes the effective ID into a private request-header
-   **overlay** that `web.header` consults, and sets the response header. The
-   overlay is the recommended shape (+1 symbol: `request_id`); if the owner
-   rejects the overlay as too implicit, the fallback is a public accessor
-   (`request_id_value`, +2). Accepting the overlay obliges WP19 to document
-   `web.header` as "the effective request header", so the coupling is declared
-   rather than discovered.
+   **overlay** that `web.header` consults, and sets the response header
+   (accepted shape; +1 symbol: `request_id`). The acceptance obliges WP19 to
+   document `web.header` as "the effective request header", so the coupling is
+   declared rather than discovered. The rejected accessor alternative
+   (`request_id_value`, +2) returns only if implementation evidence reopens
+   ADR-027 with owner approval.
 4. The ID appears on the response for every request through the chain,
-   including a 404 (this depends on ADR-023's miss chain; if ADR-023 is
-   rejected, the ID demonstrably cannot appear on a 404 and the documentation
-   must say so — the couplings are stated so the owner decides them together).
+   including a 404 — deliverable because ADR-023's miss chain is accepted; the
+   two decisions were presented and taken together.
 
 * Implementation: WP23 (WP19 for the overlay read path).
 * Proof: WP23 RED tests as already enumerated in the plan — absent → generated
@@ -376,7 +380,7 @@ amended and the wording is already accepted:
 
 ---
 
-## 9. The Phase-2 public ledger — PROPOSED (owner approval required; this is the ledger WP16 will encode)
+## 9. The Phase-2 public ledger — APPROVED (owner, 2026-07-19; this is the ledger WP16 encodes)
 
 ### 9.1 A correction to the plan's arithmetic, stated before the numbers
 
@@ -393,27 +397,38 @@ approval.
 
 | Symbol | Kind | WP | Decided by |
 |---|---|---|---|
-| `use` | proc (group once WP18 lands) | 17, 18 | ADR-005/019 (settled) |
+| `use` | proc (a group once WP18 adds the `Router` variant — see the guard note below) | 17, 18 | ADR-005/019 (settled) |
 | `next` | proc | 17 | ADR-005 (settled) |
-| `Router` | type | 18 | ADR-024 (PROPOSED) |
-| `router` | proc | 18 | ADR-024 (PROPOSED) |
-| `mount` | proc | 18 | ADR-024 (PROPOSED) |
+| `Router` | type | 18 | ADR-024 (ACCEPTED) |
+| `router` | proc | 18 | ADR-024 (ACCEPTED) |
+| `mount` | proc | 18 | ADR-024 (ACCEPTED) |
 | `header` | proc | 19 | plan WP19 (no new decision) |
 | `bearer_token` | proc | 19 | plan WP19 (no new decision; not a spelling variant — it encodes the RFC 6750 parse) |
-| `observe` | proc | 20 | ADR-026 (PROPOSED) |
-| `Framework_Event` | type | 20 | ADR-026 (PROPOSED) |
-| `Framework_Error` | enum (existing private, made public) | 20 | ADR-026 (PROPOSED) |
+| `observe` | proc | 20 | ADR-026 (ACCEPTED) |
+| `Framework_Event` | type | 20 | ADR-026 (ACCEPTED) |
+| `Framework_Error` | enum (existing private, made public) | 20 | ADR-026 (ACCEPTED) |
 | `logger` | `Handler` value | 22 | plan WP22 (no new decision) |
-| `request_id` | `Handler` value | 23 | ADR-027 (PROPOSED); +1 more (`request_id_value`) only if the overlay is rejected |
+| `request_id` | `Handler` value | 23 | ADR-027 (ACCEPTED with the overlay: exactly +1) |
 
-Application ledger: **32 + 12 = 44**, or **45** if the ADR-027 overlay is
-rejected.
+Application ledger: **32 + 12 = 44**. The 45 case exists only if
+implementation evidence reopens ADR-027's overlay, which requires owner
+approval — it is a reopen path, not an open contingency.
 
 No `Middleware` type (D-12.1: a distinct proc type converts implicitly in both
 directions on this toolchain — no call-site cost, no protection either). No
 `web.group` (ADR-024). No `recovery` (ADR-020, closed at zero). No per-verb
-middleware names. Route-level middleware adds **zero names** whichever way
-ADR-025 goes.
+middleware names. ADR-025 option B adds **zero names** and mutates **zero**
+frozen signatures.
+
+**A guard note WP18 must not sleepwalk past.** The plan projects the five
+verbs, `use` and `destroy` becoming **procedure groups** so `Router` variants
+add zero names. ADR-021 (as amended) measured that `odin doc` renders a group
+as member names only, so a group over `@(private)` members is unfreezable —
+and `build/check_phase1_freeze.sh` now **rejects that construct outright**.
+WP18 therefore cannot use private-member groups as projected; it must either
+export the members (ledger growth to be priced then) or find another shape,
+decided at the WP18 boundary with a compile probe first. Recorded here so the
+collision is met on purpose, not discovered by a red gate.
 
 ### 9.3 Test-support ledger
 
@@ -429,13 +444,19 @@ is adopted, exactly as ADR-021 required of WP14.
 
 | Ledger | Phase 1 | Phase 2 | Total |
 |---|---|---|---|
-| Application | 32 | +12 (+13 if overlay rejected) | **44–45** |
+| Application | 32 | +12 | **44** |
 | Test-support | 2 | +0 (contingency stated above) | **2** |
-| **Union** | **34** | **+12 – +13** | **46–47** |
+| **Union** | **34** | **+12** | **46** |
 
-**The gate never asserts a number this document has not yet earned.** The
-range stays a range until WP23 closes the last contingency; pre-committing to
-a single figure is the G-08 failure the plan already named. Operationally:
+The approved end-state target is **46**. The outer bound **47** exists only
+through the two named reopen paths (the ADR-027 overlay, the §9.3
+test-support default-parameter contingency), each of which requires owner
+approval before the number moves — so WP16's assertions treat 46 as the
+target and 46–47 as the never-exceed envelope, exactly as the owner's review
+directed ("46–47, not 46–48").
+
+**The gate never asserts a number this document has not yet earned.**
+Operationally:
 
 * each work package that grows a ledger updates the gate's expected inventory
   **in the same change**, with G-09 evidence, exactly as WP14 did;
@@ -455,20 +476,15 @@ finding, not a footnote.
 
 ---
 
-## 10. Amendments to `knowledge-base/03-development-phases.md` §Phase 2 — PROPOSED, exact text, NOT applied
+## 10. Amendments to `knowledge-base/03-development-phases.md` §Phase 2 — APPLIED (owner approval 2026-07-19)
 
-Applied only on owner approval (the ADR-020 amendments are already in the file
-and are not repeated here).
+The ADR-020 amendments were already in the file and are not repeated here.
+Applied with the approval:
 
-### 10.1 If ADR-024 is accepted (Router + mount, no `web.group`)
+### 10.1 ADR-024 (Router + mount, no `web.group`) — applied
 
-In **§Scope (required)**, replace:
-
-```
-- route groups: `web.router`, `web.group`, `web.mount`
-```
-
-with:
+In **§Scope (required)**, replaced
+`- route groups: web.router, web.group, web.mount` with:
 
 ```
 - route organisation: `web.Router`, `web.router`, `web.mount` — and NO
@@ -477,73 +493,77 @@ with:
   which G-01 rejects (ADR-024)
 ```
 
-### 10.2 If ADR-025 is accepted (variadic route-level middleware)
+### 10.2 ADR-025 decided as option B — applied in its option-B form
 
-In **§Scope (required)**, replace:
-
-```
-- `web.use` at app, group, and route level
-```
-
-with:
+The originally drafted amendment assumed option A (the variadic) and was
+**not** applied. In **§Scope (required)**, replaced
+`- web.use at app, group, and route level` with:
 
 ```
-- `web.use` at app and router level; route-level middleware as a variadic
-  tail on the five registration verbs (ADR-025, a ratified freeze amendment
-  to five Phase-1 signatures)
+- `web.use` at app and router level; route-level middleware is expressed as a
+  one-route `Router` mounted at the path (ADR-025, option B — the five Phase-1
+  registration signatures stay frozen; a variadic tail remains available later
+  by freeze amendment if real usage proves the need)
 ```
 
-### 10.3 If ADR-023 is accepted (miss chain)
+### 10.3 ADR-023 (miss chain) — applied
 
-In **§Test Gate checklist**, add:
+Added to **§Test Gate checklist**:
 
 ```
 - [ ] app-level middleware observe a 404 and a 405, in `bare()` too, with the
       standard envelopes and the 405 `Allow` header unchanged (ADR-023)
 ```
 
+### 10.4 Spec Gate checklist — ticked
+
+Every §Phase 2 Spec Gate checkbox is ticked in the phases doc with a pointer
+into this document, per the WP15 completion criterion in
+`planning/phase-2-plan.md`.
+
 ---
 
 ## 11. Spec Gate checklist mapping
 
 The phases-doc §Phase 2 Spec Gate items, each pointed at the clause that ticks
-it. The owner ticks a box by accepting the clause; this table only aims them.
+it. All boxes are now ticked in the phases doc itself (§10.4).
 
 | Phases-doc Spec Gate item | Clause here | Status |
 |---|---|---|
-| exact ordering rules (global → outer groups → inner → route → handler) | §2.1 | settled mechanism; nesting order rides on ADR-024 |
-| onion decision (post-`next` semantics, prototyped on the bootstrap transport) | §3 | PROPOSED — ADR-022 (B1 recommended; ADR-005's option-C condition was met by WP12 P4/P5) |
+| exact ordering rules (global → outer routers → inner → handler) | §2.1 | settled; nesting order via ADR-024 (ACCEPTED), one rule under ADR-025 option B |
+| onion decision (post-`next` semantics, prototyped on the bootstrap transport) | §3 | ADR-022 ACCEPTED — B1 (ADR-005's option-C condition was met by WP12 P4/P5) |
 | chain flattening at registration time specified | §2.2 | settled by ADR-005 evidence; invariant stated |
 | fault-behaviour documentation (ADR-020) | §8 | settled; not reopened |
-| request ID source/generation | §7 | PROPOSED — ADR-027 |
-| `use()`-before-routes enforcement: mechanism, message, `Router`/`mount`/`bare()` scope | §5 | scope settled by ADR-019; diagnostic text proposed here; mechanism is a WP17 prototype per ADR-019 |
-| error-event fields, redaction policy, observer isolation, behaviour after commit | §6 | PROPOSED — ADR-026 |
+| request ID source/generation | §7 | ADR-027 ACCEPTED |
+| `use()`-before-routes enforcement: mechanism, message, `Router`/`mount`/`bare()` scope | §5 | scope settled by ADR-019; diagnostic text approved; mechanism is a WP17 prototype per ADR-019 |
+| error-event fields, redaction policy, observer isolation, behaviour after commit | §6 | ADR-026 ACCEPTED |
 
-Two items this specification adds beyond the printed checklist, for the same
-gate: the miss-chain decision (§4, ADR-023 — the plan calls it a first-class
-semantic decision) and the ledger (§9).
+Two items this specification added beyond the printed checklist, for the same
+gate: the miss-chain decision (§4, ADR-023 ACCEPTED) and the ledger (§9,
+approved).
 
 ---
 
-## 12. What the owner is asked to decide
+## 12. The decisions, as taken (owner, 2026-07-19)
 
-Six decisions, each carried by a PROPOSED ADR in `planning/adrs.md`, each with
-question, options, recommendation, strongest argument against, public impact
-and reversibility:
+Six decisions were presented, each carried by an ADR in `planning/adrs.md`
+with question, options, recommendation, strongest argument against, public
+impact and reversibility. The outcomes:
 
-| ADR | Decision | Recommendation |
+| ADR | Decision | Outcome |
 |---|---|---|
-| ADR-022 | post-`next` promise: B1 or B3 | **B1** — specify and test |
-| ADR-023 | do app-level middleware observe 404/405, and does `bare()` join | **yes, both**, miss chain per P13, `use()`-after-dispatch closed fail-closed |
-| ADR-024 | `Router`+`router`+`mount`, rejecting `web.group` | **adopt Router/mount, reject `group`** (G-01) |
-| ADR-025 | route-level middleware: variadic on the five verbs, or a one-route Router | **variadic** (P12: compiles, source-compatible, zero heap; five-signature freeze amendment) |
-| ADR-026 | `Framework_Event` field set and redaction | **the §6.1 shape** — pattern-only route identity, no message string |
-| ADR-027 | request-ID trust policy and the header overlay | **strict charset/length, never echo invalid, overlay** |
+| ADR-022 | post-`next` promise: B1 or B3 | **ACCEPTED — B1**, as recommended |
+| ADR-023 | do app-level middleware observe 404/405, and does `bare()` join | **ACCEPTED — yes, both**, miss chain per P13, `use()`-after-first-dispatch closed fail-closed |
+| ADR-024 | `Router`+`router`+`mount`, rejecting `web.group` | **ACCEPTED** — Router/mount adopted, `group` rejected (G-01) |
+| ADR-025 | route-level middleware: variadic on the five verbs, or a one-route Router | **ACCEPTED — option B (one-route Router)**, against the WP15 recommendation: the only LOW-reversibility item, five frozen signatures preserved; B → A later stays HIGH |
+| ADR-026 | `Framework_Event` field set and redaction | **ACCEPTED** — the §6.1 shape: pattern-only route identity, no message string |
+| ADR-027 | request-ID trust policy and the header overlay | **ACCEPTED** — strict charset/length, never echo invalid, overlay (+1) |
 
-Plus one number: the §9 ledger (44–45 application, 2 test-support, union
-46–47), superseding plan §3 on approval.
+The §9 ledger is approved — application 44, test-support 2, union **46**
+(47 only via a named, owner-approved reopen) — and supersedes plan §3. The §5
+fail-closed diagnostic text is approved as written.
 
-And one piece of exact wording: the §5 fail-closed diagnostic text.
-
-Nothing else in this document changes a decision already made, and nothing in
-it is accepted until the owner says so.
+The owner's review also independently confirmed the §9.1 arithmetic
+correction against the actual tables, and ran the full gate on
+main + the WP15 commit: `GATE_EXIT=0`, `PASS=10 FAIL=0 SKIP=0`, 126s,
+freeze ledgers 32 + 2 = 34 byte-identical.

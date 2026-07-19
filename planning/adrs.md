@@ -3,8 +3,10 @@
 Status: **MIXED.** Human decisions recorded on 2026-07-18 accept ADR-001,
 ADR-002, ADR-003's value-only baseline, ADR-004, ADR-006, ADR-007, ADR-008,
 ADR-009, and ADR-011. Decisions recorded on 2026-07-19 accept ADR-005 (with
-ADR-019) and ADR-020. ADR-010 and ADR-013 remain PROPOSED/deferred to their
-owning gates. Reproducible compiler evidence lives
+ADR-019), ADR-020, ADR-021 (as amended), and — at the WP15 Spec Gate —
+ADR-022 through ADR-027 (ADR-025 as option B, against the WP15
+recommendation). ADR-010 and ADR-013 remain PROPOSED/deferred to their owning
+gates. Reproducible compiler evidence lives
 in `experiments/` and the permanent work-package tests.
 
 Each ADR: context · options · benefits · costs · risks · evidence ·
@@ -668,16 +670,21 @@ the stop API at the same time.
 
 ---
 
-## WP15 Spec Gate proposals
+## WP15 Spec Gate decisions
 
-**Status of every entry below: PROPOSED. None is accepted.** Presented together
-by WP15 (`planning/phase-2-spec.md`); each requires the owner's explicit
-approval before it may be marked accepted. Evidence citations refer to
+**Status: ALL SIX DECIDED by the owner, 2026-07-19, in the PR #30 review of
+the WP15 Spec Gate.** ADR-022, -023, -024, -026 and -027 are ACCEPTED as
+recommended; ADR-025 is ACCEPTED as **option B** — the reviewer's
+counter-recommendation, not the WP15 recommendation. The option analysis below
+is retained verbatim as presented; each entry's Status line records the
+outcome. Evidence citations refer to
 `planning/phase-2-prototype-middleware.md` (WP12) and
 `planning/phase-2-prototype-recovery.md` (WP13), which carry the verbatim
 commands and outputs.
 
-## ADR-022 (PROPOSED) — the post-`next` promise: B1 or B3
+## ADR-022 — the post-`next` promise: B1 or B3
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — **B1**, as recommended.
 
 - **Question.** ADR-005 accepted the onion mechanism, in which code written
   after `next(ctx)` inevitably runs. What does the specification promise about
@@ -707,7 +714,12 @@ commands and outputs.
 - **Reversibility.** B1 → B3 is a broken promise (LOW after applications rely
   on after-hooks); B3 → B1 is a pure strengthening (HIGH).
 
-## ADR-023 (PROPOSED) — app-level middleware observe 404/405 (the miss chain)
+## ADR-023 — app-level middleware observe 404/405 (the miss chain)
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **A**, as recommended,
+  including the sub-decision: the fail-closed guard also rejects `use()` after
+  the first dispatch, so the miss chain is built lazily once and never
+  invalidated.
 
 - **Question.** Chains attach to routes; a miss has no route. Do app-level
   middleware observe a 404/405, and does `bare()` behave the same?
@@ -740,7 +752,11 @@ commands and outputs.
 - **Reversibility.** MEDIUM once shipped — applications will rely on loggers
   seeing 404s; withdrawing it is a silent behaviour change.
 
-## ADR-024 (PROPOSED) — `Router` + `router` + `mount`; `web.group` rejected
+## ADR-024 — `Router` + `router` + `mount`; `web.group` rejected
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **A**, as recommended.
+  `web.group` does not exist; the phases-doc scope line is amended
+  accordingly.
 
 - **Question.** The phases doc lists `web.router`, `web.group`, `web.mount`.
   Once a detached `Router` can be mounted at a prefix, is `web.group` a second
@@ -768,7 +784,19 @@ commands and outputs.
 - **Reversibility.** Adding `group` later is HIGH (additive sugar, though a
   permanent G-01 scar); removing a shipped `Router` is LOW.
 
-## ADR-025 (PROPOSED) — route-level middleware as a variadic on the five verbs
+## ADR-025 — route-level middleware as a variadic on the five verbs
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **B**, AGAINST the
+  WP15 recommendation. The owner's review weighed the ADR's own
+  argument-against as decisive: the variadic is the only Spec Gate item with
+  LOW reversibility, it mutates five frozen Phase-1 signatures for a
+  convenience, `get(&app, "/x", h, auth, audit)` gives the reader five
+  positional arguments with no cue which are middleware, and WP12 recommended
+  it without having built the alternative it competes with. Route-level
+  middleware is therefore expressed as a **one-route `Router`** mounted at the
+  path; the five verbs stay frozen. B → A later is HIGH reversibility: the
+  variadic remains available by freeze amendment if real usage proves the
+  need.
 
 - **Question.** How does one route get its own middleware: a variadic tail on
   the five frozen registration signatures, or a one-route `Router`?
@@ -796,7 +824,9 @@ commands and outputs.
 - **Reversibility.** (A) is LOW once call sites use the tail — removing a
   variadic breaks source. (B) → (A) later is HIGH.
 
-## ADR-026 (PROPOSED) — `Framework_Event` field set and redaction policy
+## ADR-026 — `Framework_Event` field set and redaction policy
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **A**, as recommended.
 
 - **Question.** ADR-011 promised a Phase-2 typed observer. What exactly does
   the event carry, and what can never reach it?
@@ -832,7 +862,12 @@ commands and outputs.
   amendment; removing them is breaking. Start minimal (HIGH → LOW as consumers
   appear).
 
-## ADR-027 (PROPOSED) — request-ID trust policy and the header overlay
+## ADR-027 — request-ID trust policy and the header overlay
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **A**, as recommended:
+  strict charset/length, never echo or log an invalid inbound value, the
+  header overlay. `request_id` is +1; the +2 accessor contingency is closed
+  unless implementation evidence reopens this ADR (owner approval required).
 
 - **Question.** Is a client-supplied `X-Request-Id` honoured, how are IDs
   generated, and how does a handler read the effective ID? This is a security

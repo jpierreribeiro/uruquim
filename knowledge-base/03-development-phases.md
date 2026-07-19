@@ -180,8 +180,14 @@ dispatcher.
 
 ### Scope (required)
 
-- `web.use` at app, group, and route level
-- route groups: `web.router`, `web.group`, `web.mount`
+- `web.use` at app and router level; route-level middleware is expressed as a
+  one-route `Router` mounted at the path (ADR-025, option B — the five Phase-1
+  registration signatures stay frozen; a variadic tail remains available later
+  by freeze amendment if real usage proves the need)
+- route organisation: `web.Router`, `web.router`, `web.mount` — and NO
+  `web.group`: once a detached Router can be mounted at a prefix,
+  `group(&app, "/admin")` is a second canonical way to perform one operation,
+  which G-01 rejects (ADR-024)
 - `web.next`; short-circuit by returning without `next`
 - **fault behaviour (amended 2026-07-19, ADR-020).** Phase 2 ships **no
   recovery middleware and no public symbol for it.** Odin has no recoverable
@@ -201,21 +207,27 @@ dispatcher.
 - documented auth pattern: gate-only `require_auth` middleware + typed
   `current_user` extraction procedure (no `user_data` field, ever)
 
-### Spec Gate checklist
+### Spec Gate checklist (all ticked at the WP15 Spec Gate, owner-approved
+2026-07-19; the clause pointers are into `planning/phase-2-spec.md`)
 
-- [ ] exact ordering rules (global → outer groups → inner → route → handler)
-- [ ] **onion decision:** post-`next` semantics supported only if the
+- [x] exact ordering rules (global → outer routers → inner → handler) — §2.1
+- [x] **onion decision:** post-`next` semantics supported only if the
       transport boundary guarantees them without confusing behavior
       (prototype on the bootstrap transport); otherwise simplify to
-      pre-handler + short-circuit
-- [ ] chain flattening at registration time specified
-- [ ] fault-behaviour documentation (ADR-020: driver 500 + panic aborts);
-      request ID source/generation
-- [ ] `use()`-before-routes enforcement: exact failure mechanism and message,
-      whether it applies to `Router` and `mount`, and whether `bare()` enforces
-      it too (ADR-019)
-- [ ] error-event fields, redaction policy, observer isolation, and behavior
-      after response commit
+      pre-handler + short-circuit — decided **B1, specified and tested**
+      (ADR-022; WP12 P4/P5 are the bootstrap-transport prototype) — §3
+- [x] chain flattening at registration time specified — §2.2 (index pairs,
+      append-only pool invariant)
+- [x] fault-behaviour documentation (ADR-020: driver 500 + panic aborts) — §8;
+      request ID source/generation — §7 (ADR-027: strict charset, counter +
+      process-start entropy, documented as not unguessable)
+- [x] `use()`-before-routes enforcement (ADR-019): applies to `Router`,
+      `mount` and `bare()`; diagnostic text approved in §5; the mechanism is
+      constrained by ADR-019's three properties, with poison-vs-cured-abort
+      delegated to the WP17 prototype by that ADR — §5
+- [x] error-event fields, redaction policy, observer isolation, and behavior
+      after response commit — §6 (ADR-026: pattern-only route identity, no
+      message string, safety by type)
 
 ### Test Gate checklist
 
@@ -231,6 +243,8 @@ dispatcher.
 - [ ] request ID present in context and response header
 - [ ] every framework error is observed exactly once; an observer cannot
       trigger a second response write or expose internal details
+- [ ] app-level middleware observe a 404 and a 405, in `bare()` too, with the
+      standard envelopes and the 405 `Allow` header unchanged (ADR-023)
 - [ ] `web.bare()` installs none of the defaults
 
 ### Implementation Gate checklist
