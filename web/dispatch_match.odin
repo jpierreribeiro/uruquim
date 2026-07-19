@@ -43,28 +43,58 @@ segment_next :: proc(path: string, cursor: ^int) -> (segment: string, ok: bool) 
 	return path[start:end], true
 }
 
-// pattern_has_param reports whether a pattern contains a `:param` segment.
+// pattern_classify inspects a pattern ONCE, at registration.
 //
-// Computed ONCE at registration and stored on the entry, so lookup can scan
-// static routes before parametric ones without re-examining any pattern. That
-// is what makes precedence depend on the pattern's shape rather than on
-// registration order.
+// `has_param` lets lookup scan static routes before parametric ones without
+// re-examining any pattern, which is what makes precedence depend on the
+// pattern's shape rather than on registration order.
+//
+// `valid` reports whether this interim dispatcher can interpret the pattern at
+// all. A pattern is valid when:
+//
+//   - it begins with `/`;
+//   - it contains AT MOST ONE `:param` segment (D5);
+//   - every `:param` segment is named — a bare `:` is not a parameter.
+//
+// An INVALID pattern never matches anything and never contributes to an `Allow`
+// value. That is the whole of WP4's answer to a malformed registration, and it
+// is deliberately not a diagnostic: registration still accepts the pattern and
+// returns nothing, because a public registration-error API is Phase-3 scope
+// (D5). What WP4 guarantees is that an unsupported pattern cannot silently
+// behave like a supported one.
+//
+// Both failure modes are silent-wrong-answer bugs if left unchecked, which is
+// why they are refused rather than approximated. A second `:param` would match
+// a request while capturing only the first segment, discarding the rest without
+// telling anyone. An unnamed `:` would capture a value under the empty name,
+// which no `web.path(ctx, name)` call in WP5 could ever retrieve.
 @(private)
-pattern_has_param :: proc(pattern: string) -> bool {
+pattern_classify :: proc(pattern: string) -> (has_param: bool, valid: bool) {
 	if len(pattern) == 0 || pattern[0] != '/' {
-		return false
+		return false, false
 	}
 
+	param_count := 0
 	cursor := 1
 	for {
 		segment, ok := segment_next(pattern, &cursor)
 		if !ok {
-			return false
+			break
 		}
-		if len(segment) > 0 && segment[0] == ':' {
-			return true
+		if len(segment) == 0 || segment[0] != ':' {
+			continue
 		}
+		if len(segment) == 1 {
+			// A bare `:` names nothing.
+			return false, false
+		}
+		param_count += 1
 	}
+
+	if param_count > 1 {
+		return false, false
+	}
+	return param_count == 1, true
 }
 
 // route_match matches one pattern against one request path.
@@ -74,13 +104,15 @@ pattern_has_param :: proc(pattern: string) -> bool {
 // A `:param` segment matches exactly one whole segment and never spans a `/`,
 // which is why `/users/:id` does not match `/users/42/posts`.
 //
-// The interim dispatcher supports at most one `:param` per pattern (D5). If a
-// pattern nonetheless contains several, the FIRST is captured — a deterministic
-// choice rather than an accident of iteration order.
+// It assumes its `pattern` was already accepted by `pattern_classify`, so at
+// most one `:param` reaches it and that param is named. Callers skip invalid
+// entries rather than passing them here; the `:` branch below therefore fires
+// at most once per match. Its `captured` guard is defence in depth, not the
+// mechanism that enforces D5 — enforcing "one param" by silently keeping the
+// first would make a two-param pattern match while discarding a segment.
 //
-// A pattern that does not begin with `/` matches nothing. That is how an
-// invalid registration stays harmless without WP4 inventing a registration-
-// error API that Phase 3 owns.
+// The leading-`/` guards are likewise defensive for the pattern and load-bearing
+// for the path, which arrives from a transport and is never pre-validated.
 //
 // It allocates nothing. `name` is a view over the App-owned pattern; `value` is
 // a view over the request path and is valid only for this request.
@@ -144,6 +176,9 @@ route_match :: proc(
 // Phase 3's radix tree must be free to change the implementation of without
 // changing the result.
 //
+// Invalid patterns are skipped in both passes, so a registration this
+// dispatcher cannot interpret can never win a match.
+//
 // It allocates nothing. The returned pointer aliases the table, which is stable
 // for the duration of a request because nothing registers during dispatch.
 @(private)
@@ -158,7 +193,7 @@ route_lookup :: proc(
 ) {
 	// Pass 1 — static routes.
 	for &candidate in a.private.routes {
-		if candidate.method != method || candidate.has_param {
+		if !candidate.valid || candidate.method != method || candidate.has_param {
 			continue
 		}
 		if _, _, ok := route_match(candidate.pattern, path); ok {
@@ -168,7 +203,7 @@ route_lookup :: proc(
 
 	// Pass 2 — parametric routes.
 	for &candidate in a.private.routes {
-		if candidate.method != method || !candidate.has_param {
+		if !candidate.valid || candidate.method != method || !candidate.has_param {
 			continue
 		}
 		if name, value, ok := route_match(candidate.pattern, path); ok {
@@ -184,6 +219,11 @@ route_lookup :: proc(
 // It reports `allowed = false` when the path matches no route under any method
 // — which is what separates a 404 from a 405.
 //
+// Invalid patterns are skipped, exactly as in `route_lookup`. A pattern that can
+// never match must not make a path look "known under another method" either —
+// otherwise an unsupported registration would turn a 404 into a 405 advertising
+// a method that could never actually serve the request.
+//
 // The set of methods is collected in a `bit_set`, which gives deduplication for
 // free: a path registered twice under GET, or matched by both a static and a
 // parametric GET route, still yields "GET" exactly once. The value is then
@@ -198,6 +238,9 @@ allow_value :: proc(a: ^App, path: string, buffer: []u8) -> (value: string, allo
 	methods: bit_set[Method]
 
 	for entry in a.private.routes {
+		if !entry.valid {
+			continue
+		}
 		if _, _, ok := route_match(entry.pattern, path); ok {
 			methods += {entry.method}
 		}

@@ -130,10 +130,11 @@ runs on the pinned toolchain.
 - **Deps.** WP2. **Rollback.** test-only package.
 
 ## WP4 — Minimal route registration and dispatch
-- **Execution status.** **COMPLETE.** Registration, `:param` matching,
-  order-independent static precedence, per-method isolation, the automatic 404,
-  and the 405 with its exact `Allow` header are merged and test-pinned (35
-  internal + 12 public-surface tests). The public surface did not move: 32
+- **Execution status.** **IMPLEMENTED; GATE GREEN ON PR #13; NOT YET MERGED.**
+  Registration, `:param` matching, order-independent static precedence,
+  per-method isolation, the automatic 404, and the 405 with its exact `Allow`
+  header are implemented and test-pinned (40 internal + 13 public-surface
+  tests). This entry becomes COMPLETE when PR #13 merges. The public surface did not move: 32
   application + 2 test-support = 34. Measured cost of routing on a minimal
   two-route application: 47,880 -> 58,072 bytes (+10,192); an application that
   registers no route pays +240 bytes (`routes_destroy` plus its
@@ -188,7 +189,11 @@ runs on the pinned toolchain.
     internal `package web` test.
   - **D5 — path semantics limited to what WP4 proves.** Patterns begin with
     `/`; `/` is valid; a `:param` occupies one whole segment; at most one
-    `:param` per pattern in this interim dispatcher; no wildcard. WP4
+    `:param` per pattern in this interim dispatcher, and it must be named; no
+    wildcard. A pattern outside that grammar is ENFORCED, not assumed: it is
+    classified at registration and never matches and never contributes to an
+    `Allow` value, so an unsupported registration can never behave like a
+    supported one. Registration still reports no error. WP4
     normalizes NOTHING — not slashes, percent-encoding, dot segments, or
     trailing slashes — so `/users` and `/users/` are different patterns. A
     normalization policy and definitive registration-conflict diagnostics

@@ -39,17 +39,23 @@ import "core:strings"
 // registration-time clone is the one allocation the spec explicitly permits
 // (`knowledge-base/02-odin-idioms-guidelines.md`, "Registration MAY allocate").
 //
-// `has_param` is computed once at registration rather than re-derived on every
-// request. It is what makes static-over-parametric precedence a property of the
-// PATTERN instead of the registration order: lookup scans static entries first
-// and parametric entries second, so both registration orders resolve
-// identically.
+// `has_param` and `valid` are computed once at registration rather than
+// re-derived on every request. `has_param` is what makes static-over-parametric
+// precedence a property of the PATTERN instead of the registration order: lookup
+// scans static entries first and parametric entries second, so both registration
+// orders resolve identically.
+//
+// `valid` marks a pattern this interim dispatcher cannot interpret — no leading
+// `/`, more than one `:param`, or an unnamed `:`. Invalid entries stay in the
+// table but are skipped by both lookup and the `Allow` builder, so they never
+// match and never make a path look "known". See `pattern_classify`.
 @(private)
 Route_Entry :: struct {
 	method:    Method,
 	pattern:   string,
 	handler:   Handler,
 	has_param: bool,
+	valid:     bool,
 }
 
 // Route_Param is the captured path parameter for one request.
@@ -102,13 +108,16 @@ ALLOW_VALUE_MAX :: 29
 // uses that same allocator — read back from the array — so registration and
 // teardown can never disagree about which allocator owns the storage.
 //
-// WP4 REJECTS NOTHING. A malformed pattern, a duplicate method+path, or a
-// pattern with more than one `:param` is stored as given: definitive
-// registration-conflict detection and its diagnostics are Phase 3 (D5), and
-// inventing an error contract here would freeze a public registration-error API
-// that no work package has ratified. What WP4 does guarantee is that such a
-// registration cannot corrupt matching — `route_match` simply never matches a
-// pattern it cannot interpret.
+// WP4 REPORTS NOTHING. A malformed pattern, a duplicate method+path, or a
+// pattern with more than one `:param` is stored as given and returns no error:
+// definitive registration-conflict detection and its diagnostics are Phase 3
+// (D5), and inventing an error contract here would freeze a public
+// registration-error API that no work package has ratified.
+//
+// What WP4 DOES guarantee is that such a registration cannot behave like a
+// supported one. `pattern_classify` marks it invalid, and both lookup and the
+// `Allow` builder skip invalid entries, so it never matches a request and never
+// contributes a method to a 405.
 @(private)
 route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handler) {
 	if a.private.routes == nil {
@@ -116,6 +125,7 @@ route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handle
 	}
 
 	owned := strings.clone(pattern, a.private.routes.allocator)
+	has_param, valid := pattern_classify(owned)
 
 	append(
 		&a.private.routes,
@@ -123,7 +133,8 @@ route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handle
 			method = method,
 			pattern = owned,
 			handler = handler,
-			has_param = pattern_has_param(owned),
+			has_param = has_param,
+			valid = valid,
 		},
 	)
 }

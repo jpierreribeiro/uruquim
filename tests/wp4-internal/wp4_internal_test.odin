@@ -809,21 +809,137 @@ wp4_param_does_not_match_across_a_segment_boundary :: proc(t: ^testing.T) {
 	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
 }
 
+// WP4 deliberately does NOT pin whether a `:param` may capture an EMPTY segment
+// (`/users/` against `/users/:id`). Whether an empty capture means "absent",
+// "invalid", or a legitimate empty value interacts with WP5 extraction
+// (`web.path`/`web.path_int`) and with the Phase-3 normalization policy, and
+// neither is decided yet. An assertion here would freeze that answer as a
+// side effect of this interim matcher, so there is none — the behavior exists,
+// it is simply not a promise.
+
+// ---------------------------------------------------------------------------
+// 15. A pattern this interim dispatcher cannot interpret NEVER matches, and
+//     never makes a path look "known under another method".
+//
+//     D5 allows at most one `:param` per pattern. The dangerous outcome is not
+//     rejection but SILENT ACCEPTANCE: a two-param pattern that matches while
+//     discarding a segment, or an unnamed `:` that captures under a name no
+//     `web.path(ctx, name)` call could ever retrieve. Both are refused.
+//
+//     Registration still reports nothing — a public registration-error API is
+//     Phase-3 scope (D5). "Never wins a match" is the whole contract.
+// ---------------------------------------------------------------------------
+
 @(test)
-wp4_param_matches_an_empty_segment_without_special_casing :: proc(t: ^testing.T) {
+wp4_pattern_with_two_params_never_matches :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
 
-	get(&a, "/users/:id", wp4_noop_handler)
+	get(&a, "/a/:first/:second", wp4_static_handler)
 
-	// `/users/` has two segments, the second empty. It matches, and the capture
-	// is the empty string. WP4 asserts the mechanical outcome rather than
-	// inventing a validation rule that Phase 3 has not decided.
 	ctx: Context
-	wp4_run(&a, &ctx, .GET, "/users/")
+	wp4_run(&a, &ctx, .GET, "/a/x/y")
 
-	testing.expect(t, ctx.private.param.found)
-	testing.expect_value(t, ctx.private.param.value, "")
+	// Not a handler call, and specifically not a match that quietly kept only
+	// `first` and threw `y` away.
+	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
+	testing.expect(t, !ctx.private.param.found, "an uninterpretable pattern captures nothing")
+}
+
+@(test)
+wp4_pattern_with_an_unnamed_param_never_matches :: proc(t: ^testing.T) {
+	a := app()
+	defer destroy(&a)
+
+	get(&a, "/users/:", wp4_static_handler)
+
+	ctx: Context
+	wp4_run(&a, &ctx, .GET, "/users/42")
+
+	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
+	testing.expect(t, !ctx.private.param.found)
+}
+
+@(test)
+wp4_pattern_without_a_leading_slash_never_matches :: proc(t: ^testing.T) {
+	a := app()
+	defer destroy(&a)
+
+	get(&a, "users", wp4_static_handler)
+
+	for path in ([]string{"/users", "users", "/"}) {
+		ctx: Context
+		wp4_run(&a, &ctx, .GET, path)
+		testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
+	}
+}
+
+@(test)
+wp4_uninterpretable_pattern_does_not_contribute_to_allow :: proc(t: ^testing.T) {
+	a := app()
+	defer destroy(&a)
+
+	// A pattern that can never match must not turn a 404 into a 405 that
+	// advertises a method which could never have served the request.
+	get(&a, "/a/:first/:second", wp4_noop_handler)
+
+	ctx: Context
+	wp4_run(&a, &ctx, .DELETE, "/a/x/y")
+
+	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
+	testing.expect_value(t, len(ctx.private.response.headers), 0)
+}
+
+@(test)
+wp4_uninterpretable_patterns_do_not_disturb_valid_ones :: proc(t: ^testing.T) {
+	a := app()
+	defer destroy(&a)
+
+	// The invalid entries stay in the table; they are skipped, not removed, and
+	// they must not shadow or displace the routes around them.
+	get(&a, "/users/:a/:b", wp4_param_handler)
+	get(&a, "/users/:id", wp4_param_handler)
+	get(&a, "/users/me", wp4_static_handler)
+	get(&a, "bad", wp4_param_handler)
+
+	ctx: Context
+	wp4_run(&a, &ctx, .GET, "/users/me")
+	testing.expect_value(t, string(ctx.private.response.body), "static")
+
+	ctx2: Context
+	wp4_run(&a, &ctx2, .GET, "/users/42")
+	testing.expect_value(t, string(ctx2.private.response.body), "param")
+	testing.expect_value(t, ctx2.private.param.name, "id")
+	testing.expect_value(t, ctx2.private.param.value, "42")
+
+	// And the still-valid GET route is what `Allow` reports.
+	ctx3: Context
+	wp4_run(&a, &ctx3, .POST, "/users/42")
+	testing.expect_value(t, ctx3.private.response.status, Status.Method_Not_Allowed)
+	testing.expect_value(t, ctx3.private.response.headers[0].value, "GET")
+}
+
+@(test)
+wp4_uninterpretable_patterns_are_still_owned_and_freed :: proc(t: ^testing.T) {
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+
+	context.allocator = mem.tracking_allocator(&track)
+
+	// An invalid pattern is still cloned and still owned, so teardown must
+	// release it exactly like any other.
+	a := app()
+	get(&a, "/a/:x/:y", wp4_noop_handler)
+	post(&a, "no-slash", wp4_noop_handler)
+	put(&a, "/ok/:id", wp4_noop_handler)
+
+	testing.expect(t, len(track.allocation_map) > 0)
+
+	destroy(&a)
+
+	testing.expect_value(t, len(track.allocation_map), 0)
+	testing.expect_value(t, len(track.bad_free_array), 0)
 }
 
 @(test)

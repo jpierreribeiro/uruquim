@@ -78,6 +78,12 @@ wp4_owned_handler :: proc(ctx: ^web.Context) {
 	wp4_owned_hits += 1
 }
 
+wp4_unsupported_hits: int
+
+wp4_unsupported_handler :: proc(ctx: ^web.Context) {
+	wp4_unsupported_hits += 1
+}
+
 wp4_silent_handler :: proc(ctx: ^web.Context) {
 }
 
@@ -317,6 +323,32 @@ wp4_app_owns_its_pattern_copy :: proc(t: ^testing.T) {
 
 	web.test_request(&app, .GET, "/users/42")
 	testing.expect_value(t, wp4_owned_hits - before, 1)
+}
+
+// ---------------------------------------------------------------------------
+// 8b. A pattern Phase 1 does not support never matches, from the outside too.
+// ---------------------------------------------------------------------------
+
+@(test)
+wp4_unsupported_pattern_never_routes :: proc(t: ^testing.T) {
+	app := web.app()
+	defer web.destroy(&app)
+
+	before := wp4_unsupported_hits
+
+	// At most ONE :param per pattern in Phase 1. A pattern with two is not
+	// rejected at registration — Phase 1 freezes no registration-error API —
+	// but it must never match, and never make the path look "known".
+	web.get(&app, "/a/:first/:second", wp4_unsupported_handler)
+
+	res := web.test_request(&app, .GET, "/a/x/y")
+	testing.expect_value(t, res.status, web.Status.Not_Found)
+	testing.expect_value(t, wp4_unsupported_hits - before, 0)
+
+	// Not a 405 either: a route that can never match must not advertise a
+	// method that could never have served the request.
+	other := web.test_request(&app, .DELETE, "/a/x/y")
+	testing.expect_value(t, other.status, web.Status.Not_Found)
 }
 
 // ---------------------------------------------------------------------------

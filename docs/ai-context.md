@@ -86,7 +86,10 @@ Rules (all test-pinned):
 - a pattern begins with `/`; `/` itself is a valid pattern;
 - `:param` occupies exactly ONE whole segment — `/users/:id` matches
   `/users/42` but never `/users/42/posts`;
-- at most one `:param` per pattern in Phase 1; there is no wildcard;
+- at most one `:param` per pattern in Phase 1, and it must be named; there is
+  no wildcard;
+- a pattern outside that grammar (`/a/:x/:y`, `/users/:`, or no leading `/`)
+  **never matches anything** and never appears in an `Allow` header;
 - a static route always beats a parametric one that also matches, no matter
   which was registered first — `/users/me` wins over `/users/:id`;
 - methods are isolated: registering GET on a path does not register POST;
@@ -94,9 +97,10 @@ Rules (all test-pinned):
   Percent-encoding and `.`/`..` segments are not decoded. Do not rely on any
   normalization; the policy is Phase 3.
 
-Registration conflicts are not diagnosed in Phase 1. A duplicate or malformed
-registration is stored as given and simply never wins a match; there is no
-registration-error type to catch.
+Registration conflicts are not diagnosed in Phase 1. A duplicate registration is
+stored as given, and an unsupported pattern simply never wins a match; there is
+no registration-error type to catch. A route that is never reached is
+indistinguishable from a 404, so check your patterns.
 
 The captured `:param` value is NOT readable yet — `web.path(ctx, "id")` is a
 WP5 stub that still returns `""`. Routing matches; extraction comes next.

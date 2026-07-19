@@ -166,8 +166,13 @@ web.get(&app, "/users", list_users)       // static
 web.get(&app, "/users/:id", get_user)     // one :param segment
 ```
 
-A pattern begins with `/`. A `:param` occupies exactly one whole segment, and
-Phase 1 allows at most one per pattern. There is no wildcard.
+A pattern begins with `/`. A `:param` occupies exactly one whole segment, must
+be named, and Phase 1 allows **at most one per pattern**. There is no wildcard.
+
+A pattern outside that grammar — `/a/:x/:y`, a bare `/users/:`, or one without a
+leading `/` — **never matches any request**, and never contributes to an `Allow`
+header either. Registration accepts it silently and reports nothing, so check
+your patterns: a route that is never reached looks exactly like a 404.
 
 When a static and a parametric route both match, **the static one always
 wins**, independently of registration order:
@@ -184,9 +189,9 @@ method on it.
 percent-encoding and dot segments are not decoded. Do not write code that
 depends on either behavior; the normalization policy is decided in Phase 3.
 
-Registration conflicts are not diagnosed in Phase 1. A duplicate or malformed
-pattern is stored as given and never wins a match — there is no registration
-error to handle, and no such API is frozen yet.
+Registration conflicts are not diagnosed in Phase 1. A duplicate pattern is
+stored as given, and an unsupported one never wins a match — there is no
+registration error to handle, and no such API is frozen yet.
 
 The pattern string is copied: the App owns its copy, so the caller may reuse or
 free its own buffer immediately after registering.
