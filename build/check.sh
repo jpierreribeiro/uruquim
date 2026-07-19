@@ -518,6 +518,15 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp9-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp9-public-surface"
 
+# WP14 — request bodies are reachable in memory. This is the first Phase-2
+# capability to land, and its parity assertions matter more than its convenience
+# one: the 4 MiB cap and the JSON errors must behave identically here and on a
+# socket, or the in-memory transport stops being trustworthy (R-10).
+echo "--- WP14 request bodies through the memory transport (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp14-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp14-public-surface"
+
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
 # actually asserted.

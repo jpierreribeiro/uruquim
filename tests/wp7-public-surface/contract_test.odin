@@ -62,11 +62,14 @@ wp7_empty_body_reports_failure :: proc(t: ^testing.T) {
 // ---------------------------------------------------------------------------
 // 3. A body handler driven end to end through the framework's own driver.
 //
-//    `web.test_request` carries no body (its signature is frozen at method +
-//    path, and WP7 adds no overload), so binding here takes the empty-body 400
-//    path — and the driver runs the full response AND arena teardown, so this
-//    also proves that a request routed to a body handler tears down cleanly
-//    under memory tracking.
+//    Called WITHOUT a body — the three-argument form — so binding here takes
+//    the empty-body 400 path, and the driver runs the full response AND arena
+//    teardown, proving that a request routed to a body handler tears down
+//    cleanly under memory tracking.
+//
+//    WP14 later added an optional `body` parameter, so the success path IS now
+//    reachable in memory; it is covered by tests/wp14-public-surface. This test
+//    deliberately keeps exercising the empty-body path, which is unchanged.
 // ---------------------------------------------------------------------------
 
 wp7_handler_hits: int
@@ -77,7 +80,8 @@ create_user_handler :: proc(ctx: ^web.Context) {
 	if !web.body(ctx, &input) {
 		return
 	}
-	// Unreachable via test_request (no body), but this is the canonical shape.
+	// The canonical shape. Reachable in memory since WP14 added the optional
+	// body parameter; exercised by tests/wp14-public-surface.
 	web.created(ctx, input)
 }
 
@@ -111,17 +115,28 @@ wp7_body_handler_via_test_request_produces_invalid_json :: proc(t: ^testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 4. WP8 has not started: web.test_request still takes exactly method + path,
-//    and web.serve is still the inert stub (no port bound).
+// 4. The exact frozen shapes of `web.test_request` and `web.serve`, pinned as
+//    procedure values so a signature drift is a COMPILE error here rather than
+//    a snapshot diff somewhere else.
+//
+//    `test_request` carries the optional `body` parameter added by the WP14
+//    freeze amendment (planning/phase-1-freeze.md, Amendment 1). The default is
+//    what keeps every three-argument call site — including the one below —
+//    compiling and behaving exactly as Phase 1 froze it.
 // ---------------------------------------------------------------------------
 
 @(test)
-wp7_test_request_signature_is_unchanged :: proc(t: ^testing.T) {
-	sig: proc(a: ^web.App, method: web.Method, path: string) -> web.Recorded_Response = web.test_request
+wp7_test_request_signature_is_pinned :: proc(t: ^testing.T) {
+	sig: proc(a: ^web.App, method: web.Method, path: string, body: string) -> web.Recorded_Response = web.test_request
 	serve_sig: proc(a: ^web.App, port: int) = web.serve
 	a := web.app()
 	defer web.destroy(&a)
-	res := sig(&a, .GET, "/nope")
+	// Called through the pinned procedure VALUE, which is why the body is passed
+	// explicitly: a procedure TYPE carries no default values in Odin, so
+	// `sig` requires all four arguments even though `web.test_request` itself
+	// defaults the last one. That is a useful property here — the pin exercises
+	// the complete signature rather than the convenient call shape.
+	res := sig(&a, .GET, "/nope", "")
 	testing.expect_value(t, res.status, web.Status.Not_Found)
 	testing.expect(t, serve_sig != nil)
 }

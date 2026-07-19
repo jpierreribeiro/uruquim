@@ -29,7 +29,7 @@ wp9_public_surface_is_unchanged :: proc(t: ^testing.T) {
 	serve_sig: proc(a: ^web.App, port: int) = web.serve
 
 	// Test support: still exactly two symbols, still method + path.
-	test_request_sig: proc(a: ^web.App, method: web.Method, path: string) -> web.Recorded_Response =
+	test_request_sig: proc(a: ^web.App, method: web.Method, path: string, body: string) -> web.Recorded_Response =
 		web.test_request
 
 	testing.expect(t, app_sig != nil)

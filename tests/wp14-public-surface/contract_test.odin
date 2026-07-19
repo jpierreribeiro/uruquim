@@ -74,7 +74,15 @@ wp14_the_body_cap_holds_on_the_memory_transport :: proc(t: ^testing.T) {
 
 	res := web.test_request(&app, .POST, "/users", string(oversized))
 
-	testing.expect_value(t, res.status, web.Status.Bad_Request)
+	// 413, and asserted as an integer on purpose. Phase 1 deliberately kept 413
+	// OUT of the public `Status` enum — the cap is a private HTTP behavior of
+	// the transport (planning/phase-1-freeze.md §4). Now that the cap is
+	// reachable in memory, that decision has a visible consequence worth
+	// pinning: `Recorded_Response.status` can hold a value with no `Status`
+	// member, so it must be compared numerically. This is the frozen design
+	// meeting the new capability, not a defect — but a user WILL hit it the
+	// first time they test the cap, so the contract is recorded here.
+	testing.expect_value(t, int(res.status), 413)
 }
 
 // Malformed JSON is a 400 through this path too, not a crash or a 500.
