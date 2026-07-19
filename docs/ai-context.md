@@ -9,13 +9,15 @@ alternative forms. If something is not listed, it does not exist.**
 > ratified; sections marked Phase 2/3/4 do not yet exist and must not be
 > emitted by a coding agent.
 >
-> **Implementation status (WP1): the Phase-1 surface below is a compiling
-> skeleton, not a working server.** Every name and signature here exists in
-> `web/` and compiles on the pinned toolchain, so code written against this
-> reference compiles. None of it does anything yet: no route is matched, no
-> value is extracted, no JSON is produced, no response is committed, and
-> `web.serve` returns immediately without binding a port. Behavior is added by
-> WP2–WP9. Write against these shapes; do not deploy against them.
+> **Implementation status (WP2): the Phase-1 surface below is a compiling
+> skeleton plus a request/response model, not a working server.** Every name
+> and signature here exists in `web/` and compiles on the pinned toolchain, so
+> code written against this reference compiles. `Request`, `Method` and
+> `Header_View` now have real behavior. Everything else still does nothing: no
+> route is matched, no value is extracted, no JSON is produced, no response is
+> committed, and `web.serve` returns immediately without binding a port.
+> Behavior is added by WP3–WP9. Write against these shapes; do not deploy
+> against them.
 
 ## Application
 
@@ -63,6 +65,43 @@ handler :: proc(ctx: ^web.Context) {
 	payload: User = load_user()
 	web.ok(ctx, payload) // payload is a User value
 }
+```
+
+## Request
+
+`ctx.request` is the only public request surface. There is no `ctx.response`,
+no `ctx.params` and no `ctx.route` in Phase 1.
+
+```odin
+ctx.request.method   // web.Method
+ctx.request.path     // string  — view
+ctx.request.query    // string  — view, raw; use the query extractors
+ctx.request.headers  // web.Header_View — NO lookup in Phase 1
+ctx.request.body     // []u8    — view
+```
+
+`web.Method` members are UPPERCASE. Write `.GET`, never `.Get`:
+
+```odin
+// The complete set: .UNKNOWN .GET .POST .PUT .PATCH .DELETE
+m: web.Method = .GET
+
+if ctx.request.method == .GET { }
+```
+
+Any other method token — `"HEAD"`, `"OPTIONS"`, `"PROPFIND"`, or a lowercase
+`"get"`, since HTTP methods are case-sensitive — arrives as `.UNKNOWN`.
+`.UNKNOWN` is not an error and produces no response on its own.
+
+`web.Header_View` is encapsulated by contract: it promises nothing about its
+representation, and Phase 1 gives it no accessor. **There is no header lookup
+in Phase 1** — `web.header(ctx, name)` is Phase 2.
+
+Request data is a temporary view. To keep it, copy it:
+
+```odin
+saved := strings.clone(ctx.request.path, context.allocator)
+defer delete(saved)
 ```
 
 Do not return `error`, `Handler_Error`, `Handler_Outcome`, or another result
@@ -291,4 +330,10 @@ create_user :: proc(ctx: ^web.Context) {
   string, header, param or body slice, copy it explicitly with an appropriate
   allocator. Never hand a request view to background work.
 - There is no header lookup in Phase 1. `web.header(ctx, name)` is Phase 2 —
-  do not invent a Phase-1 substitute.
+  do not invent a Phase-1 substitute, and do not reach into
+  `ctx.request.headers` to build one.
+- `web.Method` members are UPPERCASE: `.GET`, never `.Get`. `HEAD` and
+  `OPTIONS` are not members; those tokens arrive as `.UNKNOWN`.
+- `web.Request`, `web.Method` and `web.Header_View` are the only types WP2
+  adds. There is no public `Response`, no `Header_Pair`, no `[]Header`, and no
+  `method_raw`.
