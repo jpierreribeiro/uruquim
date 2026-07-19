@@ -1007,8 +1007,16 @@ test "$URUQUIM_CONSUME_LINE" -lt "$URUQUIM_PARSE_LINE" ||
 # 10d-vii. The driver frees the arena. `request_arena_destroy` must be called
 #          from the test-support facade (the response driver), or a bound body
 #          leaks (WP7 D4).
-grep -qE 'request_arena_destroy\(' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" ||
-  fail "web/$URUQUIM_TEST_SUPPORT_FILE does not call request_arena_destroy; the driver must free the arena (WP7 D4)"
+# AMENDED IN WP9: both drivers now tear down through the SHARED `driver_cleanup`
+# (which calls response_destroy then request_arena_destroy in the D4 order), so
+# the assertion is that each driver invokes that cleanup — not that each one
+# repeats the arena call literally.
+grep -qE 'driver_cleanup\(' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" ||
+  fail "web/$URUQUIM_TEST_SUPPORT_FILE does not call driver_cleanup; the driver must free the response and the arena (WP7 D4)"
+grep -qE 'driver_cleanup\(' "$URUQUIM_WEB/serve.odin" ||
+  fail "web/serve.odin does not call driver_cleanup; the real transport must free the response and the arena (WP7 D4)"
+grep -qE 'request_arena_destroy\(ctx\)' "$URUQUIM_WEB/serve.odin" ||
+  fail "driver_cleanup does not release the request arena (WP7 D4)"
 
 # 10d-viii. NO configurable body limit, replay, or cache entered the package.
 #           These are the WP7 non-goals the prompt forbids. The patterns target
