@@ -1,0 +1,118 @@
+From 4a609c849418f63246df61d04309eec6ba54b622 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 18 Jul 2026 20:38:00 +0000
+Subject: [PATCH 4/4] Add freeze discipline: signatures ratified only by
+ compiling prototypes
+
+- New normative rule in the architecture spec: no public signature is frozen
+  merely for looking elegant in the document; every canonical signature must
+  be demonstrated by at least one compilable Odin example and one behavior
+  test before freezing. Specification text proposes; compiling prototypes
+  ratify
+- Phase 1 Spec Gate restructured around this discipline, with an explicit
+  frozen/not-frozen split: the gate freezes the minimal public API, Context
+  and lifetimes, extractors, responses, conceptual transport contract,
+  dispatch, test transport, and minimal conformance suite; it deliberately
+  leaves out post-next onion semantics, threading guarantees, final arena
+  design, optimized radix tree, OpenAPI, streaming, WebSocket, and the
+  definitive Transport shape, each decided at its own later gate on
+  implementation evidence
+- Agent prompt updated with the corresponding process rules
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb8XLFPAMxHCWVuHrjpUAw
+---
+ knowledge-base/01-architecture-spec.md        | 16 +++++++++++
+ knowledge-base/03-development-phases.md       | 28 +++++++++++++++++++
+ .../04-local-agent-system-prompt.txt          |  7 +++++
+ 3 files changed, 51 insertions(+)
+
+diff --git a/knowledge-base/01-architecture-spec.md b/knowledge-base/01-architecture-spec.md
+index a6673ab..f72d312 100644
+--- a/knowledge-base/01-architecture-spec.md
++++ b/knowledge-base/01-architecture-spec.md
+@@ -990,6 +990,22 @@ allocators internally; the Advanced API exposes them.
+   agent context window; it is updated in the same commit as any public API
+   change.
+ 
++## Freeze Discipline (normative)
++
++```markdown
++No public signature SHALL be frozen merely because it looks elegant in the
++document. Every canonical signature SHALL be demonstrated by at least one
++compilable Odin example and one behavior test before it is frozen.
++```
++
++Specification text proposes; compiling prototypes ratify. A gate freezes
++only what has been demonstrated in real Odin — everything else (onion
++post-`next` semantics, threading guarantees, final arena design, optimized
++radix internals, OpenAPI, streaming, WebSocket, the definitive `Transport`
++shape) waits for implementation evidence at its own later gate. This keeps
++the spec coherent with the actual language, not just internally coherent as
++a text.
++
+ ## Validation (deferred, prototype-gated)
+ 
+ Tag-driven validation (`validate:"required,min=2"`) and a
+diff --git a/knowledge-base/03-development-phases.md b/knowledge-base/03-development-phases.md
+index d4f47aa..8a86d41 100644
+--- a/knowledge-base/03-development-phases.md
++++ b/knowledge-base/03-development-phases.md
+@@ -73,8 +73,36 @@ public API alone.
+   typed state)
+ - OpenAPI
+ 
++### Freeze discipline (normative for this gate)
++
++```markdown
++No public signature SHALL be frozen merely because it looks elegant in the
++document. Every canonical signature SHALL be demonstrated by at least one
++compilable Odin example and one behavior test before it is frozen.
++```
++
++The gate freezes **only what compilable prototypes have demonstrated**:
++
++```text
++FROZEN AT THIS GATE          DELIBERATELY NOT FROZEN
++minimal public API           post-next onion semantics
++Context and lifetimes        guaranteed threading model
++extractors                   final request arena design
++responses                    optimized radix tree
++conceptual transport         OpenAPI
++  contract                   streaming
++dispatch                     WebSocket
++test transport               definitive Transport shape
++minimal conformance suite
++```
++
++Everything in the right column still depends on implementation evidence and
++is decided at its own later gate.
++
+ ### Spec Gate checklist
+ 
++- [ ] every signature below is backed by a compiling example AND a behavior
++      test before being marked frozen
+ - [ ] freeze the canonical vocabulary (app/routes/extractors/responses/serve)
+ - [ ] freeze the extractor control flow: `(value, ok)` + `#optional_ok` for
+       value-producing; `^$T` destination + `bool` for `web.body`
+diff --git a/knowledge-base/04-local-agent-system-prompt.txt b/knowledge-base/04-local-agent-system-prompt.txt
+index 7f00b92..648aead 100644
+--- a/knowledge-base/04-local-agent-system-prompt.txt
++++ b/knowledge-base/04-local-agent-system-prompt.txt
+@@ -133,6 +133,13 @@ Process rules you must obey:
+ - Spec first
+ - Tests second
+ - Implementation third
++- Never freeze a public signature because it looks elegant in a document:
++  every canonical signature must be demonstrated by at least one compilable
++  Odin example and one behavior test before it is marked frozen
++- A gate freezes only what compiling prototypes have demonstrated; items
++  awaiting implementation evidence (onion post-next, threading, final arena,
++  optimized radix, OpenAPI, streaming, WebSocket, definitive Transport
++  shape) are decided at their own later gates
+ 
+ For every non-trivial task:
+ 1. restate the exact phase and scope you are working in
+-- 
+2.43.0
+

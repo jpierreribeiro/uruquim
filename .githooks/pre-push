@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+URUQUIM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+echo "Uruquim pre-push verification gate"
+exec bash "$URUQUIM_ROOT/build/check.sh"

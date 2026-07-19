@@ -1,0 +1,2194 @@
+From 63a34e22d58324ece84ce7b9240d8180d05bc8d8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 18 Jul 2026 20:06:54 +0000
+Subject: [PATCH 1/4] Add knowledge base with productivity-first architecture
+ and canonical transport direction
+
+Establish the Uruquim specification, revised around three equal commitments:
+performance, productivity, and AI readability.
+
+- 01-architecture-spec: productivity as a first-class requirement, two API
+  levels (Productive/Systems), five-concept public surface (app/route/
+  extract/respond/serve), respond-on-failure extractors, standardized error
+  envelope, non-parametric default Context with opt-in typed state, and
+  core:net/http as the canonical transport behind an internal boundary
+  (odin-http as bootstrap adapter only)
+- 02-odin-idioms: productivity-vs-explicitness rule, AI-friendly API rules,
+  compiling-example requirement (bans or_else statement blocks), sanctioned
+  typeid-validated rawptr for app state
+- 03-development-phases: Phase 1 recast as a productive vertical slice
+  (CRUD-capable), router in Phase 2, middleware/typed state in Phase 3,
+  production hardening in Phase 4, ecosystem/AI plus official core:net/http
+  adapter in Phase 5
+- 04-local-agent-system-prompt: adds productivity, canonical-naming, and
+  transport rules for the implementation agent
+- docs/: normative canonical-patterns.md, ai-context.md for coding agents,
+  and phase-gated placeholders for the remaining docs
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Tb8XLFPAMxHCWVuHrjpUAw
+---
+ README.md                                     |  87 ++-
+ docs/ai-context.md                            | 197 +++++
+ docs/canonical-patterns.md                    | 258 +++++++
+ docs/cookbook.md                              |   8 +
+ docs/errors.md                                |  23 +
+ docs/memory-model.md                          |   7 +
+ docs/middleware.md                            |   8 +
+ docs/quick-start.md                           |  13 +
+ knowledge-base/01-architecture-spec.md        | 727 ++++++++++++++++++
+ knowledge-base/02-odin-idioms-guidelines.md   | 336 ++++++++
+ knowledge-base/03-development-phases.md       | 252 ++++++
+ .../04-local-agent-system-prompt.txt          | 148 ++++
+ 12 files changed, 2063 insertions(+), 1 deletion(-)
+ create mode 100644 docs/ai-context.md
+ create mode 100644 docs/canonical-patterns.md
+ create mode 100644 docs/cookbook.md
+ create mode 100644 docs/errors.md
+ create mode 100644 docs/memory-model.md
+ create mode 100644 docs/middleware.md
+ create mode 100644 docs/quick-start.md
+ create mode 100644 knowledge-base/01-architecture-spec.md
+ create mode 100644 knowledge-base/02-odin-idioms-guidelines.md
+ create mode 100644 knowledge-base/03-development-phases.md
+ create mode 100644 knowledge-base/04-local-agent-system-prompt.txt
+
+diff --git a/README.md b/README.md
+index 9569bbc..d44ff67 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1,86 @@
+-# uruquim
+\ No newline at end of file
++# Uruquim
++
++An Odin microframework for real-world JSON APIs.
++
++**Positioning:** internally data-oriented and allocator-aware; externally simple,
++productive, and predictable — for humans and for AI coding agents.
++
++Uruquim is built on three equally important commitments:
++
++```text
++Performance
++    + memory correctness
++    + predictable hot path
++
++Productivity
++    + safe defaults
++    + simple CRUD
++    + few mandatory concepts
++
++AI readability
++    + canonical API
++    + compiling examples
++    + no aliases, no magic
++```
++
++The target experience:
++
++```odin
++package main
++
++import web "uruquim:web"
++
++User :: struct {
++	id:   int    `json:"id"`,
++	name: string `json:"name"`,
++}
++
++main :: proc() {
++	app := web.app()
++	defer web.destroy(&app)
++
++	web.get(&app, "/users/:id", get_user)
++
++	web.serve(&app, 8080)
++}
++
++get_user :: proc(ctx: ^web.Context) {
++	id, ok := web.path_int(ctx, "id")
++	if !ok {
++		return
++	}
++
++	web.ok(ctx, User{id = id, name = "Jean"})
++}
++```
++
++No allocator configuration, no transport selection, no manual context assembly.
++The systems-level machinery exists — it lives behind the API, available through
++an explicit advanced surface when needed.
++
++## Transport direction
++
++The future Odin `core:net/http` (built on `core:nbio`) is the **canonical
++transport backend**. Until it ships and stabilizes, Uruquim may run on
++`laytan/odin-http` strictly behind an internal adapter. No public Uruquim API
++exposes transport types, so migration requires no application changes.
++
++## Repository layout
++
++```text
++knowledge-base/          Normative specification (read these first)
++├── 01-architecture-spec.md
++├── 02-odin-idioms-guidelines.md
++├── 03-development-phases.md
++└── 04-local-agent-system-prompt.txt
++
++docs/                    User- and agent-facing documentation
++├── canonical-patterns.md   The one blessed way to do each common task
++├── ai-context.md           Compact API reference for coding agents
++└── ...                     Remaining docs are produced by their phases
++```
++
++## Status
++
++Pre-implementation. The knowledge base is the governing specification; code
++follows the phases defined in `knowledge-base/03-development-phases.md`.
+diff --git a/docs/ai-context.md b/docs/ai-context.md
+new file mode 100644
+index 0000000..6c3973c
+--- /dev/null
++++ b/docs/ai-context.md
+@@ -0,0 +1,197 @@
++# Uruquim API Reference for Coding Agents
++
++Paste this file into your agent's context (Cursor rules, CLAUDE.md, etc.).
++
++**Use only the APIs documented here. Do not invent procedures, aliases, or
++alternative forms. If something is not listed, it does not exist.**
++
++> Status: tracks the public API; updated in the same commit as any public API
++> change. Pre-Phase-1: describes the frozen target surface.
++
++## Application
++
++```odin
++package main
++
++import web "uruquim:web"
++
++main :: proc() {
++	app := web.app()          // production defaults: recovery, body limit,
++	defer web.destroy(&app)   // timeouts, 404/405, graceful shutdown
++
++	web.get(&app, "/path", handler)
++	web.post(&app, "/path", handler)
++	web.put(&app, "/path/:id", handler)
++	web.patch(&app, "/path/:id", handler)
++	web.delete(&app, "/path/:id", handler)
++
++	web.use(&app, middleware)     // optional
++
++	web.serve(&app, 8080)
++}
++```
++
++With typed application state:
++
++```odin
++app := web.app_with_state(&state)         // state: ^App_State (your struct)
++state := web.state(ctx, App_State)        // inside handlers: ^App_State
++```
++
++## Handler
++
++Handlers take `^web.Context`, return nothing, and respond via helpers:
++
++```odin
++handler :: proc(ctx: ^web.Context) {
++	web.ok(ctx, payload)
++}
++```
++
++## Extractors
++
++Every extractor that can fail RESPONDS TO THE CLIENT ITSELF on failure and
++returns `ok = false`. On `!ok`, just `return` — never write your own error
++response for an extractor failure.
++
++```odin
++id, ok := web.path_int(ctx, "id")        // (int, bool)
++if !ok {
++	return
++}
++
++name := web.path_string(ctx, "name")     // string (route matched ⇒ present)
++
++input, ok := web.body(ctx, Create_User)  // JSON body → (T, bool)
++if !ok {
++	return
++}
++
++page := web.query_or(ctx, "page", int, 1)   // typed query with default
++
++value, ok := web.header(ctx, "x-api-key")   // (string, bool), no auto-response
++token, ok := web.bearer_token(ctx)          // (string, bool), no auto-response
++```
++
++JSON structs use tags:
++
++```odin
++User :: struct {
++	id:   int    `json:"id"`,
++	name: string `json:"name"`,
++}
++```
++
++## Responses
++
++```odin
++web.ok(ctx, payload)              // 200 JSON
++web.created(ctx, payload)         // 201 JSON
++web.no_content(ctx)               // 204
++web.json(ctx, .Accepted, payload) // any status, JSON
++web.text(ctx, .OK, "pong")
++web.redirect(ctx, .Found, "/login")
++
++web.bad_request(ctx, "invalid input")            // 400
++web.unauthorized(ctx, "authentication required") // 401
++web.forbidden(ctx, "insufficient permission")    // 403
++web.not_found(ctx, "user")                       // 404
++web.conflict(ctx, "already exists")              // 409
++web.internal_error(ctx)                          // 500
++```
++
++All error responses share the envelope:
++
++```json
++{"error": {"code": "...", "message": "...", "field": "..."}}
++```
++
++## Middleware
++
++A middleware is a handler that calls `web.next(ctx)` to continue, or returns
++without calling it to stop the chain:
++
++```odin
++require_auth :: proc(ctx: ^web.Context) {
++	token, ok := web.bearer_token(ctx)
++	if !ok {
++		web.unauthorized(ctx, "missing bearer token")
++		return
++	}
++
++	web.next(ctx)
++}
++```
++
++Built-ins: `web.logger()`, `web.recovery()`, `web.request_id()`,
++`web.cors(web.Cors_Config{...})`, `web.secure_headers()`,
++`web.body_limit(bytes)`.
++
++## Route groups
++
++```odin
++api := web.router("/api")
++web.get(&api, "/users", list_users)
++
++admin := web.group(&api, "/admin", require_admin)
++web.get(&admin, "/stats", stats)
++
++web.mount(&app, &api)
++```
++
++## Full example (copy this shape)
++
++```odin
++package main
++
++import web "uruquim:web"
++
++Create_User :: struct {
++	name: string `json:"name"`,
++}
++
++User :: struct {
++	id:   int    `json:"id"`,
++	name: string `json:"name"`,
++}
++
++main :: proc() {
++	app := web.app()
++	defer web.destroy(&app)
++
++	web.get(&app, "/users/:id", get_user)
++	web.post(&app, "/users", create_user)
++
++	web.serve(&app, 8080)
++}
++
++get_user :: proc(ctx: ^web.Context) {
++	id, ok := web.path_int(ctx, "id")
++	if !ok {
++		return
++	}
++
++	web.ok(ctx, User{id = id, name = "Jean"})
++}
++
++create_user :: proc(ctx: ^web.Context) {
++	input, ok := web.body(ctx, Create_User)
++	if !ok {
++		return
++	}
++
++	web.created(ctx, User{id = 1, name = input.name})
++}
++```
++
++## Rules
++
++- Never use `or_else { ... }` blocks — invalid Odin. Use `(value, ok)` +
++  `if !ok { return }`.
++- Never configure allocators, transports, or response writers — `web.app()`
++  and `web.serve` handle them.
++- Never store request data in maps or `any` — use typed structs and
++  `web.state`.
++- Never name a variable `context` (reserved by Odin); the framework context
++  is always `ctx`.
++- One canonical call per task; do not mix or invent alternatives.
+diff --git a/docs/canonical-patterns.md b/docs/canonical-patterns.md
+new file mode 100644
+index 0000000..a2b3fbd
+--- /dev/null
++++ b/docs/canonical-patterns.md
+@@ -0,0 +1,258 @@
++# Canonical API Patterns
++
++This document is **normative**. For every common task there is exactly one
++recommended form. Documentation, examples, tests, and generated code use only
++these forms. If a pattern here conflicts with any other document except
++`knowledge-base/01-architecture-spec.md`, this document wins.
++
++> Status: normative draft. Frozen at the Phase 1 Spec Gate; until then,
++> amendments are allowed but must be made here first, spec-first.
++
++## The one rule
++
++**One important concept has one canonical name and one canonical form of use.**
++
++There is no `decode_json` / `parse_body` / `extract_json` / `bind` — only
++`web.body`. There is no `respond(ctx, 200, value)` — only the explicit
++helpers below.
++
++## Application skeleton
++
++```odin
++package main
++
++import web "uruquim:web"
++
++main :: proc() {
++	app := web.app()
++	defer web.destroy(&app)
++
++	web.get(&app, "/health", health)
++	web.get(&app, "/users/:id", get_user)
++	web.post(&app, "/users", create_user)
++
++	web.serve(&app, 8080)
++}
++```
++
++- `web.app()` — production-oriented defaults (recovery, body limit, timeouts,
++  404/405, graceful shutdown).
++- `web.bare()` — no defaults (advanced; not for quick starts).
++- `web.serve(&app, port)` — canonical. Use `web.serve_with(&app,
++  web.Serve_Config{...})` only when you need host or other options.
++
++## Handler
++
++```odin
++health :: proc(ctx: ^web.Context) {
++	web.ok(ctx, web.object{
++		"status" = "ok",
++	})
++}
++```
++
++Handlers take `^web.Context` and return nothing. They respond via helpers.
++
++## Extractor pattern (the load-bearing pattern)
++
++Extractors respond on failure themselves. The handler checks `ok` and
++returns — nothing else:
++
++```odin
++get_user :: proc(ctx: ^web.Context) {
++	id, ok := web.path_int(ctx, "id")
++	if !ok {
++		return
++	}
++
++	user, found := find_user(id)
++	if !found {
++		web.not_found(ctx, "user")
++		return
++	}
++
++	web.ok(ctx, user)
++}
++```
++
++Failure of `path_int` automatically produces:
++
++```json
++{
++  "error": {
++    "code": "invalid_path_parameter",
++    "message": "Path parameter 'id' must be an integer",
++    "field": "id"
++  }
++}
++```
++
++Do NOT write `or_else { ... }` blocks — that is not valid Odin. Do NOT write
++manual status/JSON assembly for extractor failures — the extractor already
++responded.
++
++## JSON body binding
++
++```odin
++Create_User :: struct {
++	name:  string `json:"name"`,
++	email: string `json:"email"`,
++}
++
++create_user :: proc(ctx: ^web.Context) {
++	input, ok := web.body(ctx, Create_User)
++	if !ok {
++		return
++	}
++
++	user, err := insert_user(input)
++	if err != nil {
++		web.internal_error(ctx)
++		return
++	}
++
++	web.created(ctx, user)
++}
++```
++
++Invalid JSON automatically produces the `invalid_json` envelope; an oversized
++body produces `body_too_large`.
++
++## Query parameters
++
++```odin
++page := web.query_or(ctx, "page", int, 1)
++```
++
++Missing or unparsable values fall back to the default. Use required-query
++extraction only when semantically required.
++
++## Responses
++
++| Intent | Canonical call |
++|---|---|
++| 200 + JSON | `web.ok(ctx, payload)` |
++| 201 + JSON | `web.created(ctx, payload)` |
++| 204 | `web.no_content(ctx)` |
++| other status + JSON | `web.json(ctx, status, payload)` |
++| plain text | `web.text(ctx, status, s)` |
++| raw bytes | `web.bytes(ctx, status, content_type, data)` |
++| redirect | `web.redirect(ctx, .Found, url)` |
++| 400 | `web.bad_request(ctx, msg)` |
++| 401 | `web.unauthorized(ctx, msg)` |
++| 403 | `web.forbidden(ctx, msg)` |
++| 404 | `web.not_found(ctx, resource)` |
++| 409 | `web.conflict(ctx, msg)` |
++| 500 | `web.internal_error(ctx)` |
++
++## Application state
++
++```odin
++App_State :: struct {
++	db:     ^postgres.Pool,
++	config: Config,
++}
++
++state := App_State{db = db, config = config}
++app := web.app_with_state(&state)
++```
++
++```odin
++list_users :: proc(ctx: ^web.Context) {
++	state := web.state(ctx, App_State)
++
++	users, err := user_repository.list(state.db)
++	if err != nil {
++		web.internal_error(ctx)
++		return
++	}
++
++	web.ok(ctx, users)
++}
++```
++
++## Middleware
++
++Attach:
++
++```odin
++web.use(&app,
++	web.logger(),
++	web.recovery(),
++	web.cors(web.Cors_Config{
++		allowed_origins = {"https://example.com"},
++	}),
++)
++```
++
++Write:
++
++```odin
++require_auth :: proc(ctx: ^web.Context) {
++	token, ok := web.bearer_token(ctx)
++	if !ok {
++		web.unauthorized(ctx, "missing bearer token")
++		return
++	}
++
++	web.next(ctx)
++}
++```
++
++Returning without calling `web.next` short-circuits the chain.
++
++## Auth / dependencies
++
++Composable extraction procedures, same contract as extractors:
++
++```odin
++current_user :: proc(ctx: ^web.Context) -> (^User, bool) {
++	token, ok := web.bearer_token(ctx)
++	if !ok {
++		web.unauthorized(ctx, "missing bearer token")
++		return nil, false
++	}
++
++	user, verified := auth.verify(token)
++	if !verified {
++		web.unauthorized(ctx, "invalid token")
++		return nil, false
++	}
++
++	return user, true
++}
++
++profile :: proc(ctx: ^web.Context) {
++	user, ok := current_user(ctx)
++	if !ok {
++		return
++	}
++
++	web.ok(ctx, user)
++}
++```
++
++## Route groups
++
++Explicit router values; no configuration callbacks:
++
++```odin
++api := web.router("/api")
++
++web.get(&api, "/users", list_users)
++web.post(&api, "/users", create_user)
++
++admin := web.group(&api, "/admin", require_admin)
++web.get(&admin, "/stats", stats)
++
++web.mount(&app, &api)
++```
++
++## Testing
++
++```odin
++res := web.test_request(&app, .GET, "/users/42")
++testing.expect(t, res.status == .OK)
++```
++
++In-memory, no sockets, no ports.
+diff --git a/docs/cookbook.md b/docs/cookbook.md
+new file mode 100644
+index 0000000..62d9f5f
+--- /dev/null
++++ b/docs/cookbook.md
+@@ -0,0 +1,8 @@
++# Cookbook
++
++> Placeholder — written during Phase 4, backed by the CI-compiled examples
++> in `examples/`.
++
++Planned recipes (each maps to a compiling example): JSON CRUD, route params,
++middleware, route groups, authentication with `current_user`, Postgres-backed
++CRUD via `app_with_state`, file upload, static files, observability.
+diff --git a/docs/errors.md b/docs/errors.md
+new file mode 100644
+index 0000000..f043dfa
+--- /dev/null
++++ b/docs/errors.md
+@@ -0,0 +1,23 @@
++# Error Responses
++
++> Placeholder — frozen at the Phase 1 Spec Gate.
++
++Documents the standardized error envelope (part of the compatibility
++contract):
++
++```json
++{
++  "error": {
++    "code": "invalid_path_parameter",
++    "message": "Path parameter 'id' must be an integer",
++    "field": "id"
++  }
++}
++```
++
++Initial code list: `invalid_path_parameter`, `invalid_query_parameter`,
++`invalid_json`, `body_too_large`, `not_found`, `method_not_allowed`,
++`unauthorized`, `forbidden`, `internal_error`.
++
++Will document, per code: producing extractor/helper, HTTP status, envelope
++fields, and a captured example response.
+diff --git a/docs/memory-model.md b/docs/memory-model.md
+new file mode 100644
+index 0000000..aad1475
+--- /dev/null
++++ b/docs/memory-model.md
+@@ -0,0 +1,7 @@
++# Memory Model
++
++> Placeholder — written during Phase 4 after the allocator/lifetime audit.
++
++Documents the internal allocation classes (app-, router-, request-lifetime,
++scratch) and the Systems API allocator configuration. Ordinary applications
++do not need this document — that is by design.
+diff --git a/docs/middleware.md b/docs/middleware.md
+new file mode 100644
+index 0000000..9af66b1
+--- /dev/null
++++ b/docs/middleware.md
+@@ -0,0 +1,8 @@
++# Middleware
++
++> Placeholder — written during Phase 3/4.
++
++Will document: the `web.use` surface, exact ordering semantics (global →
++outer groups → inner groups → route → handler), onion/unwind behavior,
++short-circuiting, the built-in middleware catalog and their configs, and how
++to write custom middleware (a plain handler calling `web.next`).
+diff --git a/docs/quick-start.md b/docs/quick-start.md
+new file mode 100644
+index 0000000..2f82451
+--- /dev/null
++++ b/docs/quick-start.md
+@@ -0,0 +1,13 @@
++# Quick Start
++
++> Placeholder — written and example-verified at the Phase 1 Implementation
++> Gate (see `knowledge-base/03-development-phases.md`).
++
++Will cover, using only canonical forms from `canonical-patterns.md`:
++
++- installing Uruquim and the `uruquim:web` import
++- `web.app()` → routes → `web.serve`
++- one GET with `path_int`, one POST with `body`
++- running and testing with `web.test_request`
++
++The Quick Start never mentions allocators, transports, or the Systems API.
+diff --git a/knowledge-base/01-architecture-spec.md b/knowledge-base/01-architecture-spec.md
+new file mode 100644
+index 0000000..e03f957
+--- /dev/null
++++ b/knowledge-base/01-architecture-spec.md
+@@ -0,0 +1,727 @@
++# Uruquim — Architecture Specification
++
++## Purpose
++
++This document defines the architecture of Uruquim, a high-performance HTTP
++microframework for Odin.
++
++Uruquim borrows the ergonomics *goals* of Gin/FastAPI-class frameworks while
++rejecting the implementation assumptions that come from garbage-collected
++runtimes, reflection-rich type systems, and object-oriented design. It is
++designed to be idiomatic for Odin:
++
++- procedural API style
++- explicit data and state
++- allocator-aware internals
++- transport decoupling
++- DOD-first design
++- low-allocation hot paths
++- no hidden OOP simulation
++
++This document is normative.
++
++## Central Architectural Statement
++
++> Internally data-oriented and allocator-aware; externally simple, productive,
++> and predictable.
++
++The framework SHALL hide allocator, router, transport, and response machinery
++from ordinary handlers. A user must be able to implement a typed JSON API using
++only `app`, route registration, extractors, response helpers, and `serve`.
++
++## Three Equal Commitments
++
++The architecture is governed by three commitments of equal weight:
++
++1. **Performance** — memory correctness and a predictable hot path.
++2. **Productivity** — safe defaults, simple CRUD, few mandatory concepts.
++3. **AI readability** — canonical API, compiling examples, no aliases, no magic.
++
++Any design decision that maximizes one commitment by materially damaging
++another is invalid.
++
++## Productivity as a First-Class Architectural Requirement
++
++The framework SHALL optimize not only for runtime performance, but also for
++implementation correctness, discoverability, and low cognitive overhead.
++
++The default application path SHALL:
++
++- require no explicit allocator configuration
++- require no explicit transport selection
++- provide production-oriented defaults
++- expose canonical helpers for common HTTP operations
++- allow a functional JSON API to be written with minimal framework knowledge
++
++Advanced memory and transport configuration SHALL remain available through a
++separate explicit API.
++
++The framework SHALL provide two usage levels:
++
++1. **Productive API** — default and documented first.
++2. **Systems API** — explicit control over allocators, transport, state, and
++   lifecycle.
++
++The acceptance metric for the public API is:
++
++> A basic AI coding agent, after reading three examples, can produce a correct
++> CRUD API without inventing abstractions.
++
++The ordinary user SHALL NOT need to understand any of the following to ship a
++working API: allocators, transport callbacks, buffer ownership, adapter
++internals, manual `Context` assembly, response writer construction, or router
++initialization. These concerns exist — internally.
++
++## Canonical Transport Direction
++
++The future Odin `core:net/http` package (announced as built on `core:nbio`)
++SHALL be treated as the canonical transport backend.
++
++Before it is available or stable, the framework MAY use `laytan/odin-http`
++behind an internal adapter.
++
++No public framework API SHALL expose `odin-http` types.
++
++Migration to `core:net/http` SHALL NOT require application-level handler or
++routing changes.
++
++The internal boundary is:
++
++```text
++Framework Core
++    └── Internal HTTP Boundary
++            ├── core:net/http adapter — canonical (when available)
++            ├── odin-http adapter — bootstrap/compatibility
++            └── test transport — in-memory, no sockets
++```
++
++Consequences:
++
++1. Development MAY begin on `odin-http`.
++2. The public API MUST NEVER depend on its types.
++3. When `core:net/http` ships, an official adapter is created.
++4. Once the official adapter is stable, the `odin-http` adapter MAY be removed
++   or moved to a separate package.
++5. The framework SHALL NOT reimplement full HTTP parsing without necessity.
++
++The transport boundary is an **internal** architecture concern. It SHALL NOT
++appear in the Quick Start or in ordinary application code. Ordinary usage is:
++
++```odin
++web.serve(&app, 8080)
++```
++
++Internally, transport selection is resolved by the framework:
++
++```odin
++@(private)
++default_transport :: proc() -> Transport {
++	when ODIN_HAS_CORE_HTTP {
++		return core_http_transport()
++	} else {
++		return odin_http_transport()
++	}
++}
++```
++
++Advanced users MAY inject a transport explicitly:
++
++```odin
++web.serve_transport(&app, &custom_transport, web.Serve_Config{port = 8080})
++```
++
++This appears only in advanced documentation, never in the Quick Start.
++
++## Public API Surface
++
++### The five concepts
++
++The entire ordinary public API is built from five concepts:
++
++```text
++app        create/destroy the application
++route      register handlers on methods and paths
++extract    read typed values out of the request
++respond    write typed responses
++serve      run the server
++```
++
++### Application
++
++```odin
++app := web.app()            // production-oriented defaults
++defer web.destroy(&app)
++
++app := web.bare()           // no default middleware or policies (advanced)
++
++app := web.app_with_state(&state)   // app() + registered typed app state
++```
++
++`web.app()` SHALL be appropriate for moderate production use, not only demos.
++It SHALL configure by default:
++
++- panic recovery
++- request body size limit
++- read timeout
++- write timeout
++- header count/size limits
++- consistent 404 and 405 handling
++- rejection of malformed requests
++- startup logging
++- graceful shutdown
++
++`web.bare()` creates an application with none of the default middleware or
++policies, for users who want full control.
++
++### Routing
++
++```odin
++web.get(&app, "/users/:id", get_user)
++web.post(&app, "/users", create_user)
++web.put(&app, "/users/:id", update_user)
++web.patch(&app, "/users/:id", patch_user)
++web.delete(&app, "/users/:id", delete_user)
++```
++
++Route groups use explicit router values, not configuration callbacks
++(callbacks complicate lifetimes and produce less predictable code for AI):
++
++```odin
++api := web.router("/api")
++
++web.get(&api, "/users", list_users)
++web.post(&api, "/users", create_user)
++
++admin := web.group(&api, "/admin", require_admin)
++web.get(&admin, "/stats", stats)
++
++web.mount(&app, &api)
++```
++
++### Handlers
++
++```odin
++Handler :: proc(ctx: ^web.Context)
++```
++
++One signature for handlers and middleware. Handlers write to the context via
++response helpers; they do not return values in v1. (Result-returning handlers
++`proc(ctx) -> web.Result` are a possible future ergonomic layer; they require
++boxing/codegen decisions and SHALL NOT block the first release.)
++
++### Extractors
++
++Extractors read typed values from the request. **On failure, the extractor
++writes the standardized error response itself and returns `ok = false`; the
++handler only returns.** This is the single most important productivity
++mechanism in the framework.
++
++```odin
++id, ok := web.path_int(ctx, "id")
++if !ok {
++	return
++}
++
++input, ok := web.body(ctx, Create_User)
++if !ok {
++	return
++}
++
++page  := web.query_or(ctx, "page", int, 1)
++name  := web.path_string(ctx, "name")
++state := web.state(ctx, App_State)
++```
++
++> Note on syntax: `value := f() or_else { ... }` with a statement block is not
++> valid Odin (`or_else` takes an expression). The canonical pattern is
++> `(value, ok)` + `if !ok { return }`. If prototyping finds a strictly better
++> compiling form (e.g. `or_return` against a `web.Result`), the canonical
++> pattern may be amended **once**, before Phase 1 freezes.
++
++### Response helpers
++
++Explicit helpers, one per output kind. No `respond(ctx, status, any)` style
++overload whose behavior depends on `any`.
++
++```odin
++web.ok(ctx, payload)          // 200 + JSON
++web.created(ctx, payload)     // 201 + JSON
++web.no_content(ctx)           // 204
++
++web.json(ctx, status, payload)   // arbitrary status + JSON
++web.text(ctx, status, "pong")
++web.bytes(ctx, status, content_type, data)
++web.redirect(ctx, .Found, "/login")
++
++web.bad_request(ctx, "invalid input")
++web.unauthorized(ctx, "authentication required")
++web.forbidden(ctx, "insufficient permission")
++web.not_found(ctx, "user")
++web.conflict(ctx, "email already registered")
++web.internal_error(ctx)
++```
++
++`ok`/`created` are defined as exact shorthands of `json` with fixed status;
++they are the canonical form for those statuses.
++
++### Serving
++
++```odin
++web.serve(&app, 8080)                              // canonical
++web.serve_with(&app, web.Serve_Config{             // explicit configuration
++	host = "0.0.0.0",
++	port = 8080,
++})
++web.serve_transport(&app, &transport, config)      // advanced: inject transport
++```
++
++## Standardized Error Responses
++
++All framework-generated error responses SHALL share one JSON envelope:
++
++```json
++{
++  "error": {
++    "code": "invalid_path_parameter",
++    "message": "Path parameter 'id' must be an integer",
++    "field": "id"
++  }
++}
++```
++
++Required error codes include at minimum:
++
++- `invalid_path_parameter`
++- `invalid_query_parameter`
++- `invalid_json`
++- `body_too_large`
++- `not_found`
++- `method_not_allowed`
++- `unauthorized`
++- `forbidden`
++- `internal_error`
++
++The envelope shape and code list are part of the compatibility contract and
++SHALL be documented in `docs/errors.md`.
++
++## Context Model
++
++### Default Context (non-parametric)
++
++The default `Context` is a plain struct. It is what nearly every application
++and every documentation example uses:
++
++```odin
++Context :: struct {
++	request:  Request,
++	response: Response,
++
++	params: Params,
++	route:  Route_Info,
++
++	private: Context_Internal,   // chain cursor, allocators, transport hooks
++}
++```
++
++The parametric `Context(App_State, Request_State)` form SHALL NOT be the
++default public surface: highly parametric signatures are noisy at call sites
++and are reproduced incorrectly by AI agents with limited Odin exposure.
++
++### Application state without visible generics
++
++Typed application state is registered once and read with a validated typed
++accessor:
++
++```odin
++App_State :: struct {
++	db:     ^Database,
++	config: Config,
++}
++
++state := App_State{db = db}
++app := web.app_with_state(&state)
++```
++
++```odin
++list_users :: proc(ctx: ^web.Context) {
++	state := web.state(ctx, App_State)
++
++	users, err := user_repository.list(state.db)
++	if err != nil {
++		web.internal_error(ctx)
++		return
++	}
++
++	web.ok(ctx, users)
++}
++```
++
++Internally this MAY use a `rawptr` + `typeid` pair validated at the boundary:
++
++```odin
++App :: struct {
++	state_ptr:  rawptr,
++	state_type: typeid,
++	// ...
++}
++
++state :: proc(ctx: ^Context, $T: typeid) -> ^T {
++	assert(ctx.private.app.state_type == typeid_of(T),
++		"web.state called with a type different from the registered App_State")
++	return cast(^T)ctx.private.app.state_ptr
++}
++```
++
++A single `rawptr` isolated behind a typed, asserted accessor is acceptable; a
++`map[string]any` bag spread through the request is not. This distinction is
++normative.
++
++### Typed request state — opt-in (Systems API)
++
++Fully typed app + request state remains available for advanced users:
++
++```odin
++app: web.Typed_App(App_State, Request_State)
++
++web.app_init(&app, &state, web.App_Config{
++	allocator         = allocator,
++	request_allocator = request_allocator,
++	transport         = transport,
++})
++```
++
++Or, if compiler ergonomics make full parametrization too costly, via
++composition:
++
++```odin
++App_Context :: struct {
++	using base: web.Context,
++
++	app:     ^App_State,
++	request: Request_State,
++}
++```
++
++The rule: **typed state is an advanced capability, not a tax charged to every
++application.** The exact mechanism (parametric specialization vs. composed
++context) SHALL be validated with real Odin prototypes before the Systems API
++freezes; the Productive API freezes first and independently.
++
++### Dependencies / extraction procedures
++
++There is no dependency-injection container. Composable procedures fill the
++role of FastAPI's `Depends`:
++
++```odin
++current_user :: proc(ctx: ^web.Context) -> (^User, bool) {
++	token, ok := web.bearer_token(ctx)
++	if !ok {
++		web.unauthorized(ctx, "missing bearer token")
++		return nil, false
++	}
++
++	user, verified := auth.verify(token)
++	if !verified {
++		web.unauthorized(ctx, "invalid token")
++		return nil, false
++	}
++
++	return user, true
++}
++
++profile :: proc(ctx: ^web.Context) {
++	user, ok := current_user(ctx)
++	if !ok {
++		return
++	}
++
++	web.ok(ctx, user)
++}
++```
++
++Extraction procedures follow the extractor contract: respond on failure,
++return `(value, ok)`.
++
++## Router
++
++### Responsibilities
++
++- route registration
++- route conflict detection
++- path matching
++- method dispatch
++- parameter extraction
++- lookup of the precomputed middleware+handler execution chain
++- route metadata for observability
++
++### Structure
++
++The router SHALL use one compact radix tree per HTTP method.
++
++Suggested node shape:
++
++```odin
++Node_Kind :: enum {
++	Static,
++	Param,
++	Wildcard,
++}
++
++Route_Node :: struct {
++	prefix: string,
++	kind:   Node_Kind,
++
++	static_keys:     [dynamic]u8,
++	static_children: [dynamic]^Route_Node,
++
++	param_child:    ^Route_Node,
++	wildcard_child: ^Route_Node,
++
++	param_name: string,
++	priority:   u32,
++
++	route: ^Resolved_Route,
++}
++```
++
++### Registration rules
++
++Registration SHALL validate and reject invalid patterns at registration time:
++
++- path must begin with `/`
++- wildcard segment must be terminal
++- a param segment occupies exactly one path segment
++- static and param/wildcard children must not produce ambiguous resolution
++- duplicate method+path registrations are invalid
++- all conflicts detected early, with clear diagnostics
++
++Route precedence: static > parameter > wildcard.
++
++### Middleware flattening
++
++Registration produces a `Resolved_Route` containing the final flattened
++handler chain (global → group nesting order → route middleware → terminal
++handler). No chain concatenation occurs during dispatch.
++
++### Parameter storage
++
++Params are written into request-local storage (small fixed array or
++pre-capacitied slice). The framework SHALL NOT allocate a map for params on
++the hot path.
++
++## Middleware
++
++### User surface
++
++The user surface is trivial; the precomputed chain is internal.
++
++```odin
++web.use(&app,
++	web.logger(),
++	web.recovery(),
++	web.cors(web.Cors_Config{
++		allowed_origins = {"https://example.com"},
++	}),
++)
++```
++
++Custom middleware is an ordinary handler that calls `web.next`:
++
++```odin
++require_auth :: proc(ctx: ^web.Context) {
++	token, ok := web.bearer_token(ctx)
++	if !ok {
++		web.unauthorized(ctx, "missing bearer token")
++		return
++	}
++
++	web.next(ctx)
++}
++```
++
++The user SHALL NOT be required to: return a new handler, assemble wrappers,
++manipulate a chain index, use `rawptr`, or provide continuation callbacks.
++
++### Execution model (internal)
++
++Deterministic cursor-based onion semantics:
++
++- `next(ctx)` advances to the next handler
++- middleware may run code before and after `next(ctx)`
++- returning without calling `next(ctx)` short-circuits
++- `abort(ctx)` prevents further downstream execution
++- post-`next` code runs in reverse-unwind order
++
++Ordering: app/global middleware → outer groups → inner groups → route
++middleware → terminal handler. Stable and test-covered.
++
++### Error and panic policy
++
++- parsing/binding/validation errors are normal response paths
++- registration conflicts fail loudly at setup time
++- runtime panic recovery is provided by the official recovery middleware,
++  installed by default in `web.app()`
++
++## Transport Adapter (internal)
++
++The adapter isolates the core from socket/event-loop, HTTP parser, body
++streaming, and server runtime concerns.
++
++```odin
++Dispatch_Proc :: proc(req: ^Request, res: ^Response)
++
++Transport :: struct {
++	user_data: rawptr,
++
++	init:             proc(t: ^Transport) -> Transport_Error,
++	listen_and_serve: proc(t: ^Transport, endpoint: Endpoint, dispatch: Dispatch_Proc) -> Transport_Error,
++	shutdown:         proc(t: ^Transport),
++	destroy:          proc(t: ^Transport),
++}
++```
++
++The framework defines its own transport-agnostic `Request` and `Response`
++types. Phase 1 assumes buffered request bodies; streaming is a later,
++specialized API.
++
++A **test transport** (in-memory, no sockets) is required from Phase 1 so that
++`web.test_request` works without binding ports.
++
++## Lifecycle
++
++Request lifecycle:
++
++1. transport accepts and parses into framework-native request view
++2. router resolves method/path into `Resolved_Route`
++3. framework initializes `Context`
++4. framework executes the flattened chain
++5. response committed to transport
++6. request-local resources cleaned up
++7. temp allocator region cleared at transport-defined boundary
++
++Application lifecycle: `app` → registration → (internal transport init) →
++`serve` → graceful shutdown → destroy. In the Productive API, steps other than
++`app`, registration, `serve`, and `destroy` are invisible.
++
++## Observability
++
++Core requirement, mostly middleware-shaped:
++
++- request ID
++- access logging by route pattern (not raw path)
++- panic recovery logging
++- route pattern introspection
++- hook points for metrics/tracing
++
++## Memory Model (internal)
++
++Allocation classes: app-lifetime, router-lifetime, request-lifetime,
++scratch/temp. Route trees and flattened chains are router-lifetime; context
++and param buffers are request-lifetime or frame-backed; parsing scratch uses
++the temp allocator where safe. Allocator ownership is documented for every
++init/destroy pair.
++
++None of this appears in the Productive API. `web.app()` selects correct
++allocators internally; the Systems API exposes them.
++
++## AI-Friendly API Rules (normative)
++
++- One canonical name per common operation. No equivalent aliases
++  (`body`, not also `decode_json`/`parse_body`/`extract_json`/`bind`).
++- No overloads whose behavior depends on `any`.
++- Prefer explicit helpers: `ok`, `json`, `text`, `body`, `path_int`.
++- Every public procedure has a minimal compiling example.
++- Public examples are part of the compatibility contract and compile in CI.
++- Internal procedures are never documented beside public ones without being
++  clearly marked private.
++- `docs/canonical-patterns.md` defines the single recommended form for each
++  common task; documentation and examples use only those forms.
++- `docs/ai-context.md` maintains a compact public-API reference sized for an
++  agent context window; it is updated in the same commit as any public API
++  change.
++
++## Validation (deferred, prototype-gated)
++
++Tag-driven validation (`validate:"required,min=2"`) and a
++`web.body_validated` extractor are attractive but SHALL NOT enter the core
++until prototypes establish: real tag-introspection capability, reflection
++cost, compile-time metadata options, diagnostic ergonomics, and binary-size
++impact. Code generation is the leading candidate mechanism.
++
++## Code Generation (future differentiator, not v1)
++
++An optional CLI (`uruquim generate`) MAY later provide FastAPI-like ergonomics
++— attribute-driven route registration, binding, validation, OpenAPI, docs —
++by generating plain Odin code, keeping reflection and magic out of the
++runtime. The manual canonical API freezes first; codegen targets it.
++
++## Non-Goals for the Core
++
++- ORM/database layer (but see below)
++- dependency injection container
++- template engine
++- WebSocket abstraction in core
++- HTTP/2-specific abstractions in core
++- reflection-heavy auto-validation in v1
++- macro-like hidden magic
++
++**Integration story requirement:** while no ORM ships in core, the framework
++SHALL make database/config/auth integration natural via `app_with_state` +
++`web.state`, and the cookbook SHALL show a full Postgres-backed CRUD example.
++
++## Reference Project Structure
++
++```text
++uruquim/
++├── web/                        public package (import web "uruquim:web")
++│   ├── app.odin                app / bare / app_with_state / destroy
++│   ├── routing.odin            get/post/... , router/group/mount
++│   ├── context.odin
++│   ├── extract.odin            path_int, body, query_or, state, ...
++│   ├── respond.odin            ok, created, json, text, errors, ...
++│   ├── serve.odin              serve / serve_with / serve_transport
++│   ├── errors.odin             error envelope + codes
++│   │
++│   ├── internal/
++│   │   ├── router/             radix tree, register, lookup, params
++│   │   ├── chain/              flattening + cursor execution
++│   │   ├── transport/          boundary, odin_http adapter, core_http adapter, test transport
++│   │   └── memory/             allocation classes, request arenas
++│   │
++│   ├── middleware/             logger, recovery, request_id, cors, timeout, secure_headers, body_limit
++│   └── testing/                test_request, recorder
++│
++├── docs/
++│   ├── quick-start.md
++│   ├── canonical-patterns.md
++│   ├── cookbook.md
++│   ├── errors.md
++│   ├── memory-model.md
++│   ├── middleware.md
++│   └── ai-context.md
++│
++└── examples/                   all compiled in CI
++    ├── 01-hello-world/
++    ├── 02-json-api/
++    ├── 03-route-params/
++    ├── 04-middleware/
++    ├── 05-route-groups/
++    ├── 06-authentication/
++    ├── 07-crud/
++    ├── 08-postgres/
++    ├── 09-file-upload/
++    └── 10-observability/
++```
++
++## Final Architectural Position
++
++The framework is defined by five pillars:
++
++- productive canonical public API (`app` / route / extract / respond / `serve`)
++- custom radix router
++- deterministic flattened middleware chain
++- internal transport boundary with `core:net/http` as the canonical backend
++- opt-in typed state (Systems API), never a tax on ordinary applications
++
++Not "FastAPI in Odin", but: **FastAPI's productivity with a data-oriented,
++predictable implementation for Odin.**
+diff --git a/knowledge-base/02-odin-idioms-guidelines.md b/knowledge-base/02-odin-idioms-guidelines.md
+new file mode 100644
+index 0000000..bc56a07
+--- /dev/null
++++ b/knowledge-base/02-odin-idioms-guidelines.md
+@@ -0,0 +1,336 @@
++# Uruquim — Odin Idioms and Coding Guidelines
++
++## Status
++
++This document is normative for the implementation agent.
++
++If a code generation choice conflicts with this document, this document wins.
++If this document conflicts with `01-architecture-spec.md`, the architecture
++spec wins.
++
++## Core Identity
++
++You are writing Odin, not Go-with-different-syntax.
++
++You MUST optimize for:
++
++- explicitness
++- procedural design
++- allocator correctness
++- data layout clarity
++- low hidden cost
++- spec compliance
++- a simple, predictable public surface
++
++You MUST NOT optimize for:
++
++- Go familiarity
++- Rust stylistic imitation when it harms Odin clarity
++- pseudo-OOP aesthetics
++- abstract "generic elegance" at the cost of straightforward code
++
++## Productivity Is Not the Enemy of Explicitness
++
++Do not expose systems-level complexity merely because the language permits it.
++
++The framework internals must be allocator-aware and ownership-correct.
++The common public API must provide safe defaults and hide infrastructure
++details that application developers do not need to control.
++
++Do not require users to configure allocators, transports, radix nodes,
++response buffers, or middleware cursors for ordinary applications.
++
++Explicitness is a property we demand of the *internals* and of the *contract*,
++not a burden we shift onto every Hello World.
++
++## AI-Friendly API Rules
++
++- Use one canonical name per common operation.
++- Avoid equivalent aliases.
++- Avoid overloads whose behavior depends on `any`.
++- Prefer explicit helpers such as `ok`, `json`, `text`, `body`, and `path_int`.
++- Every public procedure must have a minimal compiling example.
++- Public examples are part of the compatibility contract.
++- Never document internal procedures beside public procedures without clearly
++  marking them private.
++- When choosing between two equally correct public APIs, prefer the one with:
++  fewer required concepts, fewer user-managed lifetimes, fewer generic
++  parameters visible at call sites, one obvious way to perform the task,
++  better compiler diagnostics, and lower probability of hallucinated usage.
++
++### Canonical syntax must actually compile
++
++Every pattern published in docs, examples, or `ai-context.md` MUST be valid
++Odin verified by CI. In particular:
++
++- `or_else` takes an *expression*, not a statement block. Patterns like
++  `id := f() or_else { respond(...); return }` are NOT valid Odin and MUST NOT
++  appear anywhere in documentation.
++- The canonical extractor pattern is:
++
++```odin
++id, ok := web.path_int(ctx, "id")
++if !ok {
++	return
++}
++```
++
++If prototyping later proves a strictly better compiling form, the canonical
++pattern is amended once, spec-first, before the API freezes — never ad hoc in
++individual examples.
++
++## Language Mindset
++
++### No OOP simulation
++
++Do not simulate classes, methods, inheritance, or "objects with behavior".
++
++Use:
++
++- records for data
++- procedures for operations
++- packages as library boundaries
++- explicit state passed by pointer when mutation is intended
++
++Preferred:
++
++```odin
++router_init :: proc(r: ^Router) { ... }
++router_add_route :: proc(r: ^Router, method: Method, path: string, h: Handler) -> Route_Error { ... }
++```
++
++Avoid receiver-thinking (`Router.add_route(...)`, `ctx.json(...)`) even where
++style tricks would allow it.
++
++### Package style
++
++Packages are libraries, not pseudo-namespaces. Keep responsibilities crisp;
++prefer a few coherent packages over many tiny pseudo-class packages. The
++public package is `web`; internals live under `web/internal/`.
++
++## Memory Management Rules
++
++### General allocator policy
++
++Every allocation belongs to exactly one lifetime:
++
++- application lifetime
++- router lifetime
++- request lifetime
++- temporary scratch lifetime
++
++Identify the lifetime before allocating.
++
++### `context.allocator`
++
++Use for allocations that survive the current local operation: router
++construction, chain precomputation, persistent request-owned structures, test
++harness objects.
++
++### `context.temp_allocator`
++
++Use only for short-lived scratch where ALL of the following hold: the
++allocation is temporary, is not stored into framework state that outlives the
++operation, is not returned as part of a persistent structure, and is not
++referenced after the temp allocator may be cleared.
++
++Allowed: path normalization scratch, temporary formatting buffers, short-lived
++parse helpers, lookup-time scratch consumed immediately.
++
++Forbidden: storing temp-allocated strings in route tables; storing
++temp-allocated slices in request state; returning temp-allocated data unless
++the contract explicitly requires immediate copy; keeping temp-allocated
++values in deferred work.
++
++Note: `core:net` documents a performance dependency on an adequately sized
++`context.temp_allocator`. Allocator discipline is correctness, not tuning.
++
++### Deallocation forms
++
++- `free(ptr)` for pointer/object storage
++- `delete(x)` for slices, dynamic arrays, maps, strings with managed backing
++- `free_all(allocator)` only when the allocator semantics support it
++
++Pair init/destroy procedures for router-, application-, and request-level
++lifetimes.
++
++### Allocation restrictions by area
++
++**Registration** MAY allocate (radix nodes, metadata, chain flattening,
++pattern storage, diagnostics).
++
++**Lookup / request hot path** treats allocation as exceptional. Forbidden by
++default: param maps, heterogeneous containers, heap-backed path splitting,
++diagnostic string formatting on the success path. Allowed if justified and
++documented: bounded once-per-request storage, phase-contracted body
++buffering, explicit fallback allocation in error paths.
++
++**Body handling**: do not copy bodies without reason; do not materialize
++strings when bytes suffice; cap sizes; allocate with request-lifetime
++allocator; avoid double copies; define ownership clearly.
++
++## Data-Oriented Design Rules
++
++Prefer simple structs with obvious ownership, contiguous storage, flat
++arrays/slices over pointer-chasing, enum-indexed tables, and fixed-capacity
++param storage. Avoid maps in hot dispatch paths, per-request map-based feature
++bags, and generic tree abstractions with opaque cost.
++
++If work can be done at registration time, do it then: flattened chains, param
++counts, pattern metadata, conflict validation, static-child ordering.
++
++## Error Modeling
++
++Do not emulate Go's `error` interface or return strings as the primary error
++channel.
++
++Prefer:
++
++- enums for closed failure sets
++- unions (`#shared_nil`) for multi-domain failure sets
++- `(value, ok)` where failure is binary and carries no detail
++- `(value, Error)` when detail is needed
++
++```odin
++Route_Register_Error :: enum {
++	None = 0,
++	Empty_Path,
++	Path_Must_Start_With_Slash,
++	Duplicate_Route,
++	Wildcard_Must_Be_Last,
++	Conflicting_Route,
++}
++
++Bind_Error :: union #shared_nil {
++	Json_Bind_Error,
++	Query_Bind_Error,
++	Validation_Error,
++}
++```
++
++**Extractor contract:** public extractors return `(value, ok)` and are
++responsible for writing the standardized error response before returning
++`ok = false`. Detailed error taxonomies (`Bind_Error` etc.) exist internally
++and power the standardized envelope; ordinary handlers never inspect them.
++
++### Panic policy
++
++Panic only for impossible internal invariants, programmer misuse at
++initialization time, or corruption. Never for request-time validation or user
++input failure.
++
++## `any` Policy
++
++Assume `any` is dangerous. Do not use `any` in core framework architecture
++unless a spec explicitly allows it.
++
++Forbidden uses: request-scoped storage bags, middleware communication, route
++parameter values, handler return channels, error transport, default public
++extension points.
++
++Allowed only in tightly bounded tooling/debug cases (debug logging, test
++utilities, diagnostic payloads off the hot path) — documented, lifetime-
++annotated, and isolated at boundaries.
++
++### The one sanctioned `rawptr`
++
++`app_with_state` stores a single `rawptr` + `typeid` pair, validated by
++assertion inside `web.state(ctx, T)`. This controlled, boundary-isolated use
++of type information is explicitly permitted. It does not license dynamic bags
++anywhere else.
++
++## Procedure Design Rules
++
++Signatures communicate ownership and mutability:
++
++```odin
++router_lookup :: proc(r: ^Router, method: Method, path: string) -> (^Resolved_Route, []Param, bool)
++```
++
++Use pointers for mutable large state; do not pass giant structs by value
++casually. Every type that owns memory has init/destroy pairs — in the
++Productive API these are wrapped (`web.app()` / `web.destroy(&app)`), but they
++exist and are documented in the Systems API.
++
++## Context Usage Rules
++
++- `context` always means Odin's implicit context.
++- `ctx` always means the framework request `Context`.
++- Never name a framework context variable `context`.
++
++Capture allocators deliberately at boundaries
++(`ctx_internal.allocator = context.allocator`); override `context.allocator`
++only in narrow, documented scopes.
++
++## Concurrency and Async Discipline
++
++No goroutine-like assumptions. All async/event-loop work is explicit in the
++transport layer (`core:nbio`-backed once `core:net/http` lands). Core
++framework control flow stays transport-agnostic and synchronous unless a
++phase introduces streaming APIs.
++
++Never retain references into transport-owned request storage past the request
++lifetime; copy intentionally with the correct allocator if a value must
++survive.
++
++## Testing Rules
++
++Spec first, tests second, implementation third — always, for core components.
++
++Required test layers: unit tests for radix operations; unit tests for chain
++semantics; integration tests via the in-memory test transport; negative tests
++for route conflicts; allocator/lifetime tests where possible; **compile tests
++for every documented example**.
++
++Must-test invariants:
++
++- Router: static beats param; param beats wildcard; duplicates rejected;
++  wildcard-last enforced; per-method dispatch isolated.
++- Middleware: exact order; short-circuit stops downstream; post-`next` runs in
++  reverse-unwind order; recovery catches panics.
++- Context/extractors: params/query/header lookups predictable; failed
++  extractors write the standardized envelope exactly once; response commit
++  rules enforced.
++- Defaults: `web.app()` actually installs recovery, body limit, timeouts,
++  404/405 handling — verified by tests, not by documentation.
++
++## Public API Design Rules
++
++- Minimize surface area; start with a small core that composes.
++- One canonical name per concept; no synonyms in the first release.
++- Explicit names over vague, magic, or cute ones.
++- No reflection-heavy validation by default; if metadata-driven validation
++  appears later it is optional and never infects the hot path.
++
++## Dependency Rules
++
++Write code robust to vendored third-party packages. Do not hardwire external
++package details into the public architecture. Transport-specific types must
++not leak into user handlers — this is the load-bearing rule that makes the
++`odin-http` → `core:net/http` migration a non-event for applications.
++
++## Documentation Rules
++
++For any nontrivial procedure, document: ownership expectations, allocator use,
++failure modes, and whether returned strings/slices are borrowed or owned.
++Mandatory for router, context, extractor, and transport-boundary procedures.
++
++Additionally, any change to the public API MUST, in the same commit:
++
++- update `docs/canonical-patterns.md` if a canonical form changed
++- update `docs/ai-context.md`
++- keep every affected example compiling
++
++## Final Behavioral Rules for the Agent
++
++You MUST: favor explicit procedures over abstraction theater; keep structs
++simple; keep hot paths predictable; keep allocator ownership visible
++internally; model failures with enums/unions; avoid `any`; avoid OOP
++simulation; write tests before implementation; preserve the transport
++boundary; keep the ordinary public surface down to app/route/extract/respond/
++serve.
++
++You MUST NOT: port Gin or FastAPI mechanically; mimic Go's context bag;
++assume GC-like lifetime forgiveness; introduce maps/interfaces/`any` into hot
++request paths; design public APIs around hidden allocations; add public
++aliases or a second way to do an already-canonical task.
+diff --git a/knowledge-base/03-development-phases.md b/knowledge-base/03-development-phases.md
+new file mode 100644
+index 0000000..40f1610
+--- /dev/null
++++ b/knowledge-base/03-development-phases.md
+@@ -0,0 +1,252 @@
++# Uruquim — Development Phases
++
++## Process Contract
++
++Every phase follows this strict rule:
++
++- finalize spec statements for the phase
++- write tests for the phase
++- implement only after tests exist
++- do not expand scope mid-phase unless the specification is amended first
++
++Each phase has three mandatory gates: **Spec Gate**, **Test Gate**,
++**Implementation Gate**. A phase is not complete until all three pass.
++
++Cross-phase invariants, enforced from Phase 1 onward:
++
++- no transport-native types in any public signature
++- every documented example compiles in CI
++- `docs/ai-context.md` matches the public API at every merge
++
++## Phase One — Productive Vertical Slice
++
++### Goal
++
++Not "Hello World". The phase is complete only when a user can build a small
++JSON CRUD-style API without accessing transport internals.
++
++### Scope (required)
++
++- application creation with safe defaults: `web.app()`, `web.bare()`,
++  `web.destroy`
++- GET and POST routing (static and `:param` routes; full method set may land
++  in Phase 2 with the real router)
++- query access: `web.query_or`
++- path extractors: `web.path_int`, `web.path_string`
++- JSON rendering: `web.ok`, `web.created`, `web.no_content`, `web.json`,
++  `web.text`
++- JSON binding: `web.body`
++- standardized error envelope + helpers (`bad_request`, `not_found`,
++  `unauthorized`, `forbidden`, `internal_error`)
++- body size limit (default-on)
++- panic recovery (default-on)
++- consistent 404 behavior
++- in-memory testing harness: `web.test_request` over the test transport
++- internal transport boundary (`Transport` struct) prepared for
++  `core:net/http`
++- functional bootstrap adapter over `odin-http`
++- transport-neutral public handler API: `proc(ctx: ^web.Context)`
++- `web.serve(&app, port)` and graceful shutdown
++
++Routing MAY use a simple interim dispatcher; the radix router is Phase 2. The
++interim dispatcher's *observable behavior* (precedence, 404) must already
++match the router spec so Phase 2 changes nothing publicly.
++
++### Forbidden in this phase
++
++- route groups, middleware registration API (`web.use`) beyond the built-in
++  defaults
++- streaming bodies
++- validation system
++- observability beyond startup/access logging needed for debugging
++- Systems API surface (`Typed_App`, custom allocators, `serve_transport`)
++
++### Spec Gate checklist
++
++- [ ] freeze canonical names for everything in scope (extract/respond/app/serve)
++- [ ] define the standardized error envelope and initial code list
++- [ ] define extractor contract (respond-on-failure, `(value, ok)`)
++- [ ] define `Request`/`Response` minimum fields and commit semantics
++- [ ] define the `Transport` boundary and test-transport contract
++- [ ] define default policies of `web.app()` (limits, timeouts, recovery)
++- [ ] define shutdown behavior
++
++### Test Gate checklist
++
++- [ ] static route returns expected status and body
++- [ ] `:param` route extracts value; `path_int` failure returns the
++      standardized `invalid_path_parameter` response
++- [ ] `web.body` success and `invalid_json` failure paths
++- [ ] oversized body returns `body_too_large`
++- [ ] unknown route returns standardized 404
++- [ ] panic in handler returns 500 via recovery
++- [ ] `test_request` round-trips without sockets
++- [ ] adapter starts and stops cleanly; response cannot be committed twice
++- [ ] `web.bare()` installs none of the default policies
++
++### Implementation Gate checklist
++
++- [ ] odin-http bootstrap adapter implemented behind the boundary
++- [ ] test transport implemented
++- [ ] examples `01-hello-world`, `02-json-api`, `03-route-params` compile and
++      run in CI
++- [ ] a small CRUD example is writable using only public API (proof of goal)
++- [ ] no transport-native types leak into public signatures
++- [ ] `docs/quick-start.md`, `docs/errors.md`, `docs/canonical-patterns.md`,
++      `docs/ai-context.md` cover the shipped surface
++
++## Phase Two — Custom Router
++
++### Goal
++
++Replace the interim dispatcher with a real method-sharded radix router,
++with no public API change.
++
++### Scope (required)
++
++- router init/destroy; one radix tree per HTTP method
++- full method set: GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
++- static segments, `:param`, terminal `*wildcard`
++- zero-allocation lookup on the hot path
++- route conflict detection with diagnostics
++- 404 and 405 behavior
++- route pattern metadata preserved for observability
++- benchmarks (registration excluded, lookup measured)
++
++### Forbidden
++
++- middleware composition API
++- binding/validation changes
++- streaming
++
++### Spec Gate checklist
++
++- [ ] radix node shape; precedence rules; duplicate/conflict rules
++- [ ] path normalization policy
++- [ ] param extraction representation (no maps)
++- [ ] 405 and OPTIONS policy
++
++### Test Gate checklist
++
++- [ ] static/param/wildcard match; static beats param; param beats wildcard
++- [ ] duplicate registration rejected; invalid wildcard placement rejected
++- [ ] per-method routing isolated; 405 when route exists on another method
++- [ ] matched pattern preserved for instrumentation
++- [ ] fuzz/property tests for insert+lookup invariants
++
++### Implementation Gate checklist
++
++- [ ] radix insert/lookup implemented; conflict diagnostics implemented
++- [ ] params populated without map allocation
++- [ ] lookup hot path reviewed for avoidable allocations; benchmarks recorded
++- [ ] all Phase 1 public-behavior tests still pass unchanged
++
++## Phase Three — Middleware and Typed State
++
++### Goal
++
++Deterministic middleware composition and the opt-in typed state story.
++
++### Scope (required)
++
++- `web.use` at app, group, and route level; `web.router` / `web.group` /
++  `web.mount`
++- onion semantics: `web.next`, short-circuit, `abort`
++- chain flattening at registration time
++- application state: `web.app_with_state` + `web.state(ctx, T)` with
++  typeid-validated access
++- per-request state pattern (documented canonical pattern; Systems API
++  `Typed_App` prototype)
++- auth pattern via extraction procedures (`current_user`-style)
++- logger middleware (route-pattern aware)
++- request ID middleware
++
++### Spec Gate checklist
++
++- [ ] exact ordering rules (global → outer groups → inner → route → handler)
++- [ ] abort semantics; post-`next` unwind order
++- [ ] `app_with_state` registration and validation semantics
++- [ ] Systems API prototype decision: parametric `Typed_App` vs composed
++      context — decided with real compiled prototypes
++
++### Test Gate checklist
++
++- [ ] middleware order exactness, including nested groups
++- [ ] short-circuit stops downstream; unwind order correct
++- [ ] `web.state` returns registered state; wrong type asserts
++- [ ] request ID present in context and response header
++- [ ] typed request state writable in middleware, readable in handler
++
++### Implementation Gate checklist
++
++- [ ] flattened chains built at registration; no dispatch-time assembly
++- [ ] logger, request ID implemented
++- [ ] examples `04-middleware`, `05-route-groups`, `06-authentication`
++- [ ] all phase tests pass
++
++## Phase Four — Production
++
++### Goal
++
++Harden for serious use.
++
++### Scope (required)
++
++- read/write timeouts wired through config; timeout middleware
++- CORS middleware; secure headers middleware
++- graceful shutdown robustness (in-flight requests covered)
++- cookies helpers
++- file upload (fully specified multipart contract) and static file serving
++- structured logging
++- metrics and tracing hooks (route-pattern keyed)
++- allocator/lifetime audit; benchmark regression harness
++- request/response edge-case coverage
++
++### Gates (summary)
++
++- Spec: timeout semantics; telemetry hook points; upload/static contracts;
++  shutdown guarantees
++- Test: timeout behavior; shutdown with in-flight requests; recovery +
++  telemetry interaction; upload limits; benchmark harness exists
++- Implementation: hardening middleware done; audit completed; examples
++  `07-crud`, `08-postgres`, `09-file-upload`, `10-observability`; docs
++  `memory-model.md`, `middleware.md`, `cookbook.md` complete
++
++## Phase Five — Ecosystem and AI
++
++### Goal
++
++Make Uruquim maximally usable by humans and coding agents, and land the
++canonical transport.
++
++### Scope
++
++- canonical documentation pass (quick-start, cookbook, errors complete and
++  example-verified)
++- `docs/ai-context.md` finalized as a maintained compatibility artifact
++- project templates
++- optional CLI (`uruquim new`, `uruquim generate` exploration)
++- OpenAPI generation (likely codegen-based)
++- integrations (Postgres pool pattern, config loading pattern)
++- **official `core:net/http` adapter** when the package ships; parity tests
++  against the bootstrap adapter; bootstrap adapter then demoted or removed
++- validation story decision (tag-based vs codegen), prototype-gated
++
++### Gates (summary)
++
++- Spec: adapter parity contract; codegen scope; validation decision recorded
++- Test: adapter parity suite green on both transports; docs examples compile;
++  template projects build
++- Implementation: `core:net/http` adapter shipped as canonical; migration
++  verified to require zero application changes
++
++## Exit Criteria for the Project Core
++
++The framework core is architecturally established only when:
++
++- a small JSON CRUD API can be written from `docs/ai-context.md` alone
++- the router is custom, benchmarked, and fully test-covered
++- middleware semantics are stable and test-pinned
++- transport is decoupled, with `core:net/http` as canonical backend
++- the hot path has been allocation-reviewed
++- every documented example compiles in CI
+diff --git a/knowledge-base/04-local-agent-system-prompt.txt b/knowledge-base/04-local-agent-system-prompt.txt
+new file mode 100644
+index 0000000..0d6c574
+--- /dev/null
++++ b/knowledge-base/04-local-agent-system-prompt.txt
+@@ -0,0 +1,148 @@
++You are the implementation agent for Uruquim, an Odin HTTP microframework.
++
++You are not here to invent a new direction on your own.
++You are here to implement the architecture and process defined by the project
++knowledge base.
++
++Read these files first and treat them as the governing specification:
++
++- knowledge-base/01-architecture-spec.md
++- knowledge-base/02-odin-idioms-guidelines.md
++- knowledge-base/03-development-phases.md
++
++Your role:
++- Senior Odin systems programmer
++- Data-Oriented Design practitioner
++- Performance-focused framework implementer
++- Spec-driven development agent
++- Guardian of a simple, canonical public API
++
++Your default behavior:
++- Read the spec first
++- Follow the current phase only
++- Do not jump ahead
++- Do not add out-of-scope features
++- Do not port Go/Gin or Python/FastAPI mechanically
++- Do not simulate OOP
++- Do not introduce `any`-driven architecture
++- Do not leak transport-specific types into the public framework API
++
++Productivity rules you must obey:
++- Productivity is a core requirement, not an optional layer.
++- Do not expose internal complexity through the ordinary public API.
++- The default API must be simple enough that a coding agent with limited Odin
++  knowledge can produce correct handlers by copying canonical examples.
++- Whenever choosing between two equally correct public APIs, prefer the one
++  with:
++  - fewer required concepts
++  - fewer user-managed lifetimes
++  - fewer generic parameters visible at call sites
++  - one obvious way to perform the task
++  - better compiler diagnostics
++  - lower probability of hallucinated usage
++- Internals may be sophisticated. The common user experience must remain
++  simple.
++- One canonical name per common operation. Never add public aliases or a
++  second equivalent way to perform an already-canonical task.
++- Every public API change must, in the same commit, update
++  docs/canonical-patterns.md (if a canonical form changed) and
++  docs/ai-context.md, and keep all examples compiling.
++- Every documented code pattern must be valid Odin verified by compilation.
++  Do not publish speculative syntax (e.g. `or_else` with a statement block).
++
++Transport rules you must obey:
++- The future core:net/http is the canonical transport backend.
++- odin-http is a bootstrap adapter only, hidden behind the internal boundary.
++- The public API never exposes transport types.
++- The ordinary user calls web.serve; transport injection is an advanced,
++  separately documented API.
++
++Core implementation principles you must obey:
++- Odin is procedural; use package procedures and explicit state
++- Keep data and behavior separate
++- Respect allocator boundaries and document ownership
++- Optimize the hot path for predictability and low allocation
++- Prefer enums/unions over dynamic error patterns
++- Avoid reflection-heavy or magic-driven architecture
++- Preserve the transport adapter boundary at all times
++
++Memory rules you must obey:
++- Use `context.allocator` for persistent allocations
++- Use `context.temp_allocator` only for short-lived scratch data
++- Never let temp-allocated data escape its valid lifetime
++- Make lifetime/ownership explicit when writing or modifying APIs
++- Pair initialization and destruction procedures for owned structures
++- Never surface any of this in the Productive API
++
++Router rules you must obey:
++- Use method-sharded routing with a custom radix tree (Phase 2+)
++- Enforce route conflict detection at registration time
++- Preserve route pattern metadata for observability
++- Avoid map-based path parameter storage in the hot path
++
++Middleware rules you must obey:
++- Middleware semantics are deterministic and onion-like
++- Flatten chains at registration time
++- Support global, group, and route middleware in exact documented order
++- Short-circuit/abort must stop downstream execution
++- Recovery is explicit middleware, installed by default in web.app()
++- User-facing middleware is just proc(ctx: ^web.Context) plus web.next;
++  never require wrappers, chain indices, rawptr, or continuation callbacks
++
++Context and extractor rules you must obey:
++- The default Context is a plain struct; parametric typed state is opt-in
++  Systems API, never a tax on ordinary applications
++- Extractors respond on failure with the standardized error envelope and
++  return (value, ok); handlers only `return` on !ok
++- Request-scoped extensibility goes through typed state, never map[string]any
++- The single sanctioned rawptr is app_with_state's typeid-validated app state
++- Distinguish Odin implicit `context` from framework request `ctx`
++
++Process rules you must obey:
++- Spec first
++- Tests second
++- Implementation third
++
++For every non-trivial task:
++1. restate the exact phase and scope you are working in
++2. identify the relevant spec clauses
++3. propose or write tests first
++4. implement only what is necessary to satisfy those tests
++5. summarize what was added and what remains out of scope
++
++When asked to implement something:
++- verify it belongs to the active phase
++- if it does, proceed
++- if it does not, say it is out of scope for the active phase and name the
++  phase where it belongs
++
++When editing code:
++- preserve naming clarity
++- prefer explicit procedures
++- prefer simple structs
++- avoid unnecessary indirection
++- avoid hidden allocations
++
++When uncertain:
++- choose the simpler, more explicit Odin design
++- choose the option that preserves allocator and ownership clarity
++- choose the option that keeps the public API transport-agnostic
++- choose the option a limited-knowledge coding agent is least likely to misuse
++
++When presenting code changes:
++- explain why each file exists
++- explain allocator ownership and lifetime assumptions
++- explain how tests validate behavior
++- call out any invariants or constraints explicitly
++
++Do not start coding immediately.
++
++First action after reading the files:
++- acknowledge that the knowledge base has been loaded
++- state that you are ready
++- wait for my command indicating which phase or task to execute
++
++Expected first response after loading:
++"Knowledge base loaded. Architecture, Odin idioms, development phases, and
++productivity requirements are understood. Ready to begin when you specify the
++active phase or task."
+-- 
+2.43.0
+
