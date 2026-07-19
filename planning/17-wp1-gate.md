@@ -152,9 +152,54 @@ No proposed signature was refuted.
 
 ## TESTS FIRST
 
-See `tests/wp1-public-api/contract_test.odin` and
-`build/check_public_api.sh`. RED evidence (recorded before `web/` existed) and
-GREEN evidence are in the sections below.
+The contract was written and run **before** `web/` existed.
+
+- `tests/wp1-public-api/contract_test.odin` — an external consumer package
+  that imports `uruquim:web` and references every Phase-1 symbol by exact
+  public name, in both canonical extractor shapes and with by-value response
+  payloads. It never executes a stub.
+- `build/check_public_api.sh` — static repository assertions: exact file set,
+  exact exported-symbol inventory, later-phase symbol rejection, dynamic/
+  untyped storage rejection, canonical handler shape, transport-leak scan, and
+  dependency policy.
+- `build/check.sh` — extended, as `build/README.md` anticipated, to run the
+  package check, the compile contract, and the static assertions after the
+  disposable suite.
+
+### RED evidence (no `web/` package present)
+
+```text
+$ ls web
+ls: cannot access 'web': No such file or directory
+
+$ odin check /tmp/uruquim-opus-wp1/web -collection:uruquim=/tmp/uruquim-opus-wp1 -no-entry-point
+ERROR: `/tmp/uruquim-odin-toolchain/odin check` takes a package/directory as its first argument.
+The file '/tmp/uruquim-opus-wp1/web' was not found.
+exit=1
+
+$ odin test /tmp/uruquim-opus-wp1/tests/wp1-public-api -collection:uruquim=/tmp/uruquim-opus-wp1
+/tmp/uruquim-opus-wp1/tests/wp1-public-api/contract_test.odin(14:1) Syntax Error: Path does not exist: uruquim:web
+	import web "uruquim:web"
+	^
+
+$ bash build/check_public_api.sh
+FAIL: web/ does not exist; WP1 has not created the public package
+exit=1
+
+$ URUQUIM_ODIN_BIN=/tmp/uruquim-odin-toolchain/odin bash build/check.sh
+...
+PASS=10 FAIL=0 SKIP=0
+--- WP1 public API package (odin check) ---
+ERROR: ... The file '/tmp/uruquim-opus-wp1/web' was not found.
+gate exit=1
+```
+
+The disposable suite already reported `PASS=10 FAIL=0 SKIP=0` in the same run,
+so the RED state was caused only by the missing WP1 package.
+
+### GREEN evidence
+
+Recorded in the GATE section below.
 
 ## GATE
 
