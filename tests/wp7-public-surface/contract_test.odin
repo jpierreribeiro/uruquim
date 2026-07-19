@@ -119,15 +119,15 @@ wp7_body_handler_via_test_request_produces_invalid_json :: proc(t: ^testing.T) {
 //    procedure values so a signature drift is a COMPILE error here rather than
 //    a snapshot diff somewhere else.
 //
-//    `test_request` carries the optional `body` parameter added by the WP14
-//    freeze amendment (planning/phase-1-freeze.md, Amendment 1). The default is
-//    what keeps every three-argument call site — including the one below —
-//    compiling and behaving exactly as Phase 1 froze it.
+//    `test_request` carries the optional `body` and `query` parameters added by
+//    the WP14 freeze amendments (planning/phase-1-freeze.md, Amendments 1 and
+//    2). Their defaults are what keep every three-argument call site compiling
+//    and behaving exactly as Phase 1 froze it.
 // ---------------------------------------------------------------------------
 
 @(test)
 wp7_test_request_signature_is_pinned :: proc(t: ^testing.T) {
-	sig: proc(a: ^web.App, method: web.Method, path: string, body: string) -> web.Recorded_Response = web.test_request
+	sig: proc(a: ^web.App, method: web.Method, path: string, body: string, query: string) -> web.Recorded_Response = web.test_request
 	serve_sig: proc(a: ^web.App, port: int) = web.serve
 	a := web.app()
 	defer web.destroy(&a)
@@ -136,7 +136,7 @@ wp7_test_request_signature_is_pinned :: proc(t: ^testing.T) {
 	// `sig` requires all four arguments even though `web.test_request` itself
 	// defaults the last one. That is a useful property here — the pin exercises
 	// the complete signature rather than the convenient call shape.
-	res := sig(&a, .GET, "/nope", "")
+	res := sig(&a, .GET, "/nope", "", "")
 	testing.expect_value(t, res.status, web.Status.Not_Found)
 	testing.expect(t, serve_sig != nil)
 }

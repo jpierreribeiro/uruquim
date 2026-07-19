@@ -555,3 +555,46 @@ testing.expect_value(t, int(res.status), 413)
 That is the frozen design meeting the new capability rather than a defect, but a
 user will meet it the first time they test the cap, so it is pinned by
 `tests/wp14-public-surface/contract_test.odin::wp14_the_body_cap_holds_on_the_memory_transport`.
+
+
+---
+
+## Amendment 2 — WP14: `test_request` carries an optional query string
+
+**Date:** 2026-07-19. **Authority:** owner, ADR-021 (scope as accepted).
+**Ledger effect: none.** 32 application + 2 test-support = 34, unchanged.
+
+`web.query`, `web.query_int` and `web.query_int_or` are frozen Phase-1 symbols,
+and none of them could be exercised through `test_request`: the facade filled
+`Inbound.path` and left `Inbound.query` empty, so every lookup missed. Three
+frozen public procedures were untestable without opening a socket.
+
+The frozen line becomes:
+
+```
+test-support	proc	test_request :: proc(a: ^App, method: Method, path: string, body: string = "", query: string = "") -> Recorded_Response
+```
+
+`query` is a second fully visible default parameter, for the reason in
+Amendment 1: both defaults appear in `odin doc`, so the entire callable contract
+stays inside the frozen record. Query-only calls read
+`web.test_request(&app, .GET, "/search", query = "q=hello")`; the named-argument
+form was verified to compile on the pinned toolchain before the signature was
+frozen.
+
+**Query is carried separately from the path**, exactly as the real adapter does
+it — the transport splits the request target before the core sees it, so a `?`
+inside `path` is not a query string here either. Pinned by
+`tests/wp14-query/contract_test.odin::wp14_query_is_not_part_of_the_route_path`.
+
+### What is deliberately NOT in this amendment
+
+**Request headers.** Phase 1 exports no header accessor, so a `headers`
+parameter would be **write-only** — settable, and readable by nothing. It moves
+to **WP19**, alongside `web.header` and `web.bearer_token`, so it arrives with a
+test that can assert something. `Header_Pair` is not exported and no test-only
+header type is introduced.
+
+**Response-header recording.** `Recorded_Response` still carries only `status`
+and `body`. That decision belongs to Phase 4, where CORS and cookies create the
+first real need.

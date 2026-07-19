@@ -72,7 +72,13 @@ Recorded_Response :: struct {
 // neutral `Inbound` and nothing downstream can tell the two transports apart.
 // That is what makes the 4 MiB cap and the JSON errors identical here and on a
 // real connection (R-10), rather than a claim this facade makes about itself.
-test_request :: proc(a: ^App, method: Method, path: string, body: string = "") -> Recorded_Response {
+test_request :: proc(
+	a: ^App,
+	method: Method,
+	path: string,
+	body: string = "",
+	query: string = "",
+) -> Recorded_Response {
 	recorder := &a.private.test_transport
 
 	// Register the teardown on first use. This assignment is the ONLY reference
@@ -98,6 +104,11 @@ test_request :: proc(a: ^App, method: Method, path: string, body: string = "") -
 		transport.Inbound{
 			method = req.method,
 			path   = req.path,
+			// Query is carried SEPARATELY from the path, exactly as the real
+			// adapter does it: the transport splits the request target before the
+			// core ever sees it, so a `?` inside `path` is not a query string
+			// here any more than it would be on a socket.
+			query  = query,
 			// A view over the caller's string for the duration of this call. The
 			// core copies whatever it decides to keep, exactly as it does for a
 			// socket, so nothing here outlives the request.
