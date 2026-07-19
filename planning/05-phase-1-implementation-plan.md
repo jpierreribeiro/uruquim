@@ -1,7 +1,6 @@
 # 05 — Phase 1 Implementation Plan
 
-Status: **HUMAN-APPROVED SEQUENCE.** Implementation remains prohibited until
-`planning/07-spec-gate-phase-1.md` records READY. After that, execute one work
+Status: **HUMAN-APPROVED SEQUENCE; PHASE-1 SPEC GATE READY.** Execute one work
 package at a time. Every work package (WP) follows:
 **SPEC → TESTS → MINIMAL IMPLEMENTATION → REVIEW → DOCUMENTATION → GATE.**
 
@@ -20,7 +19,7 @@ runs on the pinned toolchain.
   commit `4ae2d1c` green with 10/10 prototypes; its timer is enabled and active.
 - **Objective.** Reproducible build: pinned Odin, collection wiring, local
   pre-push gate, and clean VPS repetition.
-- **Spec.** freeze discipline; baseline 01.
+- **Spec.** freeze discipline; pinned `odin-version.txt`; repository baseline.
 - **Files.** `odin-version.txt`, `build/check.sh`, `.githooks/pre-push`,
   `ops/ci/`, and collection documentation.
 - **API.** none.
@@ -63,7 +62,8 @@ runs on the pinned toolchain.
 - **API.** Public: `Request{method,path,query,headers,body}`, `Method`
   (`UNKNOWN/GET/POST/PUT/PATCH/DELETE`), `Header_View`. Internal, NOT exported:
   `Response{status,headers,body,committed}` and `Header_Pair`. Surface
-  checkpoint after WP2: exactly 32 symbols (29 + 3). See planning/18.
+  checkpoint after WP2: exactly 32 symbols (29 + 3), behavior recorded in
+  planning/20.
 - **Tests first.** view-aliasing + invalidation test (port of exp-06);
   explicit persistent-copy test; single-commit test on the INTERNAL commit
   primitive (port of exp-08 — integration through `web.json`/`web.ok` belongs
@@ -259,8 +259,9 @@ runs on the pinned toolchain.
 
 ## WP11 — Phase 1 Spec Gate and freeze
 - **Objective.** freeze only proven signatures/contracts.
-- **Spec.** freeze discipline; gate 07; planning/15 full guardrail audit.
-- **Files.** `planning/07-spec-gate-phase-1.md` (updated to EXECUTED results).
+- **Spec.** freeze discipline; planning/15 full guardrail audit.
+- **Files.** normative docs plus a temporary final gate record, archived after
+  the release decision is incorporated.
 - **API.** freeze the Phase-1' vocabulary.
 - **Tests first.** the gate checklist is itself the acceptance test; include
   exact public-export and direct-dependency inventories with an owner/evidence

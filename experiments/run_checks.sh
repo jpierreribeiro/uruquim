@@ -17,7 +17,7 @@ PASS=0; FAIL=0; SKIP=0
 need_odin() {
   if ! command -v odin >/dev/null 2>&1; then
     echo "SKIP: 'odin' not found on PATH (baseline: toolchain unavailable)."
-    echo "      Install dev-2026-07a and re-run. See planning/01-toolchain-baseline.md"
+    echo "      Install the version pinned in odin-version.txt and re-run."
     exit 3
   fi
   echo "odin version: $(odin version 2>&1)"

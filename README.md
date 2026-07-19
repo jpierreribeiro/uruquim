@@ -97,9 +97,9 @@ WP0 is complete. GitHub Actions is not required: a tracked pre-push hook runs
 the mandatory gate, and the project VPS repeats it from a clean commit on an
 enabled systemd timer.
 
-WP1 is complete: `web/` is a **compiling public API skeleton**, not a
-functional server. The 29 Phase-1 symbols exist with their exact names and
-signatures and compile on the pinned toolchain, but every procedure body is an
-inert stub. Nothing routes, parses, marshals, commits a response, or binds a
-socket. `web.serve` returns immediately. Behavior arrives in WP2–WP9; see
-`planning/17-wp1-gate.md`.
+WP1 and WP2 are complete. The public package compiles with the exact
+32-symbol checkpoint and now carries the request-view and internal
+single-commit response model. It is still not a functional HTTP server:
+routing, extractors, JSON rendering, body binding and the real transport arrive
+in WP3–WP9. Current work-package status lives in
+`planning/05-phase-1-implementation-plan.md`.
