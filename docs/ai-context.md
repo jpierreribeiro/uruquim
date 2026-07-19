@@ -9,22 +9,27 @@ alternative forms. If something is not listed, it does not exist.**
 > ratified; sections marked Phase 2/3/4 do not yet exist and must not be
 > emitted by a coding agent.
 >
-> **Implementation status (WP4): routing works; there is still no server.**
-> Every name and signature here exists in `web/` and compiles on the pinned
-> toolchain, so code written against this reference compiles.
+> **Implementation status (WP5): routing and extraction work; there is still
+> no server.** Every name and signature here exists in `web/` and compiles on
+> the pinned toolchain, so code written against this reference compiles.
 >
 > What now really works: `Request`, `Method` and `Header_View`; route
 > registration and dispatch, including `:param` matching and
 > static-over-parametric precedence; the automatic 404 and the 405 with its
-> `Allow` header in `web.app()`; and `web.test_request`, which drives one
-> request in-memory (no sockets) and returns the real routed result.
+> `Allow` header in `web.app()`; `web.test_request`, which drives one request
+> in-memory (no sockets) and returns the real routed result; and — new in WP5 —
+> **the five path and query extractors**, including the standardized 400
+> envelope they commit on failure.
 >
-> What still does NOT work: **no extractor returns a value** (`web.path`,
-> `web.path_int`, `web.query*` and `web.body` are inert stubs until WP5/WP7);
-> **no response helper produces output** (`web.ok`, `web.json`, `web.text` and
-> the error helpers commit nothing until WP6), so no JSON is ever produced; and
-> `web.serve` returns immediately without binding a port (WP8). The 404 and 405
-> bodies are EMPTY — the standardized error envelope below is WP6.
+> What still does NOT work: **`web.body` returns false and binds nothing**
+> (WP7); **no response helper produces output** (`web.ok`, `web.json`,
+> `web.text` and the error helpers commit nothing until WP6), so no JSON is
+> produced except the two extractor error envelopes; and `web.serve` returns
+> immediately without binding a port (WP8). The 404 and 405 bodies are still
+> EMPTY — the general error envelope is WP6.
+>
+> WP5 emits `invalid_path_parameter` and `invalid_query_parameter` and nothing
+> else. Do not expect `web.bad_request` or `web.not_found` to produce a body.
 >
 > A handler that responds with nothing leaves the response uncommitted, and
 > `web.test_request` reports that honestly as a zero status and an empty body.
@@ -102,8 +107,10 @@ stored as given, and an unsupported pattern simply never wins a match; there is
 no registration-error type to catch. A route that is never reached is
 indistinguishable from a 404, so check your patterns.
 
-The captured `:param` value is NOT readable yet — `web.path(ctx, "id")` is a
-WP5 stub that still returns `""`. Routing matches; extraction comes next.
+The captured `:param` value is read with `web.path(ctx, "id")` (WP5). There is
+still no `ctx.params`: the extractor is the one canonical access path. The name
+must match the pattern exactly — `web.path(ctx, "Id")` on `/users/:id` returns
+`""`, it does not fall back to the captured parameter.
 
 `web.app()` adds two automatic responses:
 
@@ -219,6 +226,31 @@ token, found := web.bearer_token(ctx)
 // Phase 3 Advanced API, unavailable in Phase 1:
 state := web.state(ctx, App_State)
 ```
+
+WP5 semantics you must not guess at:
+
+- **Views, not copies.** `web.path` and `web.query` return views over the
+  request. They are valid only during the request — copy explicitly to keep
+  them (see Request data lifetime).
+- **The default applies only to ABSENCE.** `web.query_int_or(ctx, "limit", 20)`
+  returns 20 when `limit` is not in the query string. `?limit=banana` and
+  `?limit=` are both a 400, never 20. Presence is decided by the key, not by
+  whether the value is usable.
+- **A key with no `=` is present with an empty value.** `?flag` makes
+  `web.query(ctx, "flag")` return `("", true)`, which is distinguishable from
+  an absent key returning `("", false)`.
+- **Integers are strict decimal.** An optional `-` and ASCII digits, nothing
+  else. `+5`, `0x10`, `1_000`, `1.5` and any surrounding whitespace are
+  rejected with a 400.
+- **Comparison is exact and case-sensitive**, for both path and query names.
+- **Nothing is decoded.** No percent-decoding, no `+`-as-space. `?q=a%20b`
+  yields the literal `a%20b`. Decode it yourself if you need to.
+- **Duplicate keys:** the first occurrence wins. This is a minimal internal
+  rule, not a contract to build on.
+
+You cannot pass a query string to `web.test_request` — its signature is method
+and path only. To test query extraction, set `ctx.request.query` on a
+`web.Context` directly.
 
 JSON structs use tags:
 

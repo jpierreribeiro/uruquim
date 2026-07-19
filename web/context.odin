@@ -75,4 +75,22 @@ Context_Internal :: struct {
 	// path that an unauthenticated client can trigger at will.
 	allow_buffer: [ALLOW_VALUE_MAX]u8,
 	allow_header: [1]Header_Pair,
+
+	// WP5 — request-local storage for the extractor error envelope, on exactly
+	// the same terms as `allow_buffer` above and for exactly the same reason:
+	// the committed response holds a VIEW over it, and it is read after the
+	// extractor returns.
+	//
+	// A fixed buffer, not an allocation. There is no request-lifetime arena
+	// until WP7 (ADR-006), so an allocated envelope would have no owner and no
+	// point of release — and a malformed `?page=x` is something an
+	// unauthenticated client can send at will, so allocating there would be a
+	// remote memory-pressure lever. `ERROR_BODY_MAX` is the exact worst case,
+	// derived from the ratified codes and messages in `web/errors.odin` and
+	// re-checked there by `#assert`.
+	//
+	// Only the FIRST commit ever writes here: `error_commit_parameter` consults
+	// the commit guard before touching the buffer, so a second failure cannot
+	// rewrite the bytes the first response is still pointing at.
+	error_buffer: [ERROR_BODY_MAX]u8,
 }

@@ -18,13 +18,18 @@ these forms. If a pattern here conflicts with any other document except
 > WP2 added the request/response model: `Request`, `Method` and `Header_View`
 > exist and behave as described below.
 >
-> WP4 has added routing: registration, `:param` matching,
-> static-over-parametric precedence, per-method isolation, and the automatic
-> 404/405 of `web.app()` all work, driven in memory by `web.test_request`.
+> WP4 added routing: registration, `:param` matching, static-over-parametric
+> precedence, per-method isolation, and the automatic 404/405 of `web.app()`,
+> driven in memory by `web.test_request`.
 >
-> It is **still not a functional server**, and two of the forms below do not
-> execute yet: no extractor returns a value (WP5/WP7) and no response helper
-> produces output (WP6), so no JSON is ever rendered. `web.serve` binds no port
+> WP5 has added extraction: `web.path`, `web.path_int`, `web.query`,
+> `web.query_int` and `web.query_int_or` all work, and a failing extractor
+> really does commit its standardized 400 envelope. The extractor pattern below
+> is therefore now executable, not just canonical.
+>
+> It is **still not a functional server**. `web.body` binds nothing (WP7) and
+> no response helper produces output (WP6), so the only JSON the framework
+> renders is the two extractor error envelopes. `web.serve` binds no port
 > (WP8). The canonical *forms* are what this document fixes, and they are
 > unchanged.
 
@@ -342,10 +347,37 @@ if !ok {
 GET /users              → limit = 20
 GET /users?limit=50     → limit = 50
 GET /users?limit=banana → 400 invalid_query_parameter
+GET /users?limit=       → 400 invalid_query_parameter
 ```
+
+The last line is the one that surprises people. Presence is decided by the
+KEY, not by whether the value is usable, so `?limit=` is PRESENT with an empty
+value — and an empty value is not an integer. The default applies only when
+the key is absent entirely. `query_int_or` never substitutes the default for a
+value the caller actually sent.
 
 Future typed variants follow the same pattern: `query_<type>` /
 `query_<type>_or`.
+
+### What the query extractors do NOT do (WP5)
+
+These are deliberate omissions, not oversights. Do not write code that assumes
+otherwise:
+
+- **No decoding.** `?q=a%20b+c` yields the literal `a%20b+c`. There is no
+  percent-decoding and `+` does not become a space. Decode in the application
+  if you need it.
+- **No normalization.** Keys and values are compared and returned byte for
+  byte, case-sensitively.
+- **No duplicate-key contract.** When a key repeats, the first occurrence
+  wins. That is a minimal internal rule so the scan is deterministic; it is not
+  a promise about multi-value parameters.
+- **Strict decimal integers.** An optional `-` then ASCII digits. `+5`,
+  `0x10`, `1_000`, `1.5` and surrounding whitespace are all 400s.
+
+`web.query` returns a VIEW over `ctx.request.query`, exactly like every other
+request-derived string. Copy it explicitly to keep it (see Request data
+lifetime above).
 
 ## Responses
 

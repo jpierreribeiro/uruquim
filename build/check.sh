@@ -282,6 +282,78 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp4-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp4-public-surface"
 
+# WP5 — the canonical path/query extractors and their private 400 envelope.
+#
+# The envelope machinery, the request-local storage it writes into, and the
+# captured `Route_Param` that `web.path` reads are all package-private, so these
+# tests run in a THROWAWAY package exactly like WP2, WP3 and WP4: the real
+# `web/` sources plus the out-of-tree test file, copied into a fresh `mktemp -d`.
+#
+# Three WP5 contracts are only observable from inside the package: the exact
+# bytes of the committed envelope, that the envelope body lives in request-local
+# Context storage rather than an allocation, and that `web.path` consumes WP4's
+# private capture (there is no public `ctx.params`). All are driven through the
+# real extractors, and every envelope assertion is validated by the OFFICIAL
+# `core:encoding/json` parser in strict `.JSON` mode.
+echo "--- WP5 canonical extractors, internal behavior (throwaway package) ---"
+URUQUIM_WP5_TMP="$(mktemp -d -t uruquim-wp5-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP5_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP5_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp5-internal/*.odin "$URUQUIM_WP5_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP5_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp5-internal"
+rm -rf "$URUQUIM_WP5_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP5_TMP" || fail "the throwaway WP5 internal-test package was not removed"
+echo "PASS: WP5 internal tests ran against the real sources; throwaway package removed"
+
+# WP5 public surface — an EXTERNAL consumer of `uruquim:web` that reads path and
+# query parameters through the ratified surface only, and observes a failing
+# `path_int` as a complete 400 through `web.test_request`. It proves extraction
+# is expressible with the ratified 34 symbols and adds none.
+echo "--- WP5 public surface contract: path/query extraction and the 400 envelope ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp5-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp5-public-surface"
+
+# WP5 negative probes — ADR-002 option B is enforced by the COMPILER.
+#
+# The value-producing extractors omit `#optional_ok`, so dropping `ok` must be a
+# compile error. Each probe is required to fail with the exact `Assignment count
+# mismatch` diagnostic: an unrelated compile error must never be read as proof
+# that the directive is absent.
+#
+# `#optional_ok` is not part of a procedure's TYPE, so the signature assertions
+# in the public contract test cannot see it. These probes are the only executable
+# evidence that the directive was not re-added (R-07).
+URUQUIM_WP5_PROBES="$URUQUIM_ROOT/tests/wp5-public-surface/probes"
+
+uruquim_wp5_discard_probe() { # file label
+  local file="$1" label="$2"
+  local output
+  echo "--- WP5 probe: $label (expected compile failure) ---"
+  if output="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
+    PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+    "$URUQUIM_COMPILER" check "$URUQUIM_WP5_PROBES/$file" -file \
+    "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point 2>&1)"; then
+    echo "$output" >&2
+    fail "probe '$label' compiled; the extractor permits dropping ok, so #optional_ok is present (ADR-002)"
+  fi
+  if ! grep -qF "Assignment count mismatch" <<<"$output"; then
+    echo "$output" >&2
+    fail "probe '$label' failed for the wrong reason; expected: Assignment count mismatch"
+  fi
+  echo "PASS: $label"
+}
+
+uruquim_wp5_discard_probe discard_path_int_ok.odin \
+  "dropping the ok of path_int is rejected"
+uruquim_wp5_discard_probe discard_query_int_ok.odin \
+  "dropping the ok of query_int is rejected"
+uruquim_wp5_discard_probe discard_query_int_or_ok.odin \
+  "dropping the ok of query_int_or is rejected"
+
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
 # actually asserted.

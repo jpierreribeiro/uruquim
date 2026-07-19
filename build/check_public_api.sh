@@ -753,6 +753,134 @@ test -d "$URUQUIM_WP4_TESTS" ||
 grep -qx 'package web' "$URUQUIM_WP4_TESTS"/*.odin ||
   fail "tests/wp4-internal/ does not declare 'package web'; it could not reach the package-private dispatcher it exists to test"
 
+# ---------------------------------------------------------------------------
+# 10. WP5 canonical extractors (planning/phase-1-plan.md §WP5; ADR-002; ADR-008)
+#
+# WP5 adds BEHAVIOR, not surface. The inventory above already proves the ledger
+# stayed at 32 + 2 = 34; what follows pins the properties the inventory cannot
+# see: the exact signatures, the absence of `#optional_ok`, and the fact that
+# neither WP6 nor WP7 started early.
+# ---------------------------------------------------------------------------
+URUQUIM_EXTRACT="$URUQUIM_WEB/extract.odin"
+test -f "$URUQUIM_EXTRACT" || fail "web/extract.odin is missing"
+URUQUIM_EXTRACT_CODE="$(sed -E 's://.*$::' "$URUQUIM_EXTRACT")"
+
+# 10a. `#optional_ok` appears NOWHERE in the shipped package (ADR-002 option B,
+#      R-07).
+#
+#      The directive is not part of a procedure's type, so no signature
+#      assertion below can see it and no public contract test can observe it.
+#      This static ban plus the three compile probes in `build/check.sh` are the
+#      only enforcement there is: with the directive, `id := web.path_int(...)`
+#      compiles and silently drops an error the extractor already responded to.
+#
+#      It is checked BEFORE the signature assertions on purpose. Adding the
+#      directive also breaks the exact-signature match below, so testing
+#      signatures first would report "the signature changed" for what is really
+#      a re-introduced `#optional_ok` — a true failure with a misleading cause.
+#      The mutation cases in `build/check_wp3_mutations.sh` pin this ordering.
+if grep -nE '#optional_ok' <<<"$URUQUIM_WEB_CODE"; then
+  fail "#optional_ok appears in web/; the HTTP extractors must force the caller to handle ok (ADR-002, R-07)"
+fi
+
+# 10b. The five extractor signatures are EXACT. These are the ratified Phase-1
+#      shapes (spec §Canonical Extractor Control Flow and §Canonical query
+#      extractor family); WP5 implements them and changes none of them.
+#
+#      A signature change is a public API change even when the symbol count is
+#      unmoved, which is precisely what the 32-symbol ledger cannot detect.
+uruquim_expect_signature() { # exact-declaration-line label
+  local decl="$1" label="$2"
+  grep -qxF "$decl {" <<<"$URUQUIM_EXTRACT_CODE" ||
+    fail "the ratified $label signature is not exactly '$decl' (planning/phase-1-plan.md §WP5)"
+}
+
+uruquim_expect_signature \
+  'path :: proc(ctx: ^Context, name: string) -> string' 'web.path'
+uruquim_expect_signature \
+  'path_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool)' 'web.path_int'
+uruquim_expect_signature \
+  'query :: proc(ctx: ^Context, name: string) -> (value: string, found: bool)' 'web.query'
+uruquim_expect_signature \
+  'query_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool)' 'web.query_int'
+uruquim_expect_signature \
+  'query_int_or :: proc(ctx: ^Context, name: string, default_value: int) -> (value: int, ok: bool)' \
+  'web.query_int_or'
+uruquim_expect_signature \
+  'body :: proc(ctx: ^Context, dst: ^$T) -> bool' 'web.body'
+
+# 10c. WP5 did not start WP6. The public responders stay INERT: WP5 owns exactly
+#      two 400 envelopes, committed through its own package-private path, and
+#      nothing else. A `response_commit` inside `respond.odin`, or a non-empty
+#      responder body, means the renderer landed early.
+uruquim_expect_empty_stub() { # file decl-prefix label
+  local file="$1" decl="$2" label="$3"
+  local body
+  body="$(sed -E 's://.*$::' "$file" |
+    awk -v d="^${decl} :: proc" '$0 ~ d {f=1; next} f && /^\}/ {f=0} f' |
+    grep -v '^[[:space:]]*$' || true)"
+  if test -n "$body"; then
+    echo "--- unexpected body in $label ---" >&2
+    echo "$body" >&2
+    fail "'$label' is no longer an empty stub; the WP6 responders must not be implemented by WP5"
+  fi
+}
+
+for URUQUIM_STUB in json text no_content; do
+  uruquim_expect_empty_stub "$URUQUIM_WEB/respond.odin" "$URUQUIM_STUB" "web.$URUQUIM_STUB"
+done
+for URUQUIM_STUB in bad_request unauthorized forbidden not_found internal_error; do
+  uruquim_expect_empty_stub "$URUQUIM_WEB/errors.odin" "$URUQUIM_STUB" "web.$URUQUIM_STUB"
+done
+
+if grep -nE 'response_commit' "$URUQUIM_WEB/respond.odin"; then
+  fail "web/respond.odin commits a response; the public responders are WP6 and must stay inert after WP5"
+fi
+
+# The generic JSON renderer is WP6. WP5's envelope is emitted by a hand-written
+# escaper into fixed request-local storage precisely so that the encoder is NOT
+# linked into applications that merely reach an extractor error, so the public
+# package must not import it.
+if grep -nE '"core:encoding/json"' "$URUQUIM_WEB"/*.odin; then
+  fail "web/ imports core:encoding/json; the marshaller is WP6, and WP5's envelope must not link an encoder"
+fi
+
+# 10d. WP5 did not start WP7. Body binding, the request arena (ADR-006) and the
+#      fixed 4 MiB cap all belong there.
+for URUQUIM_WP7 in '\barena\b' '\bArena\b' 'body_too_large' 'invalid_json' \
+  '4[[:space:]]*<<[[:space:]]*20' '4194304'; do
+  if grep -niE "$URUQUIM_WP7" <<<"$URUQUIM_WEB_CODE"; then
+    fail "WP7 construct matching /$URUQUIM_WP7/ appears in web/; body binding and the request arena are WP7 (R-12)"
+  fi
+done
+
+# `web.body` is still the WP7 stub: it returns false and touches nothing.
+grep -qxF '	return false' <<<"$(sed -E 's://.*$::' "$URUQUIM_EXTRACT" |
+  awk '/^body :: proc/{f=1; next} f && /^\}/{f=0} f' | grep -v '^[[:space:]]*$')" ||
+  fail "web.body is no longer the WP7 stub 'return false'; body binding is WP7"
+
+# 10e. The two WP5 error codes are spelled exactly as the ratified wire contract
+#      requires (docs/errors.md). A typo here is a silent compatibility break:
+#      clients match on `code`.
+for URUQUIM_CODE in invalid_path_parameter invalid_query_parameter; do
+  grep -qE "\"$URUQUIM_CODE\"" <<<"$URUQUIM_WEB_CODE" ||
+    fail "the ratified error code '$URUQUIM_CODE' is missing from web/ (docs/errors.md)"
+done
+
+# 10f. The WP5 internal tests live OUTSIDE the shipped package, like WP2/WP3/WP4.
+URUQUIM_WP5_TESTS="$URUQUIM_ROOT/tests/wp5-internal"
+test -d "$URUQUIM_WP5_TESTS" ||
+  fail "tests/wp5-internal/ is missing; the WP5 internal-behavior tests have no home outside the shipped package"
+grep -qx 'package web' "$URUQUIM_WP5_TESTS"/*.odin ||
+  fail "tests/wp5-internal/ does not declare 'package web'; it could not reach the package-private envelope machinery it exists to test"
+
+# The three discard probes must exist: they are the ONLY executable evidence
+# that `#optional_ok` was not re-added.
+for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query_int_or_ok; do
+  test -f "$URUQUIM_ROOT/tests/wp5-public-surface/probes/$URUQUIM_PROBE_FILE.odin" ||
+    fail "the WP5 negative probe '$URUQUIM_PROBE_FILE.odin' is missing; ADR-002 would be unenforced"
+done
+
 echo "public API contract: web/ file set matches the Phase-1 contract through WP3"
 echo "public API contract: application ledger 32 + test-support ledger 2 = union 34"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
@@ -762,4 +890,7 @@ echo "public API contract: no later-phase symbol, dynamic storage, or backend le
 echo "public API contract: WP4 dispatch files export nothing; dispatch takes the App explicitly"
 echo "public API contract: Allow is exactly 'Allow' in canonical GET, POST, PUT, PATCH, DELETE order"
 echo "public API contract: no radix/wildcard/middleware construct entered the interim dispatcher"
-echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4)"
+echo "public API contract: the five extractor signatures are exact and carry no #optional_ok"
+echo "public API contract: the WP6 responders stay inert and no JSON encoder is linked into web/"
+echo "public API contract: no WP7 body-binding, arena or 4 MiB construct entered the package"
+echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4 + WP5)"

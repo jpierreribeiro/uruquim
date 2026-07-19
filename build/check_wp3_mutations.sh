@@ -169,3 +169,96 @@ expect_reject "$T" "missing WP4 dispatch file" \
   "web/ file set does not match the Phase-1 contract"
 
 echo "PASS: WP4 mutation checks (8 forbidden dispatch states all rejected)"
+
+# ---------------------------------------------------------------------------
+# WP5 mutation checks — the section-10 extractor guardrails must REJECT the
+# states they claim to forbid.
+#
+# The `#optional_ok` case is the one that matters most. Section 10b is a
+# NEGATIVE grep, and a negative grep passes just as happily when the pattern is
+# wrong, when the file it reads is empty, or when the variable it scans was
+# renamed out from under it. Without the mutation below, "the checker rejects
+# #optional_ok" would be an untested claim about a guardrail whose entire job is
+# to catch a one-word regression (ADR-002, R-07).
+# ---------------------------------------------------------------------------
+
+# 16. `#optional_ok` re-added to a value-producing extractor.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/^path_int :: proc(ctx: \^Context, name: string) -> (value: int, ok: bool) {$/path_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool) #optional_ok {/' \
+  "$T/web/extract.odin"
+grep -q '#optional_ok' "$T/web/extract.odin" ||
+  fail "MUTATION-SETUP: #optional_ok was not injected into the copied extract.odin"
+expect_reject "$T" "#optional_ok re-added to path_int" \
+  "#optional_ok appears in web/"
+
+# 16b. The same directive on `query_int_or` — the extractor most likely to be
+#      mistaken for a total function and "simplified" with the directive.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/^query_int_or :: proc(ctx: \^Context, name: string, default_value: int) -> (value: int, ok: bool) {$/query_int_or :: proc(ctx: ^Context, name: string, default_value: int) -> (value: int, ok: bool) #optional_ok {/' \
+  "$T/web/extract.odin"
+grep -q '#optional_ok' "$T/web/extract.odin" ||
+  fail "MUTATION-SETUP: #optional_ok was not injected into query_int_or"
+expect_reject "$T" "#optional_ok re-added to query_int_or" \
+  "#optional_ok appears in web/"
+
+# 17. A changed extractor signature. The 32-symbol ledger cannot see this: the
+#     name is still present and the count is still 32, but the public contract
+#     changed.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/^query_int_or :: proc(ctx: \^Context, name: string, default_value: int) -> (value: int, ok: bool) {$/query_int_or :: proc(ctx: ^Context, name: string, default_value: i64) -> (value: i64, ok: bool) {/' \
+  "$T/web/extract.odin"
+expect_reject "$T" "altered query_int_or signature" \
+  "the ratified web.query_int_or signature is not exactly"
+
+# 18. A WP6 responder implemented early.
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/errors.odin" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "bad_request :: proc(ctx: ^Context, message: string) {\n}"
+if old not in s:
+    sys.exit("MUTATION-SETUP: the bad_request stub was not found in web/errors.odin")
+new = ("bad_request :: proc(ctx: ^Context, message: string) {\n"
+       "\tresponse_commit(&ctx.private.response, .Bad_Request, nil, nil)\n}")
+open(p, "w").write(s.replace(old, new, 1))
+PY
+expect_reject "$T" "WP6 responder implemented early" \
+  "is no longer an empty stub"
+
+# 19. The JSON encoder linked into the shipped package. WP5's envelope is
+#     hand-escaped into fixed storage precisely so this import stays absent.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nimport _ "core:encoding/json"\n' >>"$T/web/errors.odin"
+expect_reject "$T" "core:encoding/json imported by web/" \
+  "web/ imports core:encoding/json"
+
+# 20. WP7 machinery starting early.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\n@(private)\nBODY_LIMIT :: 4194304\n' >>"$T/web/extract.odin"
+expect_reject "$T" "WP7 body cap in the package" \
+  "WP7 construct matching"
+
+# 21. `web.body` implemented early, so the WP7 stub no longer returns false.
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/extract.odin" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "body :: proc(ctx: ^Context, dst: ^$T) -> bool {\n\treturn false\n}"
+if old not in s:
+    sys.exit("MUTATION-SETUP: the body stub was not found in web/extract.odin")
+new = "body :: proc(ctx: ^Context, dst: ^$T) -> bool {\n\treturn true\n}"
+open(p, "w").write(s.replace(old, new, 1))
+PY
+expect_reject "$T" "web.body implemented early" \
+  "web.body is no longer the WP7 stub"
+
+# 22. A misspelled error code. Clients match on `code`, so a typo is a silent
+#     compatibility break rather than a visible failure.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/invalid_query_parameter/invalid_query_param/g' "$T/web/errors.odin"
+expect_reject "$T" "misspelled invalid_query_parameter code" \
+  "the ratified error code 'invalid_query_parameter' is missing"
+
+echo "PASS: WP5 mutation checks (8 forbidden extractor states all rejected)"
