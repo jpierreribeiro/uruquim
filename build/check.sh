@@ -50,6 +50,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
 bash -n "$URUQUIM_ROOT/build/check_g11_teardown.sh"
 bash -n "$URUQUIM_ROOT/build/check_examples.sh"
 bash -n "$URUQUIM_ROOT/build/check_docs.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase1_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -546,6 +547,14 @@ bash "$URUQUIM_ROOT/build/check_public_api.sh"
 
 echo "--- WP3 mutation checks: forbidden dual-ledger states are rejected ---"
 bash "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
+
+# WP11 — the Phase-1 freeze gate runs LAST: it consumes everything above (every
+# compile, behavior, docs and example gate has already passed in this same run)
+# and adds the full-declaration snapshot, the dependency inventory and the
+# evidence-matrix validation that make the freeze executable.
+echo "--- WP11 Phase-1 freeze gate ---"
+env URUQUIM_COMPILER="$URUQUIM_COMPILER" URUQUIM_FREEZE_FROM_CHECK=1 \
+  bash "$URUQUIM_ROOT/build/check_phase1_freeze.sh"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
