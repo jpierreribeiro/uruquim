@@ -3,8 +3,10 @@
 Status: **MIXED.** Human decisions recorded on 2026-07-18 accept ADR-001,
 ADR-002, ADR-003's value-only baseline, ADR-004, ADR-006, ADR-007, ADR-008,
 ADR-009, and ADR-011. Decisions recorded on 2026-07-19 accept ADR-005 (with
-ADR-019) and ADR-020. ADR-010 and ADR-013 remain PROPOSED/deferred to their
-owning gates. Reproducible compiler evidence lives
+ADR-019), ADR-020, ADR-021 (as amended), and — at the WP15 Spec Gate —
+ADR-022 through ADR-027 (ADR-025 as option B, against the WP15
+recommendation). ADR-010 and ADR-013 remain PROPOSED/deferred to their owning
+gates. Reproducible compiler evidence lives
 in `experiments/` and the permanent work-package tests.
 
 Each ADR: context · options · benefits · costs · risks · evidence ·
@@ -665,3 +667,236 @@ the stop API at the same time.
 - **Reversibility.** HIGH — the group reduces to its single Phase-1 member, and
   every existing call site is untouched because the simple form is a member of
   the group.
+
+---
+
+## WP15 Spec Gate decisions
+
+**Status: ALL SIX DECIDED by the owner, 2026-07-19, in the PR #30 review of
+the WP15 Spec Gate.** ADR-022, -023, -024, -026 and -027 are ACCEPTED as
+recommended; ADR-025 is ACCEPTED as **option B** — the reviewer's
+counter-recommendation, not the WP15 recommendation. The option analysis below
+is retained verbatim as presented; each entry's Status line records the
+outcome. Evidence citations refer to
+`planning/phase-2-prototype-middleware.md` (WP12) and
+`planning/phase-2-prototype-recovery.md` (WP13), which carry the verbatim
+commands and outputs.
+
+## ADR-022 — the post-`next` promise: B1 or B3
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — **B1**, as recommended.
+
+- **Question.** ADR-005 accepted the onion mechanism, in which code written
+  after `next(ctx)` inevitably runs. What does the specification promise about
+  it? B2 ("leave it unspecified") was rejected on sight by the plan: observable
+  but undocumented is the worst of both.
+- **Options.** **(B1)** Specified and tested: exact reverse unwind order; a
+  post-commit response attempt is rejected by the single-commit guard with the
+  first response byte-identical; a second `next()` is a no-op with the handler
+  running exactly once. **(B3)** Documented as forbidden, untested, no
+  guarantee — the code still runs.
+- **Recommendation. B1.** The behaviour is the direct consequence of `next`
+  being a call (WP12 P4), cannot be prevented without removing `web.next`, and
+  the one dangerous act — responding late — is already rejected byte-identically
+  on both commit paths (P5, P5b). The no-op double-`next` is a DESIGN
+  CONSTRAINT, not a free property: the WP12 integrator's counter-example cursor
+  (also monotonic, also per-request) runs the handler TWICE when the terminal
+  handler sits outside the index bound. B1 therefore obliges WP17 to ship a
+  test that fails if a refactor moves the terminal handler outside the bound.
+- **Strongest argument against.** B1 freezes exact-reverse unwinding across
+  implementation changes nobody has prototyped: an iterative dispatcher, an
+  async transport, or a chain resumed on another thread would have to reproduce
+  reverse order without a live frame per middleware, which is expensive. B3
+  keeps that door open at the price of an honesty gap that lasts until the
+  first user writes a statement after `next`. Note also the coupling: under
+  B3, WP22's latency-measuring logger is descoped — it needs post-`next`.
+- **Public impact.** No symbol either way; B1 adds normative text and tests.
+- **Reversibility.** B1 → B3 is a broken promise (LOW after applications rely
+  on after-hooks); B3 → B1 is a pure strengthening (HIGH).
+
+## ADR-023 — app-level middleware observe 404/405 (the miss chain)
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **A**, as recommended,
+  including the sub-decision: the fail-closed guard also rejects `use()` after
+  the first dispatch, so the miss chain is built lazily once and never
+  invalidated.
+
+- **Question.** Chains attach to routes; a miss has no route. Do app-level
+  middleware observe a 404/405, and does `bare()` behave the same?
+- **Options.** **(A)** Yes, via a second flattened chain of the app-level
+  globals terminating in the automatic 404/405 responder (WP12 P13: measured
+  `A>B><B<A` around both, envelopes and `Allow` unchanged); `bare()` runs the
+  same chain with a no-op terminal. **(B)** As (A) but `bare()` misses skip
+  middleware (the prototype's measured inconsistency, documented). **(C)** No —
+  middleware run on matched routes only; users register a catch-all route to
+  observe misses.
+- **Recommendation. A.** Otherwise `logger` silently misses most hostile
+  traffic and `request_id` cannot correlate a 404 — and once audit/rate-limit
+  middleware exist, "misses are invisible" is the hole an attacker probes. For
+  `bare()`, ADR-019's own principle extends: `bare()` means no default POLICY,
+  not no mechanism; its no-op terminal commits nothing and the driver 500
+  finalization applies unchanged. Sub-decision, recommended together: the
+  ADR-019 guard also rejects `use()` after the FIRST DISPATCH, which closes the
+  one remaining stale-chain edge (use → dispatch-a-miss → use again, legal
+  today because no route exists) and lets the miss chain be built lazily once
+  and never invalidated — deleting P13's rebuild-on-invalidation pool growth
+  (`[3, 6, 10, 15]`) entirely.
+- **Strongest argument against.** P13's own cost sheet: this is the most
+  complexity per unit of value in Phase 2 — a second chain, lazy construction,
+  a `bare()` rule, and an App back-pointer on the Context that `context.odin`
+  documents as deliberately absent (avoidable only by special-casing the miss
+  terminal in the dispatcher, at the cost of a branch in `next`). Option C
+  needs none of that machinery and is defensible prose.
+- **Public impact.** No symbol. Behavioural surface: misses become observable
+  to middleware.
+- **Reversibility.** MEDIUM once shipped — applications will rely on loggers
+  seeing 404s; withdrawing it is a silent behaviour change.
+
+## ADR-024 — `Router` + `router` + `mount`; `web.group` rejected
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **A**, as recommended.
+  `web.group` does not exist; the phases-doc scope line is amended
+  accordingly.
+
+- **Question.** The phases doc lists `web.router`, `web.group`, `web.mount`.
+  Once a detached `Router` can be mounted at a prefix, is `web.group` a second
+  canonical way to do one operation?
+- **Options.** **(A)** `Router` + `router()` + `mount()` only; no `web.group` —
+  `group(&app, "/admin")` is exactly "make a router, mount it here", which
+  G-01 rejects; amend the phases doc. **(B)** `web.group` only, no detachable
+  `Router` — one concept, but a module can no longer export its routes for an
+  application to mount, which is the capability WP18 exists to deliver.
+  **(C)** Both — maximally convenient, and a textbook G-01 violation.
+- **Recommendation. A.** +3 symbols, one ownership story (two owned values,
+  `App` and `Router`, each destroyed once, never copied — the same rule
+  restated), and module-exported routes fall out. This is presented fairly, not
+  rubber-stamped: (B) genuinely is smaller for single-file applications, and
+  the owner should weigh that against losing mountable modules.
+- **Strongest argument against.** For the dominant small application,
+  `group(&app, "/admin", auth)` is one line where (A) needs three
+  (`r := web.router()`, registrations, `web.mount(&app, "/admin", &r)`), plus a
+  second owned value with a `destroy` obligation. G-01 rejects synonyms, but
+  (B) is not a synonym if `Router` never ships — the rejection of `group`
+  presupposes choosing the `Router` capability first.
+- **Public impact.** +3 application symbols (`Router`, `router`, `mount`);
+  amends `knowledge-base/03-development-phases.md` §Phase 2 scope (exact text
+  in `planning/phase-2-spec.md` §10.1).
+- **Reversibility.** Adding `group` later is HIGH (additive sugar, though a
+  permanent G-01 scar); removing a shipped `Router` is LOW.
+
+## ADR-025 — route-level middleware as a variadic on the five verbs
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **B**, AGAINST the
+  WP15 recommendation. The owner's review weighed the ADR's own
+  argument-against as decisive: the variadic is the only Spec Gate item with
+  LOW reversibility, it mutates five frozen Phase-1 signatures for a
+  convenience, `get(&app, "/x", h, auth, audit)` gives the reader five
+  positional arguments with no cue which are middleware, and WP12 recommended
+  it without having built the alternative it competes with. Route-level
+  middleware is therefore expressed as a **one-route `Router`** mounted at the
+  path; the five verbs stay frozen. B → A later is HIGH reversibility: the
+  variadic remains available by freeze amendment if real usage proves the
+  need.
+
+- **Question.** How does one route get its own middleware: a variadic tail on
+  the five frozen registration signatures, or a one-route `Router`?
+- **Options.** **(A)** `get :: proc(a: ^App, pattern: string, handler: Handler,
+  middleware: ..Handler)` on all five verbs — a ratified freeze amendment to
+  five Phase-1 signatures, through the same door as WP14's Amendments 1–2.
+  WP12 P12 measured: all three Phase-1 examples compile unchanged; the
+  variadic adds zero heap allocations (3 → 3 with 0, 1 or 2 route middleware);
+  the exact `odin doc` delta is five mutated signatures plus the two new names
+  `use`/`next`. **(B)** No signature change — a route needing middleware is
+  written as a one-route `Router` and mounted.
+- **Recommendation. A.** Zero new names, zero allocation, proven source
+  compatibility, and the freeze-amendment path exists precisely for
+  evidence-backed changes like this. (B) makes the common case ("this one
+  route needs auth") the most ceremonious construction in the framework.
+- **Strongest argument against.** It mutates five frozen signatures for a
+  convenience, and a variadic tail is the least readable way to say "this
+  route has an auth guard": `get(&app, "/x", h, auth, audit)` is five
+  positional arguments with no cue which are middleware or what order they run
+  in. (B) leaves the freeze untouched and states intent explicitly. WP12 made
+  its recommendation without having built the alternative it competes with.
+- **Public impact.** Zero new symbols either way; (A) changes five frozen
+  signature lines in `build/phase1-public-signatures.txt` via recorded
+  amendment.
+- **Reversibility.** (A) is LOW once call sites use the tail — removing a
+  variadic breaks source. (B) → (A) later is HIGH.
+
+## ADR-026 — `Framework_Event` field set and redaction policy
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **A**, as recommended.
+
+- **Question.** ADR-011 promised a Phase-2 typed observer. What exactly does
+  the event carry, and what can never reach it?
+- **Options.** **(A)** `Framework_Event{kind: Framework_Error, method: Method,
+  route: string, status: Status, payload_type: typeid}`, passed by value;
+  `route` is the REGISTERED PATTERN (App-owned) and `""` on a miss; no message
+  string; `observe(a, proc(event: Framework_Event))`, one observer, last
+  registration wins. `Framework_Error` is the existing private closed enum
+  made public. **(B)** As (A) plus a `message: string` of the static
+  diagnostic constant. **(C)** As (A) plus the raw request path for
+  debuggability.
+- **Recommendation. A.** The hard constraint is external and normative: the
+  OpenTelemetry HTTP conventions require `http.route` to be low-cardinality,
+  forbid populating it when the framework cannot supply it, and state the URI
+  path cannot substitute for it — so (C) is rejected outright as both a
+  cardinality explosion and a PII leak. No message string, because
+  `framework_report` emitting only compile-time constants is precisely why the
+  audit could refute log leakage; (B) surrenders nothing today but invites a
+  future formatted message. Under (A) the safety is BY TYPE: the only string
+  field is the App-owned pattern, so an observer that stores the event cannot
+  dangle and no request byte is reachable — a property WP16/WP20 turn into a
+  gate assertion.
+- **Strongest argument against.** (A) may be too spartan to be useful: an
+  observer wiring Sentry gets a kind, a method, a pattern and a status, but no
+  request correlation (no request ID field, no timestamp) and no human text,
+  so every consumer immediately needs its own enum-to-message table — six
+  copies of the constants the framework already has. Growing the event later
+  is a frozen-struct change; starting minimal bets that Phase 4's observability
+  work can pay for the growth properly.
+- **Public impact.** +3 application symbols (`observe`, `Framework_Event`,
+  `Framework_Error` — the enum already exists privately).
+- **Reversibility.** Adding fields to a frozen public struct is a spec
+  amendment; removing them is breaking. Start minimal (HIGH → LOW as consumers
+  appear).
+
+## ADR-027 — request-ID trust policy and the header overlay
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **A**, as recommended:
+  strict charset/length, never echo or log an invalid inbound value, the
+  header overlay. `request_id` is +1; the +2 accessor contingency is closed
+  unless implementation evidence reopens this ADR (owner approval required).
+
+- **Question.** Is a client-supplied `X-Request-Id` honoured, how are IDs
+  generated, and how does a handler read the effective ID? This is a security
+  boundary: the inbound value is attacker-controlled.
+- **Options.** **(A)** Accept the client value only if it matches charset
+  `[A-Za-z0-9._-]` and length 1..64; otherwise generate fresh and DISCARD the
+  client value, never logging or echoing it. Generation: counter + process-
+  start entropy, allocation-free, documented as NOT unguessable. The
+  middleware writes the effective ID into a private request-header overlay
+  that `web.header` consults (documented as "the effective request header"),
+  and sets the response header. +1 symbol (`request_id`). **(B)** As (A) but
+  no overlay: a public `request_id_value(ctx)` accessor instead. +2 symbols.
+  **(C)** Always generate; never honour the client value. **(D)** Echo
+  whatever arrives (rejected on sight: CR/LF header injection and log
+  poisoning).
+- **Recommendation. A.** The strict charset makes header injection impossible
+  by construction (and WP23 tests CR/LF anyway); honouring well-formed inbound
+  IDs is what makes cross-service correlation work behind a gateway that
+  already stamps them. The overlay keeps one canonical read path (`web.header`)
+  instead of a second name, per G-01.
+- **Strongest argument against.** The overlay makes `web.header` answer with a
+  byte sequence that never arrived on the wire — implicit mutation of an
+  otherwise pure lookup, discovered rather than declared unless the
+  documentation is read carefully. (B) costs one honest symbol and keeps
+  `header` strictly "what arrived". And against honouring inbound IDs at all
+  (for (C)): any accepted client value appears in the operator's logs, so a
+  well-formed-but-hostile ID can still spoof correlation across tenants;
+  always-generate is the only variant with zero attacker influence.
+- **Public impact.** +1 application symbol (`request_id`), +2 if the overlay
+  is rejected. Trust policy becomes documented, tested security behaviour.
+- **Reversibility.** Tightening the charset later is HIGH; loosening or
+  switching overlay↔accessor after applications read IDs is LOW.
