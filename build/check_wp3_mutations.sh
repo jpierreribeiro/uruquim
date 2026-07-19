@@ -105,3 +105,67 @@ expect_reject "$T" "public headers field on Recorded_Response" \
   "must expose exactly status and body"
 
 echo "PASS: WP3 mutation checks (8 forbidden states all rejected)"
+
+# ---------------------------------------------------------------------------
+# WP4 mutation checks — the section-9 dispatch guardrails must REJECT the states
+# they claim to forbid, for the same reason as every case above: a guardrail
+# that passes on a bad tree is worse than no guardrail.
+# ---------------------------------------------------------------------------
+
+# 9. A BRAND-NEW exported symbol in the WP4 dispatch files. The frozen 32-symbol
+#    ledger catches this first, which is the stronger message of the two.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nexported_dispatch_helper :: proc() {}\n' >>"$T/web/dispatch_match.odin"
+expect_reject "$T" "new exported symbol in the WP4 dispatch files" \
+  "exports symbols outside the ratified Phase-1 surface"
+
+# 9b. A RATIFIED symbol exported from a dispatch file. The ledger cannot see
+#     this — the name is still expected and the count is still 32 — so it is
+#     exactly the case section 9a exists for: the interim dispatcher must stay
+#     entirely internal, and it must not become a second home for public API.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nserve :: proc(a: ^App, port: int) {}\n' >>"$T/web/dispatch_match.odin"
+expect_reject "$T" "ratified symbol exported from a dispatch file" \
+  "the WP4 dispatch files export a symbol"
+
+# 10. `dispatch` losing its explicit App parameter (D3).
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/^dispatch :: proc(a: \^App, ctx: \^Context) {$/dispatch :: proc(ctx: ^Context) {/' \
+  "$T/web/dispatch_match.odin"
+expect_reject "$T" "dispatch without the explicit App parameter" \
+  "dispatch does not have the ratified internal signature"
+
+# 11. A non-canonical `Allow` header name.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/^ALLOW_HEADER_NAME :: "Allow"$/ALLOW_HEADER_NAME :: "allow"/' \
+  "$T/web/dispatch_table.odin"
+expect_reject "$T" "lowercase Allow header name" \
+  "the 405 header name is not exactly"
+
+# 12. A scrambled `Allow` method order — the value must not depend on it.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/^ALLOW_METHOD_ORDER :: .*$/ALLOW_METHOD_ORDER :: [5]Method{.DELETE, .PATCH, .PUT, .POST, .GET}/' \
+  "$T/web/dispatch_table.odin"
+expect_reject "$T" "non-canonical Allow method order" \
+  "the Allow method order is not the canonical"
+
+# 13. A later-phase routing construct entering the interim dispatcher (R-12).
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\n@(private)\nradix_node_lookup :: proc() {}\n' >>"$T/web/dispatch_match.odin"
+expect_reject "$T" "radix construct in the interim dispatcher" \
+  "later-phase routing construct"
+
+# 14. The dispatcher deciding a status outside 404/405.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\n@(private)\nwp4_extra_status :: proc(res: ^Response) {\n\tresponse_commit(res, .Internal_Server_Error, nil, nil)\n}\n' \
+  >>"$T/web/dispatch_match.odin"
+expect_reject "$T" "dispatcher deciding a status outside 404/405" \
+  "decides a status outside 404/405"
+
+# 15. A missing WP4 dispatch file.
+T="$(fresh_tree)"; TREES+=("$T")
+rm -f "$T/web/dispatch_match.odin"
+expect_reject "$T" "missing WP4 dispatch file" \
+  "web/ file set does not match the Phase-1 contract"
+
+echo "PASS: WP4 mutation checks (8 forbidden dispatch states all rejected)"

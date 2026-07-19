@@ -539,7 +539,17 @@ boundary. Odin's `@(private)` hides a declaration's *name*, not the
 reachability of fields through a public field, and per-field privacy is a
 syntax error (ADR-008, "Scope of the guarantee").
 
-`params: Params` and `route: Route_Info` are introduced by WP4 (routing).
+`params` and `route` are NOT public fields, in Phase 1 or later (amended in
+WP4). WP4 adds route matching, and the matched parameter is stored in the
+package-private `Context_Internal` — not on `Context`. Applications read path
+parameters through the extractors `web.path` and `web.path_int` (WP5), which
+are the single canonical access path; there is no public `Params`, `Param`,
+`Route_Info`, `Route`, or `Router` type and no public accessor for either.
+
+A stable internal route identity/pattern for observability remains internal and
+future (Phase 3, §Router; OQ-18). Announcing `params`/`route` as public fields
+would freeze a matching and identity contract that no work package delivers,
+against a public surface frozen at 32 application symbols.
 
 The parametric `Context(App_State, Request_State)` form SHALL NOT be the
 default public surface: highly parametric signatures are noisy at call sites

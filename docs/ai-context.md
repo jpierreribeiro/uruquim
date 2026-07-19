@@ -9,17 +9,26 @@ alternative forms. If something is not listed, it does not exist.**
 > ratified; sections marked Phase 2/3/4 do not yet exist and must not be
 > emitted by a coding agent.
 >
-> **Implementation status (WP3): the Phase-1 surface below is a compiling
-> skeleton plus a request/response model and an in-memory test transport, not a
-> working server.** Every name and signature here exists in `web/` and compiles
-> on the pinned toolchain, so code written against this reference compiles.
-> `Request`, `Method` and `Header_View` have real behavior, and
-> `web.test_request` really drives one request in-memory (no sockets). But there
-> is still NO router: no route is matched, no value is extracted, no JSON is
-> produced, no response is committed, and `web.serve` returns immediately without
-> binding a port. Because nothing is routed yet, `web.test_request` returns the
-> uncommitted response — a zero status and an empty body — until WP4 wires
-> dispatch. Behavior is added by WP4–WP9. Write against these shapes; do not
+> **Implementation status (WP4): routing works; there is still no server.**
+> Every name and signature here exists in `web/` and compiles on the pinned
+> toolchain, so code written against this reference compiles.
+>
+> What now really works: `Request`, `Method` and `Header_View`; route
+> registration and dispatch, including `:param` matching and
+> static-over-parametric precedence; the automatic 404 and the 405 with its
+> `Allow` header in `web.app()`; and `web.test_request`, which drives one
+> request in-memory (no sockets) and returns the real routed result.
+>
+> What still does NOT work: **no extractor returns a value** (`web.path`,
+> `web.path_int`, `web.query*` and `web.body` are inert stubs until WP5/WP7);
+> **no response helper produces output** (`web.ok`, `web.json`, `web.text` and
+> the error helpers commit nothing until WP6), so no JSON is ever produced; and
+> `web.serve` returns immediately without binding a port (WP8). The 404 and 405
+> bodies are EMPTY — the standardized error envelope below is WP6.
+>
+> A handler that responds with nothing leaves the response uncommitted, and
+> `web.test_request` reports that honestly as a zero status and an empty body.
+> The framework never fabricates a 200. Write against these shapes; do not
 > deploy against them.
 >
 > **Two ledgers.** The application API is exactly 32 symbols (below). The
@@ -35,8 +44,9 @@ package main
 import web "uruquim:web"
 
 main :: proc() {
-	app := web.app()          // Phase 1: fixed 4 MiB body cap, 404,
-	defer web.destroy(&app)   // and minimal 405 with required Allow header
+	app := web.app()          // Phase 1: 404 and minimal 405 with the
+	defer web.destroy(&app)   // required Allow header (the 4 MiB body cap
+	                          // is WP7 and does not exist yet)
 
 	web.get(&app, "/path", handler)
 	web.post(&app, "/path", handler)
@@ -63,6 +73,55 @@ state := web.state(ctx, App_State)        // inside handlers: ^App_State
 
 `app_with_state` rejects nil. `web.state` asserts registered state and exact
 type before returning the pointer.
+
+## Routing
+
+```odin
+web.get(&app, "/users", list_users)        // static
+web.get(&app, "/users/:id", get_user)      // one :param segment
+```
+
+Rules (all test-pinned):
+
+- a pattern begins with `/`; `/` itself is a valid pattern;
+- `:param` occupies exactly ONE whole segment — `/users/:id` matches
+  `/users/42` but never `/users/42/posts`;
+- at most one `:param` per pattern in Phase 1, and it must be named; there is
+  no wildcard;
+- a pattern outside that grammar (`/a/:x/:y`, `/users/:`, or no leading `/`)
+  **never matches anything** and never appears in an `Allow` header;
+- a static route always beats a parametric one that also matches, no matter
+  which was registered first — `/users/me` wins over `/users/:id`;
+- methods are isolated: registering GET on a path does not register POST;
+- **nothing is normalized.** `/users` and `/users/` are different paths.
+  Percent-encoding and `.`/`..` segments are not decoded. Do not rely on any
+  normalization; the policy is Phase 3.
+
+Registration conflicts are not diagnosed in Phase 1. A duplicate registration is
+stored as given, and an unsupported pattern simply never wins a match; there is
+no registration-error type to catch. A route that is never reached is
+indistinguishable from a 404, so check your patterns.
+
+The captured `:param` value is NOT readable yet — `web.path(ctx, "id")` is a
+WP5 stub that still returns `""`. Routing matches; extraction comes next.
+
+`web.app()` adds two automatic responses:
+
+```text
+unknown path                     → 404, empty body
+path exists under another method → 405 + Allow, empty body
+```
+
+`Allow` lists only the methods registered for that path, in the fixed order
+`GET, POST, PUT, PATCH, DELETE`, comma-and-space separated, with no
+duplicates. It is a response header and Phase 1 gives you no way to read
+response headers.
+
+A method outside the `Method` set arrives as `.UNKNOWN` and follows the same
+404/405 rules. It never produces a 501.
+
+`web.bare()` routes identically but installs NEITHER default: an unmatched
+request simply produces no response at all.
 
 ## Handler
 
@@ -260,10 +319,17 @@ Prohibitions (these do NOT exist; do not emit them):
   arguments — the signature is exactly `(&app, method, path)`;
 - no cleanup procedure for `Recorded_Response`.
 
-Until WP4 wires routing, `web.test_request` returns the uncommitted response (a
-zero status and an empty body). It exercises the in-memory round trip and the
-response lifetime, not routed behavior; the same call returns real routed
-results once WP4 lands.
+`web.test_request` returns REAL routed results (WP4): a registered route's
+handler runs, an unknown path produces 404, and a path registered under another
+method produces 405.
+
+Because no response helper works yet (WP6), a handler cannot produce a body, so
+a matched route reports a zero status and an empty body — the response is
+genuinely uncommitted, not a fabricated 200. Only the framework's own 404 and
+405 carry a status today, and both have empty bodies until WP6.
+
+`web.bare()` routes but installs neither default, so an unmatched request on a
+bare app stays uncommitted.
 
 ## Middleware
 

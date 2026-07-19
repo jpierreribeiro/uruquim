@@ -15,10 +15,18 @@ these forms. If a pattern here conflicts with any other document except
 > stubs until WP2–WP9. The canonical *forms* are what this document fixes, and
 > they are unchanged.
 >
-> WP2 has added the request/response model: `Request`, `Method` and
-> `Header_View` now exist and behave as described below. It is **still not a
-> functional server** — there is no dispatch and no transport, so nothing
-> fills a `Request` in yet.
+> WP2 added the request/response model: `Request`, `Method` and `Header_View`
+> exist and behave as described below.
+>
+> WP4 has added routing: registration, `:param` matching,
+> static-over-parametric precedence, per-method isolation, and the automatic
+> 404/405 of `web.app()` all work, driven in memory by `web.test_request`.
+>
+> It is **still not a functional server**, and two of the forms below do not
+> execute yet: no extractor returns a value (WP5/WP7) and no response helper
+> produces output (WP6), so no JSON is ever rendered. `web.serve` binds no port
+> (WP8). The canonical *forms* are what this document fixes, and they are
+> unchanged.
 
 ## The one rule
 
@@ -133,18 +141,75 @@ main :: proc() {
 }
 ```
 
-- `web.app()` — progressive production defaults. Phase 1 provides a fixed
-  4 MiB request-body cap, standardized 404, and minimal 405 with `Allow`.
-  Phase 2 adds recovery; Phase 3 adds configurable limits, read/write
-  timeouts, and optimized 405/header handling; Phase 4 hardens graceful
-  shutdown.
-- `web.bare()` — no defaults (advanced; not for quick starts).
+- `web.app()` — progressive production defaults. Delivered so far: a
+  standardized 404 and a minimal 405 with the `Allow` header (WP4). Still to
+  come: the fixed 4 MiB request-body cap (WP7); recovery (Phase 2);
+  configurable limits, read/write timeouts, and optimized 405/header handling
+  (Phase 3); graceful shutdown hardening (Phase 4).
+- `web.bare()` — no defaults (advanced; not for quick starts). It routes
+  exactly like `web.app()` but installs neither the 404 nor the 405, so an
+  unmatched request produces no response at all.
 - `web.serve(&app, port)` — canonical. Use `web.serve_with(&app,
   web.Serve_Config{...})` only when you need host or other options.
 
 `App` owns resources and is non-copyable by contract. Keep the value returned
 by `web.app()`, pass its address, and destroy that same value exactly once.
 Do not copy an `App` or destroy a copy.
+
+## Routing
+
+One canonical registration form per method — `web.get`, `web.post`, `web.put`,
+`web.patch`, `web.delete` — taking the app, a pattern, and a handler:
+
+```odin
+web.get(&app, "/users", list_users)       // static
+web.get(&app, "/users/:id", get_user)     // one :param segment
+```
+
+A pattern begins with `/`. A `:param` occupies exactly one whole segment, must
+be named, and Phase 1 allows **at most one per pattern**. There is no wildcard.
+
+A pattern outside that grammar — `/a/:x/:y`, a bare `/users/:`, or one without a
+leading `/` — **never matches any request**, and never contributes to an `Allow`
+header either. Registration accepts it silently and reports nothing, so check
+your patterns: a route that is never reached looks exactly like a 404.
+
+When a static and a parametric route both match, **the static one always
+wins**, independently of registration order:
+
+```odin
+web.get(&app, "/users/:id", get_user)
+web.get(&app, "/users/me", get_current_user)   // /users/me reaches THIS one
+```
+
+Methods are isolated: registering GET on a path does not register any other
+method on it.
+
+**Paths are not normalized.** `/users` and `/users/` are different, and
+percent-encoding and dot segments are not decoded. Do not write code that
+depends on either behavior; the normalization policy is decided in Phase 3.
+
+Registration conflicts are not diagnosed in Phase 1. A duplicate pattern is
+stored as given, and an unsupported one never wins a match — there is no
+registration error to handle, and no such API is frozen yet.
+
+The pattern string is copied: the App owns its copy, so the caller may reuse or
+free its own buffer immediately after registering.
+
+`web.app()` answers an unmatched request automatically:
+
+```text
+unknown path                     → 404
+path registered on another method → 405 + Allow
+```
+
+`Allow` names only the methods registered for that path, always in the order
+`GET, POST, PUT, PATCH, DELETE`, comma-and-space separated, never duplicated.
+Phase 1 exposes no way to read response headers, so it is verified internally.
+Both bodies are empty until WP6 renders the error envelope.
+
+A method token outside the `Method` set arrives as `.UNKNOWN` and follows the
+same 404/405 rules; it never becomes a 501.
 
 ## Handler
 
@@ -479,8 +544,11 @@ Lifetime: every response `test_request` returns stays readable — alongside all
 the others from the same App — until `web.destroy(&app)`, which frees them. There
 is no per-response cleanup, and there is no public `headers` field.
 
-Routing is not wired until WP4, so today `test_request` returns the uncommitted
-response (a zero status and an empty body): it proves the in-memory round trip
-and the response lifetime, not routed behavior. Once WP4 lands, this same
-`web.test_request` returns real routed status and body. The machinery lives in
+Routing is wired (WP4), so `test_request` returns real routed results: a
+registered handler runs, an unknown path gives 404, and a path registered under
+another method gives 405 with an `Allow` header. Because no response helper
+works until WP6, a handler cannot produce a body — a matched route therefore
+reports a zero status and an empty body, which is the honest report of an
+uncommitted response, not a fabricated 200. The 404 and 405 bodies are also
+empty until WP6 defines the error envelope. The machinery lives in
 `web/testing/` and is not meant to be imported directly.
