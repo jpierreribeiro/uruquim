@@ -76,14 +76,51 @@ runs on the pinned toolchain.
 ## WP3 — In-memory test transport
 - **Objective.** drive dispatch and capture responses without sockets.
 - **Spec.** §Test transport; §Three test suites.
-- **Files.** `web/testing/test_transport.odin`, `web/testing/recorder.odin`,
-  `web/testing/request_builder.odin`.
-- **API.** `web.test_request(&app, method, path) -> Recorded_Response`.
+- **Files.** Public facade in `web/` (package `web`):
+  `web/test_support.odin` — `test_request` + `Recorded_Response`. Machinery in
+  `web/testing/` (package `testing`): `test_transport.odin`, `recorder.odin`,
+  `request_builder.odin`. See planning/21 for why the public symbols live in
+  package `web`, not `web/testing`.
+- **API.** Public, package `web`: `web.test_request(&app, method, path) ->
+  Recorded_Response`. `test_request` and `Recorded_Response` are the only two
+  public symbols; both belong to the **test-support ledger**, tracked apart
+  from the frozen 32-symbol application surface (planning/15 G-11; planning/21
+  Decision 2). Total exported after WP3: 34 = 32 application + 2 test-support.
+- **Dependency direction (ratified, planning/21).** One-way only:
+  `web` (facade) → `web/testing` (machinery) → neutral internal/boundary
+  types. `web/testing` MUST NOT import `uruquim:web` — the back-edge is a
+  compile-time import cycle (`Cyclic importation of 'testing'`, ratified by the
+  planning/21 packages prototype). The facade converts `App`, `Method` and the
+  captured response across the boundary; the machinery names no `web` type.
+  Neither the facade nor the machinery may import `core:testing`.
+  If this cannot be represented without a cycle or duplicated types, the WP3
+  agent STOPS and produces a throwaway packages prototype — it does not move
+  types or introduce `rawptr` silently.
+- **`Recorded_Response` lifetime (ratified, planning/21).** `status` is copied
+  by value; `body` and `headers` are copied by the recorder into storage owned
+  by the App's lazy test-support state, created on the first `test_request` and
+  valid until `web.destroy(&app)`. No additional public cleanup is introduced,
+  and applications that never call `test_request` never allocate the recorder.
 - **Tests first.** `test_request` round-trips a canned request (port exp-09
-  harness).
-- **Min impl.** inbox/outbox loop calling dispatch; recorder captures status/
-  headers/body/commit.
-- **Done.** `test_request` usable by all later WduP tests.
+  harness). The TESTS-FIRST commit also raises `build/check_public_api.sh` to
+  the dual-ledger contract (permit the `web/testing/` subdirectory only; scan
+  `web/test_support.odin` as the 2-symbol test-support ledger; keep the other
+  `web/*.odin` at exactly 32; assert the 34-symbol union; drop `test_request`
+  from the forbidden later-phase list) and records the RED evidence before the
+  machinery exists. It ports the planning/21 package prototype into committed
+  compile probes (one-way import succeeds; back-edge cycle fails with the
+  expected diagnostic; neither side imports `core:testing`). It also records a
+  minimal application binary before/after the facade exists, verifies that an
+  application which never calls `test_request` performs no test-support
+  allocation or package initialization, and reports any binary-size delta for
+  human review rather than declaring hidden cost absent by assumption.
+- **Min impl.** inbox/outbox loop over neutral request/response values; the
+  facade owns the dispatch call, the recorder is a passive sink that copies
+  status/headers/body/commit into owned storage.
+- **Done.** `test_request` usable by all later WP tests; two recorded responses
+  remain readable across consecutive calls until `destroy(&app)`; tracked
+  recorder allocations are released by destroy; the unused-facade binary/init
+  evidence is recorded and accepted.
 - **Risks.** test transport diverging from real behavior → mitigated by WP9.
 - **Deps.** WP2. **Rollback.** test-only package.
 
