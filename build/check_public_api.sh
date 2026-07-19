@@ -341,6 +341,20 @@ if test -d "$URUQUIM_WEB_INTERNAL"; then
   if grep -nE '"uruquim:web"' "$URUQUIM_TRANSPORT"/*.odin; then
     fail "web/internal/transport imports uruquim:web; the transport boundary is one-way (ADR-009 / WP8 D1)"
   fi
+
+  # Exactly ONE file may name the vendored backend: the adapter. The backend
+  # lives in the `uruquim:` collection, so the general dependency rule below
+  # cannot catch this — an import anywhere else would put a replaceable
+  # third-party type on the wrong side of the boundary (G-06 / WP8 D1).
+  URUQUIM_BACKEND_USERS="$(grep -rlE '"uruquim:vendor/odin-http"' "$URUQUIM_WEB" |
+    xargs -r -n1 basename | LC_ALL=C sort -u)"
+  if test "$URUQUIM_BACKEND_USERS" != "odin_http_adapter.odin"; then
+    echo "--- expected backend importers ---" >&2
+    echo "odin_http_adapter.odin" >&2
+    echo "--- actual ---" >&2
+    echo "$URUQUIM_BACKEND_USERS" >&2
+    fail "the vendored backend is imported outside web/internal/transport/odin_http_adapter.odin (ADR-009 / WP8 D1)"
+  fi
 fi
 
 # ---------------------------------------------------------------------------

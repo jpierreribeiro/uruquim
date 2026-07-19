@@ -61,8 +61,11 @@ uruquim_g11_build() { # label main-source-file
   local label="$1"
   local main_source="$2"
   local tree="$URUQUIM_G11_TMP/$label"
-  mkdir -p "$tree/app"
+  mkdir -p "$tree/app" "$tree/vendor"
   cp -r "$URUQUIM_ROOT/web" "$tree/web"
+  # WP8: `web` imports web/internal/transport, which imports the vendored
+  # backend, so a consumer tree must carry the vendor snapshot too.
+  cp -r "$URUQUIM_ROOT/vendor/odin-http" "$tree/vendor/odin-http"
   cp "$main_source" "$tree/app/main.odin"
   ( cd "$tree" && env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
       PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
@@ -128,8 +131,9 @@ fi
 # and confirm the teardown symbols come back. Without this, a future refactor
 # could make the elimination accidental (or make the negative case unbuildable)
 # and the gate would keep reporting PASS for the wrong reason.
-mkdir -p "$URUQUIM_G11_TMP/mutated"
+mkdir -p "$URUQUIM_G11_TMP/mutated" "$URUQUIM_G11_TMP/mutated/vendor"
 cp -r "$URUQUIM_ROOT/web" "$URUQUIM_G11_TMP/mutated/web"
+cp -r "$URUQUIM_ROOT/vendor/odin-http" "$URUQUIM_G11_TMP/mutated/vendor/odin-http"
 mkdir -p "$URUQUIM_G11_TMP/mutated/app"
 cp "$URUQUIM_G11_TMP/never_tests.odin" "$URUQUIM_G11_TMP/mutated/app/main.odin"
 

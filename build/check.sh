@@ -229,9 +229,15 @@ echo "PASS: Recorded_Response exposes no public headers field"
 echo "--- WP3 probe C5: web/testing -> web back-edge is a compile cycle (expected failure) ---"
 URUQUIM_WP3_CYCLE="$(mktemp -d -t uruquim-wp3-cycle-XXXXXXXX)"
 trap 'rm -rf "$URUQUIM_WP3_CYCLE"' EXIT
-mkdir -p "$URUQUIM_WP3_CYCLE/web/testing"
+mkdir -p "$URUQUIM_WP3_CYCLE/web/testing" "$URUQUIM_WP3_CYCLE/web/internal/transport" \
+  "$URUQUIM_WP3_CYCLE/vendor/odin-http"
 cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP3_CYCLE/web/"
 cp "$URUQUIM_ROOT"/web/testing/*.odin "$URUQUIM_WP3_CYCLE/web/testing/"
+# WP8: `web` now imports the transport, which imports the vendored backend, so
+# the throwaway tree must carry both or the probe fails to resolve an import
+# instead of reporting the cycle it exists to prove.
+cp "$URUQUIM_ROOT"/web/internal/transport/*.odin "$URUQUIM_WP3_CYCLE/web/internal/transport/"
+cp "$URUQUIM_ROOT"/vendor/odin-http/*.odin "$URUQUIM_WP3_CYCLE/vendor/odin-http/"
 cp "$URUQUIM_ROOT"/tests/wp3-probes/back_edge_import.odin "$URUQUIM_WP3_CYCLE/web/testing/"
 if URUQUIM_WP3_CYCLE_OUT="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
   PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \

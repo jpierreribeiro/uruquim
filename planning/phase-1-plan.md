@@ -449,6 +449,22 @@ runs on the pinned toolchain.
 - **Deps.** WP2/WP6; exp-03. **Rollback.** body isolated.
 
 ## WP8 — Bootstrap real transport adapter
+- **Execution status.** **COMPLETE** — verified by a full green `build/check.sh`
+  on dev-2026-07-nightly:819fdc7, including a REAL loopback round trip
+  (`GET /ping` → 200 `pong` with `text/plain; charset=utf-8`, a POST whose JSON
+  body WP7 decoded, an over-limit POST answered 413 without running the handler,
+  and a clean stop with the port refusing new connections). Ledgers unchanged at
+  32 + 2 = 34; 50 mutation cases rejected across WP3-WP8.
+- **Cost (measured, `nm` + size).** An application that never calls `serve`
+  links ZERO odin-http server, listener, accept, connection or teardown symbols;
+  the G-11 recorder teardown is likewise absent unless `test_request` is used.
+  The unavoidable residual is two `@(init)` roots Odin links for any
+  transitively-imported package: odin-http's status-string table (101,360 B, it
+  pulls in `core:fmt`) and `core:nbio`'s thread-local cleaner (the rest of the
+  ~51 KiB over the WP7 baseline, together with the transport glue). A bare app
+  goes 47,728 → 200,744 bytes; a serving app is ~868 KiB. Compile time rises
+  ~0.33 s (0.52 → 0.85 s) because the vendored package is compiled even when
+  the linker drops it.
 - **Objective.** minimal `odin-http` adapter behind the boundary; buffered.
 - **Spec.** §Canonical Transport Direction; ADR-009; planning/public-api-guardrails.md G-06/G-07.
 - **Files.** `web/serve.odin` (real `serve`), `web/internal/transport/*.odin`
