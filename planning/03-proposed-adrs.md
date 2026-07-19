@@ -2,8 +2,8 @@
 
 Status: **MIXED.** Human decisions recorded on 2026-07-18 accept ADR-001,
 ADR-002, ADR-003's value-only baseline, ADR-004, ADR-006, ADR-007, ADR-008,
-ADR-009, and ADR-011. ADR-005 and ADR-010 remain PROPOSED/deferred to their later
-phase gates. First- and second-run evidence is in
+ADR-009, and ADR-011. ADR-005, ADR-010, ADR-012, and ADR-013 remain
+PROPOSED/deferred to their owning gates. First- and second-run evidence is in
 `planning/10-c1-execution-evidence.md`.
 
 Each ADR: context · options · benefits · costs · risks · evidence ·
@@ -232,6 +232,59 @@ recommendation · documentation impact · reversibility.
   canonical patterns, AI context, gate C-8.
 - **Reversibility.** MEDIUM before v1; breaking after handlers ship.
 
+## ADR-012 — Request body consumption and repeated typed binding
+- **Status.** **PROPOSED** — blocks WP7 implementation, not earlier work.
+- **Context.** `web.body(ctx, &dst)` consumes a request-owned byte view. A
+  buffered Phase-1 transport could decode the same bytes more than once, but
+  hidden replay/caching would make transport and memory behavior less obvious.
+- **Options.** (A) single consumer: the first binding attempt consumes the
+  typed-body capability. (B) replay the immutable buffered body on every call.
+  (C) cache a decoded dynamic representation for later conversions.
+- **Benefits.** A is explicit, bounded, and easy for humans and agents to
+  reason about. B is convenient but silently repeats parsing. C enables reuse
+  but adds dynamic storage/reflection pressure and unclear ownership.
+- **Costs.** A needs a clear diagnostic for an accidental second call. B spends
+  CPU repeatedly and makes streaming migration harder. C conflicts with the
+  small typed procedural core.
+- **Risks.** A poorly specified second call can emit two responses or hide a
+  programming error. B can make the test transport promise replay that a
+  future streaming adapter cannot provide.
+- **Evidence.** External research consistently recommends an explicit body
+  state machine, but no pinned-toolchain Uruquim prototype has tested the
+  second-call behavior yet.
+- **Recommendation.** **A**, subject to a WP7 disposable prototype. The
+  prototype must decide when consumption occurs and how a second call is
+  reported without double-commit. No replay cache enters Phase 1 by default.
+- **Doc impact.** architecture body section, canonical patterns, AI context,
+  WP7 tests, and error documentation after acceptance.
+- **Reversibility.** MEDIUM before streaming; difficult after applications rely
+  on replay.
+
+## ADR-013 — Trusted proxy and effective client-address policy
+- **Status.** **PROPOSED / DEFERRED** — Phase-4 security gate.
+- **Context.** `Forwarded` and `X-Forwarded-For` are client-controlled unless
+  the connected peer belongs to an explicitly trusted deployment boundary.
+- **Options.** (A) distrust by default; configure trusted CIDRs and walk the
+  chain from the nearest hop outward. (B) trust a fixed hop count. (C) trust
+  forwarding headers automatically.
+- **Benefits.** A ties trust to administered network identity and preserves the
+  real peer for audit. B is simple for fixed topologies. C has no safe default.
+- **Costs.** A requires IPv4/IPv6 CIDR configuration and careful parsing. B
+  breaks when proxy topology changes.
+- **Risks.** Incorrect trust changes audit logs, rate limits, allowlists, and
+  authorization inputs. Private address ranges are not inherently trusted.
+- **Evidence.** RFC 7239 says forwarded information cannot be trusted by
+  default. NGINX and Envoy require configured trust and evaluate proxy chains
+  from the connected side.
+- **Recommendation.** **A.** Default effective address is the connected peer;
+  forwarding headers are ignored until trusted proxies are configured. Keep
+  both peer and effective addresses internally. Exact header support and
+  public configuration follow the Phase-4 prototype.
+- **Doc impact.** Phase-4 security specification, deployment documentation,
+  conformance corpus, and future configuration API.
+- **Reversibility.** LOW after users base security or audit policy on it;
+  therefore ADR required before implementation.
+
 ---
 
 ## Acceptance ledger
@@ -249,6 +302,9 @@ recommendation · documentation impact · reversibility.
 | 009 | exp-08 | **ACCEPTED** — conceptual/private boundary |
 | 010 | later Advanced gate | **PROPOSED / DEFERRED** — not a Phase-1 blocker |
 | 011 | exp-10 + comparative audit | **ACCEPTED** — void handler; typed observer later |
+| 012 | WP7 repeated-binding prototype | **PROPOSED** — must close before WP7 implementation |
+| 013 | Phase-4 proxy corpus | **PROPOSED / DEFERRED** — must close before trusted-proxy code |
 
-No accepted Phase-1 ADR remains a decision blocker. ADR-005 and ADR-010 are
-owned by later gates and cannot expand Phase-1 scope.
+No accepted Phase-1 ADR has been reopened. ADR-012 is a new, narrowly owned WP7
+decision; ADR-005, ADR-010, and ADR-013 remain owned by later gates and cannot
+expand earlier scope.
