@@ -93,8 +93,16 @@ O WP2 adiciona exatamente TRÊS símbolos públicos: 29 → 32.
   }
 
   Header_View :: struct {
-      pairs: []Header_Pair,   // Header_Pair é @(private); nunca exportado
+      private: Header_View_Internal,
   }
+
+  @(private)
+  Header_View_Internal :: struct {
+      pairs: []Header_Pair,
+  }
+
+  @(private)
+  Header_Pair :: struct { name: string, value: string }
 
   Request :: struct {
       method:  Method,
@@ -113,10 +121,18 @@ ratificado na Fase 1. Não os adicione por parecerem naturais. Com este enum,
 `Header_View` NÃO deve ser documentado como "opaco" — Odin não oferece essa
 garantia. Use "encapsulado por contrato".
 
+`Header_View` NÃO deve anunciar `pairs` diretamente. Expor
+`pairs: []Header_Pair` como campo público congelaria na API justamente a
+representação por pares que o wrapper existe para esconder. O slot aninhado
+mantém `Header_View` sem promessa de formato; `r.headers.private.pairs`
+continua alcançável (`exit=0`), e isso é esperado — encapsulamento por
+contrato, não barreira.
+
 NÃO adicione, em nenhuma hipótese:
 - `Response` público ou qualquer estado de commit público;
 - o campo `response` no `Context`;
-- `Header`, `Header_Pair` público, `[]Header` público, ou lookup de header;
+- `Header_View_Internal` ou `Header_Pair` públicos, `[]Header` público, ou
+  qualquer lookup de header;
 - `web.header` / `header()` — é Fase 2;
 - `method_raw` público;
 - `Params` ou `Route_Info` — são do WP4;

@@ -529,10 +529,15 @@ Context :: struct {
 `web.json`, `web.ok`, `web.created`, `web.text`, `web.no_content` and the error
 helpers. The internal `Response` and its single-commit guard belong to WP2/WP6.
 
-Exposing `response` publicly would make `ctx.response.committed` reachable from
-application code, reducing the ADR-008 guard to a documentation convention:
-Odin's `@(private)` hides a declaration's *name*, not the reachability of
-fields through a public field, and per-field privacy is a syntax error.
+Omitting `ctx.response` keeps the API responder-only: it avoids advertising
+mutable response state as public API, so applications reach for the helpers
+instead of hand-editing a status or a `committed` flag, and accidental
+double-writes stop being an easy mistake to make.
+
+It does NOT make the internal state inaccessible and is NOT a security
+boundary. Odin's `@(private)` hides a declaration's *name*, not the
+reachability of fields through a public field, and per-field privacy is a
+syntax error (ADR-008, "Scope of the guarantee").
 
 `params: Params` and `route: Route_Info` are introduced by WP4 (routing).
 
