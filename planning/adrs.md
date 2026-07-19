@@ -2,8 +2,9 @@
 
 Status: **MIXED.** Human decisions recorded on 2026-07-18 accept ADR-001,
 ADR-002, ADR-003's value-only baseline, ADR-004, ADR-006, ADR-007, ADR-008,
-ADR-009, and ADR-011. ADR-005, ADR-010, ADR-012, and ADR-013 remain
-PROPOSED/deferred to their owning gates. Reproducible compiler evidence lives
+ADR-009, and ADR-011. Decisions recorded on 2026-07-19 accept ADR-005 (with
+ADR-019) and ADR-020. ADR-010 and ADR-013 remain PROPOSED/deferred to their
+owning gates. Reproducible compiler evidence lives
 in `experiments/` and the permanent work-package tests.
 
 Each ADR: context · options · benefits · costs · risks · evidence ·
@@ -97,7 +98,19 @@ recommendation · documentation impact · reversibility.
 - **Reversibility.** MEDIUM (public accessor).
 
 ## ADR-005 — Middleware model
-- **Status.** **PROPOSED / DEFERRED** — Phase-2 Spec Gate.
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **B (onion)**, with
+  registration-order enforcement per ADR-019 below.
+  Evidence: `planning/phase-2-prototype-middleware.md` (WP12).
+- **Outcome.** The prototype showed the mechanism is not a choice to be made but
+  a consequence: middleware is the frozen `Handler` shape (a `bool`-returning
+  form would be a second handler shape, which ADR-011 forbids), so `next` is an
+  ordinary call that returns, and code written after it inevitably runs. There
+  is no unwind machine to adopt or reject. Measured: `A>B>C>H<C<B<A`, exact
+  reverse unwind, **0 allocations** through a 5-middleware chain, and a
+  post-`next` response attempt rejected by the existing single-commit guard.
+  Option A was therefore not available without deliberately crippling the
+  mechanism, and option C's condition is satisfied.
+- **Superseded status line.** **PROPOSED / DEFERRED** — Phase-2 Spec Gate.
 - **Context.** cursor `next`, global/group/route/handler, short-circuit, unwind.
 - **Options.** (A) pre-order only (no code after `next`). (B) onion
   (before+after `next`). (C) onion only if the transport guarantees safe
@@ -372,8 +385,8 @@ recommendation · documentation impact · reversibility.
 | 014 | WP6 ownership decision | **ACCEPTED** — Response owns rendered bodies; no WP7 arena |
 
 No accepted Phase-1 ADR has been reopened. ADR-012 is a new, narrowly owned WP7
-decision; ADR-005, ADR-010, and ADR-013 remain owned by later gates and cannot
-expand earlier scope.
+decision. ADR-005 was accepted at the Phase-2 gate on WP12 evidence; ADR-010 and
+ADR-013 remain owned by later gates and cannot expand earlier scope.
 
 ---
 
@@ -384,7 +397,10 @@ so the owning work package inherits the reasoning instead of rediscovering it,
 and each requires the owner's approval before it may be marked accepted. See
 `post-phase1-audit.md` and `odin-fit-audit.md` for the evidence.
 
-### ADR-015 (PROPOSED) — test-support grows by procedure group, not by a new name
+### ADR-015 (SUPERSEDED by ADR-021) — test-support grows by procedure group
+
+**Superseded.** Accepted as ADR-021 on 2026-07-19, with the objective sharpened
+to remaining one public name. Original proposal retained below.
 
 **Context.** `test_request` takes only `(app, method, path)`, so a handler that
 calls `web.body` can never be exercised in memory: it always sees
@@ -404,7 +420,13 @@ leaving advanced testing internal-only (rejected: leaves users stuck).
 
 **Requires owner approval** — the test-support ledger grows beyond 2 symbols.
 
-### ADR-016 (PROPOSED) — middleware execution order decided by prototype
+### ADR-016 (RESOLVED by WP12) — middleware execution order
+
+**Outcome.** Resolved. The prototype ran; ADR-005 is accepted as onion with
+enforcement. See ADR-019 and `planning/phase-2-prototype-middleware.md`. The
+proposal text is retained below for the record.
+
+### ADR-016 (original proposal text)
 
 **Context.** Phase 2 needs `web.use` and `web.next`. Post-`next` (onion)
 semantics requires an unwind machine at runtime, which the Odin-fit audit
@@ -443,3 +465,186 @@ which owns lifecycle, replace the globals with per-server state and introduce
 the stop API at the same time.
 
 **Requires owner approval when implemented** — Phase 4 adds public surface.
+
+
+---
+
+## ADR-019 — Middleware registration order is enforced, not documented
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19).
+- **Owner.** Phase 2, implemented in WP17, specified in WP15.
+- **Context.** With chains flattened at registration, `use()` cannot affect a
+  route registered before it. WP12 measured what that costs when a programmer
+  gets the order wrong: the mis-ordered program serves `/admin/users` with
+  **`200 OK` to an unauthenticated caller**, purely because `get()` precedes
+  `use(auth)`. There is no error, no warning and no runtime symptom. Moving one
+  line fixes it.
+- **Options.**
+  (A) **Forbid `use()` after any route has been registered — fail at boot.**
+  (B) No retroaction, documented in prose only.
+  (C) Retroactive `use()`: a second pass re-flattens earlier routes.
+- **Decision: (A).**
+- **Rationale (owner).** An authentication boundary must not depend on the
+  programmer remembering the order in which they wrote two lines. Option B
+  leaves the 200-OK hole open, and **for security, prose is not enforcement**.
+  Option C makes order "not matter" in a way that misleads anyone reading the
+  file top to bottom, which is the opposite of Odin's explicitness. Option A is
+  fail-closed and costs one guard at registration.
+- **Costs.** A program that was legal becomes a boot failure. This is intended:
+  it converts a silent security defect into a loud startup error, before any
+  request is served.
+- **Precedent.** Go's `ServeMux` panics at registration on conflicting patterns
+  rather than resolving them silently (`planning/later-phases-plan.md` C-5).
+  Rejecting a malformed application at boot is established practice, not a
+  novelty.
+- **Reversibility.** HIGH while Phase 2 is unfrozen; the guard is one check.
+- **Sub-decisions — all four SETTLED by the owner, 2026-07-19.**
+
+  **1. Does the rule apply inside a `Router`? YES.** `use()` must precede any
+  route within the router too. A guard that only works at the top level merely
+  moves the hole down one level: a `Router` that registers a route before its
+  own auth serves the same 200-OK in silence. *A guard that only works at the
+  top is not a guard.*
+
+  **2. Does `mount()` close the window? YES.** `mount()` brings already-registered
+  routes into the app, so a global `use()` after a `mount()` is rejected exactly
+  as it is after a `get()`. Anything else falls back into the retroactivity
+  already rejected. Practical rule: **global middleware before the mounts; a
+  mount counts as a route registration.**
+
+  **3. Failure mechanism — the earlier recommendation in this ADR was WRONG and
+  is corrected.** A dry abort at the point of the offending call fails on two
+  counts that the project's own discipline exposes:
+
+  * *It breaks testability.* `use()` returns void, so it cannot signal by return
+    value; the only options are aborting or registering-and-refusing. Aborting
+    at the call site makes it impossible to write the test proving "a
+    mis-ordered app is rejected" without killing the test runner — the same
+    dead-end WP13 hit with `panic` in a handler.
+  * *It breaks transport parity (R-10).* If the guard lived only in `serve()`,
+    `test_request` — which never calls `serve()` — would dispatch the
+    unprotected route in memory: **200 in the test, 500 on the socket.** The two
+    transports would diverge on exactly the security property they exist to keep
+    identical.
+
+  The guard is therefore fail-closed, **detected at registration**, and must
+  satisfy three properties:
+
+  * **(a) identical on both transports** — it lives on the dispatch path, not
+    only in `serve()`;
+  * **(b) observable to a test** — a private "poisoned app" predicate, in the
+    spirit of WP11's `nm` assertions, rather than an abort that kills the
+    runner;
+  * **(c) a diagnostic that names the offending pattern and says what to do.**
+
+  The exact mechanism — poison the `App` so every request becomes a 500 and
+  `serve()` refuses to bind, versus a cured abort — is a **WP17 prototype**. The
+  three properties are the requirement. This is *more* fail-closed than a dry
+  abort, and unlike it, testable.
+
+  **4. Does `bare()` enforce it too? YES.** `bare()` omits the default 404/405
+  responders; it does not exist to switch off a safety interlock in the
+  middleware mechanism. If `use()` is available in `bare()`, the same guard
+  applies. **`bare()` means "no default policy", not "no safety".**
+
+## ADR-020 — Recovery is the driver guarantee, not a middleware
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19).
+- **Owner.** Phase 2, WP21. Public surface: **zero symbols.**
+- **Context.** The Phase-2 scope promised "recovery middleware — becomes
+  default-on in `web.app()`" and a gate item "recovery converts panic to
+  standardized 500". WP13 established two language facts that make this
+  impossible rather than merely difficult, both reproduced independently:
+  1. **`app()` can never install a hook.** Odin's `context` is an implicit
+     by-value parameter, so a callee's assignment dies with its frame — the
+     caller still sees the old value.
+  2. **A working hook would not be enough.** Only `panic`, `assert` and failed
+     type assertions reach `assertion_failure_proc`. Bounds-check failures, nil
+     dereferences and divide-by-zero do not; `bounds_check_error` is
+     `proc "contextless"` and cannot consult the hook even in principle.
+- **Options.**
+  (A) "Last gasp": write a 500 from a fault hook, then abort.
+  (B) **Redefine recovery as the existing WP8 driver guarantee** — an
+      uncommitted response is finalized to a standardized 500 — plus honest
+      documentation that Odin aborts on panic.
+  (C) `setjmp`/`longjmp` to continue after a fault.
+  (D) Remove the item entirely.
+- **Decision: (B).** Option (A) is deferred to Phase 4 as a **"last-gasp
+  responder"**, a name that must never be shortened to "recovery".
+- **Rationale (owner).** The promise as written is not hard, it is impossible,
+  and freezing it would freeze a lie. The alternatives are worse and measured:
+  (C) leaks **8,250 bytes per recovered fault**, linear — a 4 GiB container dies
+  in about 8 minutes while answering 500s and never signalling its supervisor;
+  (A) exports a raw file descriptor through the ADR-009 boundary and becomes
+  cross-connection response injection as soon as more than one thread serves.
+  (B) is the only option that neither widens the public surface nor opens a hole.
+- **Accepted cost, stated plainly.** A panicking handler closes the connection —
+  the client sees `curl: (52) Empty reply from server` — and the process falls
+  over for a supervisor to restart. That is standard behaviour for a serious
+  runtime, and it is accepted deliberately rather than discovered later.
+- **Evidence.** `planning/phase-2-prototype-recovery.md`.
+- **Doc impact.** `knowledge-base/03-development-phases.md` §Phase 2 scope and
+  Test Gate are amended; `planning/phase-2-plan.md` WP21 drops to zero symbols.
+- **Reversibility.** HIGH — nothing is exported, so Phase 4 may add a last-gasp
+  responder without a breaking change.
+
+
+## ADR-021 — Test-support grows by procedure group, under one public name
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19). Supersedes ADR-015 (PROPOSED).
+- **Owner.** Phase 2, WP14.
+- **Context.** `test_request` takes only `(app, method, path)`, so a handler
+  calling `web.body` can never reach its success path in memory — it always sees
+  `invalid_json`. The framework's own tests reach it only by copying
+  `web/*.odin` into a throwaway package, which a user cannot do.
+- **AMENDED 2026-07-19 — the mechanism changes, the objective does not.** The
+  variant is added by a **default parameter on the existing procedure**, not by
+  a procedure group. One public name, ledger unchanged at 2, existing call sites
+  untouched — every goal below is still met, by a simpler means.
+
+  **Why the group was withdrawn.** Measured on the pinned compiler: `odin doc`
+  renders a group as `name :: proc{member_a, member_b}` — member names only.
+  With `@(private)` members those names resolve to nothing else in the doc
+  output, so the freeze snapshot pins the group's name and **not its signature**.
+  Rewriting a member's parameters from `(Method, string, string)` to
+  `(Method, string, []u8, int)` left the snapshot line byte-identical while the
+  symbol stayed publicly callable. A group over private members is therefore
+  unfreezable, and `build/check_phase1_freeze.sh` now rejects the construct
+  outright rather than pretending to freeze it.
+
+  A default parameter keeps the entire contract in the frozen record:
+
+  ```
+  test_request :: proc(a: ^App, method: Method, path: string,
+                       body: string = "") -> Recorded_Response
+  ```
+
+  It also introduces no new concept, and matches how `core` adds optional
+  behaviour everywhere (`allocator := context.allocator`, 726 occurrences).
+
+- **Superseded decision.** Add the body/header-carrying variant through an
+  explicit Odin **procedure group**, with the objective of **remaining ONE
+  public name**: `test_request`.
+- **Why a group and not a second name.** This is the whole reason the audit
+  recommended a group. If the variants stay `@(private)` under the group, the
+  **test-support ledger stays at 2** and only the signature snapshot changes.
+  A second name (`test_request_with_body`) would be a second canonical way to do
+  one operation, which G-01 rejects, and would grow the ledger for no gain.
+- **If the toolchain will not allow a single name.** WP14's D-14.1 compile probe
+  decides this. If an exported procedure group cannot have private members on
+  the pinned compiler, the growth goes to **the minimum** — and the number is
+  reported before it is adopted, not after.
+- **Route to acceptance: a freeze amendment.** Either way this lands by amending
+  the freeze rather than bypassing it: update
+  `build/phase1-public-signatures.txt`, the manifest in
+  `planning/phase-1-freeze.md`, and the gate's ledger numbers, in the same
+  change, with the evidence attached.
+- **On whether this violates the freeze — it does not.** Freeze never meant
+  "never changes". It meant "changes only with evidence and a recorded
+  amendment". WP11 built that door deliberately. Using it here is the system
+  working as designed, not an exception to it. The gate's named assertions still
+  fire: a snapshot cannot be refreshed to launder a change, because the
+  assertions encode the decision rather than the current state.
+- **Reversibility.** HIGH — the group reduces to its single Phase-1 member, and
+  every existing call site is untouched because the simple form is a member of
+  the group.
