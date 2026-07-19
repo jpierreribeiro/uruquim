@@ -39,6 +39,12 @@ ADRs 001, 002, 003-baseline, 004, 006, 007, 008, 009, and 011 are accepted.
 ADR-005 (middleware semantics) and ADR-010 (remaining Advanced API) stay
 proposed and owned by later gates; neither can expand Phase 1.
 
+Human-accepted anti-accretion guardrails in planning/15 now require an exact
+export inventory, prohibit framework types beyond the HTTP edge, scope
+transport-leak checks to public surfaces, and assign evidence to WP1, WP2,
+WP5, WP6, WP8, WP10, and WP11. Raw Gin/Echo research remains non-normative and
+does not reopen ADR-011.
+
 ## Approved Phase-1 vertical slice
 
 The slice contains the compiling public API skeleton, Request/Response views

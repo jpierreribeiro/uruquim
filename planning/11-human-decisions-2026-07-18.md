@@ -30,6 +30,10 @@ were recorded in commit `e9a0987`.
     returned error, and an explicit result before any signature change.
 11. Gjallarhorn is a comparative reference only; no code or architecture is
     copied wholesale.
+12. Gin/Echo research is retained as non-normative input. Its accepted lesson
+    is public-API anti-accretion governance in planning/15; it does not reopen
+    the void handler, add a Phase-1 linter, or treat internal transport
+    documentation as public leakage.
 
 ADRs 006–009 retain their prototype-supported recommendations as accepted
 implementation constraints. ADR-005 and ADR-010 remain deferred to later

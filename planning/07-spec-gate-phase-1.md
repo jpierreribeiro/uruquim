@@ -183,5 +183,6 @@ the expected diagnostic. ADR-011 is accepted, canonical documents agree, and
 the Phase-1 handler remains `proc(ctx: ^Context)`.
 
 This READY result authorizes the approved WP sequence but does not itself
-start production implementation. WP0 must complete its real-VPS repetition
-before WP1 begins.
+start production implementation. WP0 is now COMPLETE. Human-accepted
+anti-accretion guardrails in planning/15 constrain, but do not reopen, the
+READY result; WP1 must enforce its exact export and boundary checks.

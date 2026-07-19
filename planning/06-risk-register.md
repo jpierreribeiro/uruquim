@@ -125,6 +125,19 @@ Scale: probability/impact ∈ {Low, Med, High}.
   clean compiler evidence and an approved spec amendment.
 - **Resolution.** Baseline resolved at the Spec Gate; ergonomic probe in WP6.
 
+## R-14 · Convenience-driven public API accretion
+- **Prob** Med · **Impact** High (cognitive load, agent hallucination, lock-in,
+  and irreversible pre-1.0 compatibility pressure).
+- **Signals.** synonyms; helpers without behavior tests; `web.Context` in
+  domain packages; dynamic state bags; backend nouns in exports; later-phase
+  features appearing in quick starts; optional dependencies entering core.
+- **Mitigation.** planning/15 guardrails; exact export inventory in WP1/WP11;
+  same-change compiling example, behavior test, docs, ownership, dependency,
+  and rollback evidence for every public change.
+- **Fallback.** keep the proposal private/advanced, move it to its owning
+  phase, or remove it before 1.0 rather than preserve a second canonical path.
+- **Resolution.** continuous; audited at every WP gate and frozen at WP11.
+
 ## Heat summary
 
 | Risk | Prob | Impact | Phase |
@@ -142,6 +155,7 @@ Scale: probability/impact ∈ {Low, Med, High}.
 | R-11 freeze violation | Med | Med | WP11 |
 | R-12 scope creep | Med | Med | WP11 |
 | R-13 pointer JSON | High when used | Med | WP1/WP6 |
+| R-14 API accretion | Med | High | Every WP / WP11 |
 
 The local R-01 condition and all Phase-1 decision blockers are resolved.
 Remaining risks are owned by their implementation work packages or later

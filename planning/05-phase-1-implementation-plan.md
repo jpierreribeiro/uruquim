@@ -38,7 +38,8 @@ runs on the pinned toolchain.
 ## WP1 — Compiling public API skeleton
 - **Objective.** All ratified Phase-1' signatures exist as stubs; no HTTP
   behavior.
-- **Spec.** §Public API Surface; §Canonical vocabulary; freeze discipline.
+- **Spec.** §Public API Surface; §Canonical vocabulary; freeze discipline;
+  planning/15 G-01/G-02/G-03/G-06/G-09.
 - **Files.** `web/app.odin`, `web/routing.odin`, `web/context.odin`,
   `web/extract.odin`, `web/respond.odin`, `web/serve.odin`, `web/errors.odin`.
 - **API.** `app/bare/destroy`, `get/post/put/patch/delete`, `Context`,
@@ -46,19 +47,24 @@ runs on the pinned toolchain.
   json/text`, error helpers, `serve`.
 - **Tests first.** `odin check` passes; a compile-only `_test.odin` references
   every public symbol (proves the surface exists and names match ai-context).
+  A static contract rejects extra exports, Phase-2+ names, untyped Context
+  bags, and backend-specific types in the public package.
 - **Min impl.** stubs returning zero values / `not_implemented` markers.
-- **Done.** surface compiles; parity test lists exactly the Phase-1 vocabulary.
+- **Done.** surface compiles; parity test lists exactly the Phase-1 vocabulary;
+  no synonym, transport type, or framework state bag was introduced.
 - **Risks.** a signature fails to compile → NOT_READY trigger (gate).
 - **Deps.** WP0; exp-01/02/03/04. **Rollback.** stubs are inert.
 
 ## WP2 — Framework request/response model
 - **Objective.** `Request`/`Response` with views + ownership + commit state.
-- **Spec.** §Request/Response ownership; ADR-007/008.
+- **Spec.** §Request/Response ownership; ADR-007/008; planning/15
+  G-03/G-04/G-05.
 - **Files.** `web/request.odin`, `web/response.odin`, `web/headers.odin`.
 - **API.** `Request{method,path,query,headers,body}`, `Response{status,headers,
   body,committed}`.
 - **Tests first.** view-aliasing + invalidation test (port of exp-06);
-  single-commit test (port of exp-08).
+  explicit persistent-copy test; single-commit test (port of exp-08); Context
+  shape test rejects dynamic/untyped storage.
 - **Min impl.** views over a supplied buffer; `commit` guard.
 - **Done.** exp-06/08 behaviors pass as real tests.
 - **Risks.** allocator ownership wrong → R-04.
@@ -96,12 +102,14 @@ runs on the pinned toolchain.
 ## WP5 — Canonical extractors
 - **Objective.** `path/path_int/query/query_int/query_int_or` with the
   respond-on-failure contract.
-- **Spec.** §Extractor Control Flow; ADR-002.
+- **Spec.** §Extractor Control Flow; ADR-002; planning/15 G-01/G-04.
 - **Files.** `web/extract.odin` (impl), `web/errors.odin` (envelope for
   invalid_path/query).
 - **API.** the five extractors + failure-stop.
 - **Tests first.** valid/invalid path int; query absent→default,
-  malformed→400; each failure writes envelope once (ports of exp-09).
+  malformed→400; each failure writes envelope once and a continued handler
+  cannot replace it (ports of exp-09). Canonical example branches return
+  immediately; the compile probe forces capture of `ok`.
 - **Min impl.** parse + write envelope + return false.
 - **Done.** extractor contract test-pinned; signatures omit `#optional_ok` and
   a negative compile probe proves that dropping `ok` is rejected.
@@ -111,7 +119,8 @@ runs on the pinned toolchain.
 ## WP6 — JSON responses and error envelope
 - **Objective.** `json/text/ok/created/no_content` + envelope; failures before
   commit.
-- **Spec.** §Response; §Std Errors; AMEND-2 (`field` optional).
+- **Spec.** §Response; §Std Errors; AMEND-2 (`field` optional); planning/15
+  G-01/G-04/G-09.
 - **Files.** `web/respond.odin`, `web/errors.odin`.
 - **API.** all response helpers; envelope encoder.
 - **Tests first.** `ok`==`json(.OK)` byte-identical; concrete value payloads
@@ -125,7 +134,8 @@ runs on the pinned toolchain.
   amendment before adding support; otherwise keep the accepted value-only
   baseline.
 - **Done.** exp-02 behaviors pass; envelope contract fixed; marshal failures
-  are observable in server logs; pointer-prototype result is recorded.
+  are observable in server logs; pointer-prototype result is recorded; error
+  formatting/commit protection uses the private typed report path.
 - **Risks.** marshal-after-commit ordering → R-05.
 - **Deps.** WP2; exp-02. **Rollback.** helpers isolated.
 
@@ -143,12 +153,13 @@ runs on the pinned toolchain.
 
 ## WP8 — Bootstrap real transport adapter
 - **Objective.** minimal `odin-http` adapter behind the boundary; buffered.
-- **Spec.** §Canonical Transport Direction; ADR-009.
+- **Spec.** §Canonical Transport Direction; ADR-009; planning/15 G-06/G-07.
 - **Files.** `web/internal/transport/odin_http_adapter.odin`,
   `web/internal/transport/boundary.odin`.
 - **API.** none public; implements `Transport`.
 - **Tests first.** adapter starts/stops; one real GET /ping over a socket
-  (end-to-end suite, small).
+  (end-to-end suite, small); exported-signature scan rejects backend types;
+  dependency inventory records what the adapter adds outside core.
 - **Min impl.** map odin-http req/res ↔ framework Request/Response; enforce body
   cap while reading.
 - **Done.** `serve` works on a real port; no odin-http type in any public
@@ -175,13 +186,14 @@ runs on the pinned toolchain.
 - **Objective.** examples 01-03 compile in the verification gate; ai-context
   parity; AMEND-3/-4
   applied to docs.
-- **Spec.** §AI-Friendly API Rules; audit AMEND-3/-4.
+- **Spec.** §AI-Friendly API Rules; audit AMEND-3/-4; planning/15 G-08/G-09.
 - **Files.** `examples/01-hello-world`, `02-json-api`, `03-route-params`;
   doc edits (proposed, not part of code freeze).
 - **API.** none.
 - **Tests first.** the verification gate compiles every example; a parity
   check diffs ai-context
-  symbols against the public package.
+  symbols against the public package and rejects future-phase vocabulary in
+  Phase-1 examples.
 - **Min impl.** three example programs using only Phase-1' surface.
 - **Done.** examples green; docs carry phase markers (AMEND-4) and the
   progressive-defaults note (AMEND-3); every response example uses concrete
@@ -191,13 +203,17 @@ runs on the pinned toolchain.
 
 ## WP11 — Phase 1 Spec Gate and freeze
 - **Objective.** freeze only proven signatures/contracts.
-- **Spec.** freeze discipline; gate 07.
+- **Spec.** freeze discipline; gate 07; planning/15 full guardrail audit.
 - **Files.** `planning/07-spec-gate-phase-1.md` (updated to EXECUTED results).
 - **API.** freeze the Phase-1' vocabulary.
-- **Tests first.** the gate checklist is itself the acceptance test.
+- **Tests first.** the gate checklist is itself the acceptance test; include
+  exact public-export and direct-dependency inventories with an owner/evidence
+  row for every public symbol.
 - **Min impl.** mark ratified signatures frozen; open items routed to their
   phase/ADR.
-- **Done.** gate result computed from executed evidence (not predictions).
+- **Done.** gate result computed from executed evidence (not predictions);
+  anti-accretion review finds no alias, god context, backend leak, hidden
+  escaping view, or unowned public dependency.
 - **Risks.** freezing something un-ratified → forbidden by discipline.
 - **Deps.** WP0-WP10 + executed experiments. **Rollback.** un-freeze pre-1.0.
 
