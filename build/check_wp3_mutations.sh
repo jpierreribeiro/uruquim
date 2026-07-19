@@ -210,28 +210,10 @@ sed -i 's/^query_int_or :: proc(ctx: \^Context, name: string, default_value: int
 expect_reject "$T" "altered query_int_or signature" \
   "the ratified web.query_int_or signature is not exactly"
 
-# 18. A WP6 responder implemented early.
-T="$(fresh_tree)"; TREES+=("$T")
-python3 - "$T/web/errors.odin" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = "bad_request :: proc(ctx: ^Context, message: string) {\n}"
-if old not in s:
-    sys.exit("MUTATION-SETUP: the bad_request stub was not found in web/errors.odin")
-new = ("bad_request :: proc(ctx: ^Context, message: string) {\n"
-       "\tresponse_commit(&ctx.private.response, .Bad_Request, nil, nil)\n}")
-open(p, "w").write(s.replace(old, new, 1))
-PY
-expect_reject "$T" "WP6 responder implemented early" \
-  "is no longer an empty stub"
-
-# 19. The JSON encoder linked into the shipped package. WP5's envelope is
-#     hand-escaped into fixed storage precisely so this import stays absent.
-T="$(fresh_tree)"; TREES+=("$T")
-printf '\nimport _ "core:encoding/json"\n' >>"$T/web/errors.odin"
-expect_reject "$T" "core:encoding/json imported by web/" \
-  "web/ imports core:encoding/json"
+# 18. (RETIRED IN WP6.) This case asserted that `web.bad_request` was still an
+#     empty stub. WP6 implemented it, so the mutation now describes the
+#     delivered feature rather than a forbidden state. The WP6 cases at the end
+#     of this file replace it.
 
 # 20. WP7 machinery starting early.
 T="$(fresh_tree)"; TREES+=("$T")
@@ -262,3 +244,109 @@ expect_reject "$T" "misspelled invalid_query_parameter code" \
   "the ratified error code 'invalid_query_parameter' is missing"
 
 echo "PASS: WP5 mutation checks (8 forbidden extractor states all rejected)"
+
+# ---------------------------------------------------------------------------
+# WP6 mutation checks — the section-10c response/envelope guardrails must REJECT
+# the states they claim to forbid.
+#
+# Several of these guardrails are NEGATIVE greps, and a negative grep passes
+# just as happily when its pattern is wrong, when the variable it scans was
+# renamed, or when the file it reads moved. These cases are what make the
+# rejection a fact.
+# ---------------------------------------------------------------------------
+
+# 23. The JSON encoder reaching the interim dispatcher. WP6 D5 keeps the
+#     automatic 404/405 bodies static precisely so that `dispatch` — reachable
+#     from every application that calls web.app() — neither allocates nor links
+#     the marshaller.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\n@(private)\nwp6_bad_render :: proc(ctx: ^Context) {\n\tdata, _ := encoding_json.marshal(1, {}, context.allocator)\n\t_ = data\n}\n' \
+  >>"$T/web/dispatch_match.odin"
+expect_reject "$T" "encoder used by the interim dispatcher" \
+  "the WP4 dispatcher marshals a response"
+
+# 24. The encoder imported by a file that must stay encoder-free.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nimport _ "core:encoding/json"\n' >>"$T/web/extract.odin"
+expect_reject "$T" "encoder imported outside respond.odin/errors.odin" \
+  "the JSON encoder is imported outside"
+
+# 25. Response teardown exported. Response lifetime is framework business; an
+#     application must never be handed a cleanup call (ADR-014 D1).
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/response.odin" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "@(private)\nresponse_destroy :: proc(res: ^Response) {"
+assert old in s, "MUTATION-SETUP: response_destroy declaration not found"
+open(p, "w").write(s.replace(old, "response_destroy :: proc(res: ^Response) {", 1))
+PY2
+expect_reject "$T" "response_destroy exported" \
+  "exports symbols outside the ratified Phase-1 surface"
+
+# 26. `field` smuggled into the general envelope. AMEND-2 says it is OMITTED,
+#     and the omission must be a property of the TYPE.
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/errors.odin" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = """Error_Envelope_Body :: struct {
+	code:    string `json:"code"`,
+	message: string `json:"message"`,
+}"""
+assert old in s, "MUTATION-SETUP: Error_Envelope_Body not found"
+new = """Error_Envelope_Body :: struct {
+	code:    string `json:"code"`,
+	message: string `json:"message"`,
+	field:   string `json:"field"`,
+}"""
+open(p, "w").write(s.replace(old, new, 1))
+PY2
+expect_reject "$T" "field added to the general envelope" \
+  "must carry exactly code and message"
+
+# 27. `omitempty` used to omit `field`. It decides on EMPTINESS, so it would also
+#     drop a field legitimately named "" — a different contract from AMEND-2.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's|`json:"message"`|`json:"message,omitempty"`|' "$T/web/errors.odin"
+expect_reject "$T" "omitempty in the envelope" \
+  "omitempty is used in web/"
+
+# 28. A wrong Content-Type. Clients dispatch on it, so a silent change here is a
+#     compatibility break rather than a visible failure.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's|^CONTENT_TYPE_JSON :: "application/json"$|CONTENT_TYPE_JSON :: "text/json"|' \
+  "$T/web/response.odin"
+expect_reject "$T" "non-canonical JSON Content-Type" \
+  "the JSON Content-Type is not exactly"
+
+# 29. The text Content-Type losing its charset.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's|^CONTENT_TYPE_TEXT :: "text/plain; charset=utf-8"$|CONTENT_TYPE_TEXT :: "text/plain"|' \
+  "$T/web/response.odin"
+expect_reject "$T" "text Content-Type without charset" \
+  "the text Content-Type is not exactly"
+
+# 30. Pointer-payload support adopted without a ratified amendment (R-13).
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\n@(private)\nwp6_deref_payload :: proc() {}\n' >>"$T/web/respond.odin"
+expect_reject "$T" "pointer dereference support introduced" \
+  "pointer-payload dereference"
+
+# 31. The response ownership machinery removed. `response_commit_owned` is what
+#     makes ADR-014 true; losing it must not pass quietly.
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/response.odin" <<'PY2'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = "response_commit_owned :: proc("
+assert old in s, "MUTATION-SETUP: response_commit_owned not found"
+open(p, "w").write(s.replace(old, "response_commit_owned_renamed :: proc(", 1))
+PY2
+expect_reject "$T" "response_commit_owned removed" \
+  "internal WP6 declaration 'response_commit_owned' is missing"
+
+echo "PASS: WP6 mutation checks (9 forbidden response states all rejected)"

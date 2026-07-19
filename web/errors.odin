@@ -1,40 +1,64 @@
-// WP1 — COMPILING PUBLIC API SKELETON. NO HTTP BEHAVIOR.
+// WP6 — ERROR RESPONDERS AND THE STANDARDIZED ENVELOPE.
 //
-// This file declares the Phase-1 error responders. Nothing is rendered: WP6
-// owns the standardized error envelope, the error code list, and the private
-// typed error-report path that framework-detected failures pass through.
+// This file owns every error the framework produces: the five public
+// responders, the two WP5 extractor envelopes, the automatic 404/405 bodies,
+// and the private typed error-report path that framework-detected failures pass
+// through (ADR-011).
 //
-// The envelope every one of these will eventually produce is:
+// The envelope is always:
 //
 //	{"error": {"code": "...", "message": "...", "field": "..."}}
 //
-// with `field` omitted entirely when the error is not bound to an input field.
-// WP1 declares no envelope type and no code enum, so it makes no part of that
-// contract available yet.
+// with `field` OMITTED ENTIRELY when the error is not bound to an input field
+// (AMEND-2). Only the two WP5 extractor errors carry one.
+//
+// Nothing here is public except the five responders themselves. There is no
+// exported envelope type, no error-code enum, and no way for an application to
+// construct or inspect an envelope: the ledger stays at exactly 32.
 package web
+
+import encoding_json "core:encoding/json"
+import "core:mem"
+import "core:strings"
+
+// The stdlib JSON import is ALIASED because this package exports a procedure
+// named `json`.
 
 // bad_request writes a standardized 400 response.
 //
-// WP1 STUB: writes nothing and commits nothing. WP6 implements it.
+// The message is returned to the client VERBATIM, so it must be safe to expose:
+// it is a caller-facing explanation, never an internal diagnostic.
 bad_request :: proc(ctx: ^Context, message: string) {
+	error_commit_message(ctx, .Bad_Request, ERROR_CODE_BAD_REQUEST, message)
 }
 
 // unauthorized writes a standardized 401 response.
-//
-// WP1 STUB: writes nothing and commits nothing. WP6 implements it.
 unauthorized :: proc(ctx: ^Context, message: string) {
+	error_commit_message(ctx, .Unauthorized, ERROR_CODE_UNAUTHORIZED, message)
 }
 
 // forbidden writes a standardized 403 response.
-//
-// WP1 STUB: writes nothing and commits nothing. WP6 implements it.
 forbidden :: proc(ctx: ^Context, message: string) {
+	error_commit_message(ctx, .Forbidden, ERROR_CODE_FORBIDDEN, message)
 }
 
 // not_found writes a standardized 404 response for the named resource.
 //
-// WP1 STUB: writes nothing and commits nothing. WP6 implements it.
+// The message is composed as `Resource '<resource>' not found`, so callers pass
+// the resource NAME ("user"), not a full sentence.
 not_found :: proc(ctx: ^Context, resource: string) {
+	if ctx.private.response.committed {
+		return
+	}
+
+	message, message_ok := error_compose_not_found(resource, context.allocator)
+	if !message_ok {
+		error_commit_static(ctx, .Not_Found, ERROR_BODY_NOT_FOUND_GENERIC)
+		return
+	}
+	defer delete_string(message, context.allocator)
+
+	error_commit_message(ctx, .Not_Found, ERROR_CODE_NOT_FOUND, message)
 }
 
 // internal_error writes a standardized 500 response.
@@ -42,8 +66,11 @@ not_found :: proc(ctx: ^Context, resource: string) {
 // It takes no message on purpose: internal failure detail is logged on the
 // server, never returned to the client.
 //
-// WP1 STUB: writes nothing and commits nothing. WP6 implements it.
+// Its envelope is a STATIC constant, so producing a 500 cannot itself fail and
+// cannot allocate. That is what makes it usable as the terminal fallback of the
+// marshal-failure path without any risk of recursion.
 internal_error :: proc(ctx: ^Context) {
+	error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +304,14 @@ error_commit_parameter :: proc(
 	n = error_write_escaped_name(buffer, n, name)
 	n += copy(buffer[n:], "\"}}")
 
-	response_commit(&ctx.private.response, .Bad_Request, nil, buffer[:n])
+	// WP6 adds the `Content-Type`; the body itself stays on the fixed
+	// request-local buffer and is therefore still BORROWED, not owned.
+	response_commit(
+		&ctx.private.response,
+		.Bad_Request,
+		response_json_headers(ctx),
+		buffer[:n],
+	)
 }
 
 // error_invalid_path_parameter commits the 400 for a path parameter that is
@@ -326,4 +360,281 @@ error_invalid_query_parameter :: proc(ctx: ^Context, name: string) {
 		name,
 		ERROR_MESSAGE_INTEGER_SUFFIX,
 	)
+}
+
+// ---------------------------------------------------------------------------
+// WP6 — the general envelope machinery.
+//
+// ONE envelope contract, THREE storage strategies, chosen by what the content
+// actually needs. The shape is always the same:
+//
+//	{"error":{"code":"...","message":"...","field":"..."}}
+//
+// with `field` OMITTED ENTIRELY when no input field caused the error (AMEND-2).
+//
+//   - STATIC constants, for envelopes whose code and message are fixed: the
+//     automatic 404 and 405, and `internal_error`. These allocate nothing and
+//     cannot fail, which is what keeps `dispatch` allocation-free (a property
+//     WP4 test-pinned) and keeps the JSON encoder out of applications that
+//     never render a payload. Committed as BORROWED bodies.
+//
+//   - The FIXED request-local buffer, for the two WP5 extractor errors. Their
+//     content is bounded, they are unchanged by WP6 apart from gaining a
+//     `Content-Type`, and they stay off the allocator (see above in this file).
+//
+//   - An OWNED allocation, for envelopes carrying an arbitrary caller-supplied
+//     message. Only these three helpers — `bad_request`, `unauthorized`,
+//     `forbidden` — plus `not_found`'s composed message can be unbounded, so
+//     only these reach the encoder.
+//
+// WHY THE OFFICIAL ENCODER HERE AND A HAND-ESCAPER IN WP5. The WP5 envelope
+// escapes a bounded parameter NAME into fixed storage, where an allocation
+// would have no owner. A WP6 message is arbitrary application text, it already
+// requires an owned allocation, and correct escaping of arbitrary text is
+// exactly what the official encoder exists to guarantee. Both are validated by
+// the official PARSER in strict mode in `tests/wp6-internal/`.
+// ---------------------------------------------------------------------------
+
+// The ratified wire codes for the general errors (docs/errors.md). `bad_request`
+// was added to the normative list by WP6 D4: the helper was ratified in WP1 and
+// the original list simply omitted its code.
+@(private)
+ERROR_CODE_BAD_REQUEST :: "bad_request"
+
+@(private)
+ERROR_CODE_UNAUTHORIZED :: "unauthorized"
+
+@(private)
+ERROR_CODE_FORBIDDEN :: "forbidden"
+
+@(private)
+ERROR_CODE_NOT_FOUND :: "not_found"
+
+@(private)
+ERROR_CODE_METHOD_NOT_ALLOWED :: "method_not_allowed"
+
+@(private)
+ERROR_CODE_INTERNAL :: "internal_error"
+
+// The static envelopes. Written out literally rather than assembled, so that
+// what ships is exactly what was reviewed, and so that emitting one is a `copy`
+// of a constant rather than a render that could fail.
+//
+// They are `string` constants transmuted to `[]u8` at the commit site; the bytes
+// live in the binary's read-only data, so the committed view is valid for the
+// whole process and is never freed.
+@(private)
+ERROR_BODY_NOT_FOUND_ROUTE ::
+	`{"error":{"code":"not_found","message":"Route not found"}}`
+
+@(private)
+ERROR_BODY_METHOD_NOT_ALLOWED ::
+	`{"error":{"code":"method_not_allowed","message":"Method not allowed"}}`
+
+@(private)
+ERROR_BODY_INTERNAL ::
+	`{"error":{"code":"internal_error","message":"Internal server error"}}`
+
+// The fallback for `not_found` when composing its message fails. Composition
+// allocates, and an allocation failure must still produce a complete, valid
+// envelope rather than a half-written one.
+@(private)
+ERROR_BODY_NOT_FOUND_GENERIC ::
+	`{"error":{"code":"not_found","message":"Resource not found"}}`
+
+// Error_Envelope is the wire shape for an error WITHOUT a field.
+//
+// There are two envelope structs rather than one with `json:",omitempty"`
+// because omitempty decides on EMPTINESS, not on presence: it would also drop a
+// field legitimately named "". Separate types make "this envelope has no field"
+// a property of the type rather than a runtime coincidence, which is what
+// AMEND-2 actually specifies.
+@(private)
+Error_Envelope :: struct {
+	error: Error_Envelope_Body `json:"error"`,
+}
+
+@(private)
+Error_Envelope_Body :: struct {
+	code:    string `json:"code"`,
+	message: string `json:"message"`,
+}
+
+// error_commit_static commits one of the constant envelopes as a BORROWED body.
+//
+// It allocates nothing and cannot fail. The `Content-Type` pair lives in
+// request-local storage on the Context, so the committed header is not a view
+// into a dead frame.
+@(private)
+error_commit_static :: proc(ctx: ^Context, status: Status, body: string) {
+	if ctx.private.response.committed {
+		return
+	}
+	response_commit(
+		&ctx.private.response,
+		status,
+		response_json_headers(ctx),
+		transmute([]u8)body,
+	)
+}
+
+// error_commit_message renders an envelope carrying an arbitrary message and
+// commits it as an OWNED body.
+//
+// The render completes BEFORE the commit is attempted, so a failed render never
+// leaves a partially-owned buffer, and `response_commit_owned` either takes the
+// allocation or destroys it (plan D2).
+//
+// If the envelope itself cannot be marshalled — which would require the encoder
+// to fail on a struct of two plain strings — it falls back to the static
+// `internal_error` body rather than recursing into the error path.
+@(private)
+error_commit_message :: proc(ctx: ^Context, status: Status, code: string, message: string) {
+	if ctx.private.response.committed {
+		return
+	}
+
+	envelope := Error_Envelope {
+		error = Error_Envelope_Body{code = code, message = message},
+	}
+
+	data, err := encoding_json.marshal(envelope, {}, context.allocator)
+	if err != nil {
+		if data != nil {
+			delete_slice(data, context.allocator)
+		}
+		error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
+		return
+	}
+
+	response_commit_owned(
+		&ctx.private.response,
+		status,
+		response_json_headers(ctx),
+		data,
+		context.allocator,
+	)
+}
+
+// error_compose_not_found builds `Resource '<resource>' not found`.
+//
+// The caller owns the result and releases it; the envelope renderer copies it
+// while marshalling, so it does not need to outlive the commit.
+@(private)
+error_compose_not_found :: proc(
+	resource: string,
+	allocator: mem.Allocator,
+) -> (
+	message: string,
+	ok: bool,
+) {
+	PREFIX :: "Resource '"
+	SUFFIX :: "' not found"
+
+	text, err := strings.concatenate([]string{PREFIX, resource, SUFFIX}, allocator)
+	if err != nil {
+		return "", false
+	}
+	return text, true
+}
+
+// ---------------------------------------------------------------------------
+// The private typed framework-error report (ADR-011).
+//
+// Framework-detected failures pass through ONE closed, package-private event
+// before anything is logged or responded. It is a closed enum plus the payload
+// TYPEID — never a stored `any`, which would be exactly the untyped error
+// transport ADR-011 forbids.
+// ---------------------------------------------------------------------------
+
+// Framework_Error is the closed set of framework-detected failures Phase 1
+// reports. It grows only when a work package ratifies a new one.
+@(private)
+Framework_Error :: enum {
+	None,
+	Response_Marshal_Failed,
+}
+
+// Framework_Report is the typed event. `payload_type` is a `typeid`, so the
+// report names the offending type without capturing the value — the value may
+// be unmarshalable, and storing it would put an `any` on a framework path.
+@(private)
+Framework_Report :: struct {
+	kind:         Framework_Error,
+	payload_type: typeid,
+}
+
+// framework_report logs one framework failure on the SERVER, at Error level.
+//
+// It never writes to the response and never allocates on its own: producing the
+// response is the caller's next step, and keeping the two separate is what lets
+// the caller guarantee the log happens BEFORE the commit (R-05).
+//
+// It uses `context.logger`. Phase 1 introduces no public logger, no observer and
+// no middleware: an application that installs no logger simply gets no output,
+// because `core:log` no-ops on a nil logger procedure.
+//
+// WHY IT DOES NOT IMPORT `core:log`, and this is a MEASURED cost decision.
+//
+// `core:log` reaches `core:os`, `core:strconv` and the terminal-detection code.
+// Odin links an imported package whether or not anything references it, so a
+// single `import "core:log"` anywhere in `web/` costs every application the
+// whole tree. Measured on 819fdc7, on a consumer that only calls
+// `app`/`destroy`/`serve` and never responds at all:
+//
+//	with    import "core:log":  84,584 bytes
+//	without import "core:log":  47,768 bytes   (+36,816 for an unused feature)
+//
+// Making this procedure parametric was tried first and did NOT help, precisely
+// because the cost is the import rather than the reference. So the framework
+// talks to `context.logger` directly: the logger lives in the implicit context,
+// its type comes from `base:runtime`, and reaching it needs no import at all.
+//
+// THE PRICE, stated plainly: the message is a STATIC string, because formatting
+// the payload type would pull in `core:fmt` and reintroduce the same problem.
+// The concrete type is therefore carried in the typed REPORT rather than in the
+// text. That is the right split anyway — ADR-011 already assigns rich,
+// structured error observation to a Phase-2 typed observer, and this keeps
+// Phase 1's diagnostic free for applications that never render JSON.
+//
+// `T` binds the payload type into the typed report as a `typeid`. The report
+// stores NO `any`: capturing the value would put untyped error transport on a
+// framework path (ADR-011 forbids it), and the value may be exactly the thing
+// that could not be marshalled.
+//
+// An application that installs no logger gets no output: `context.logger`
+// carries a nil procedure by default, and this checks for it.
+//
+// The message text is deliberately stable — `tests/wp6-internal/` matches on a
+// substring of it to tell the framework's own diagnostic apart from the test
+// runner's records.
+@(private)
+FRAMEWORK_MESSAGE_MARSHAL_FAILED ::
+	"uruquim: response payload could not be serialized; Phase 1 accepts " +
+	"concrete values only, not pointers or procedures (ADR-003). Responding 500."
+
+@(private)
+framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_location) {
+	report := Framework_Report {
+		kind         = kind,
+		payload_type = T,
+	}
+
+	logger := context.logger
+	if logger.procedure == nil {
+		return
+	}
+
+	switch report.kind {
+	case .None:
+		return
+	case .Response_Marshal_Failed:
+		logger.procedure(
+			logger.data,
+			.Error,
+			FRAMEWORK_MESSAGE_MARSHAL_FAILED,
+			logger.options,
+			loc,
+		)
+	}
 }

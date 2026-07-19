@@ -22,16 +22,15 @@ these forms. If a pattern here conflicts with any other document except
 > precedence, per-method isolation, and the automatic 404/405 of `web.app()`,
 > driven in memory by `web.test_request`.
 >
-> WP5 has added extraction: `web.path`, `web.path_int`, `web.query`,
-> `web.query_int` and `web.query_int_or` all work, and a failing extractor
-> really does commit its standardized 400 envelope. The extractor pattern below
-> is therefore now executable, not just canonical.
+> WP5 added extraction and WP6 added responses: `web.path*`/`web.query*` all
+> work, and every response helper — `web.json`, `web.ok`, `web.created`,
+> `web.text`, `web.no_content`, and the five error responders — now renders a
+> real body with a `Content-Type`. The full handler examples below execute.
 >
 > It is **still not a functional server**. `web.body` binds nothing (WP7) and
-> no response helper produces output (WP6), so the only JSON the framework
-> renders is the two extractor error envelopes. `web.serve` binds no port
-> (WP8). The canonical *forms* are what this document fixes, and they are
-> unchanged.
+> `web.serve` binds no port (WP8), so responses are observable only through
+> `web.test_request`. The canonical *forms* are what this document fixes, and
+> they are unchanged.
 
 ## The one rule
 
@@ -409,14 +408,17 @@ web.ok(ctx, user)       // accepted: User value
 
 Do not pass `&user`, and do not pass a variable whose type is `^User`.
 Pointers are unsupported by the Phase-1 baseline because the pinned official
-JSON marshaller rejects them. WP6 will separately prototype a one-level
-dereference; pointer support may be added only if that compiles cleanly and
-the specification is amended first.
+JSON marshaller rejects them. A WP6 disposable prototype confirmed one-level
+dereference compiles and marshals a `^User`, but pointer support was NOT
+adopted — the value-only baseline stands until the specification is amended.
 
-If marshalling rejects a payload type, the renderer logs the marshal error on
-the server before returning one complete standardized `internal_error`, while
-the response is still uncommitted. It never returns a silent 500 or partial
-JSON.
+If marshalling rejects a payload, the renderer logs the failure on the server
+before returning one complete standardized `internal_error`, while the response
+is still uncommitted. It never returns a silent 500 or a partial body.
+
+`web.json`/`web.ok`/`web.created` set `Content-Type: application/json`;
+`web.text` sets `text/plain; charset=utf-8`; `web.no_content` sets none. There
+is no public way to set a response header in Phase 1.
 
 ## Application state
 

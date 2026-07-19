@@ -285,6 +285,49 @@ recommendation · documentation impact · reversibility.
 - **Reversibility.** LOW after users base security or audit policy on it;
   therefore ADR required before implementation.
 
+## ADR-014 — Response body ownership in Phase 1
+- **Status.** **ACCEPTED** — option A, human decision recorded 2026-07-19,
+  ratified for WP6.
+- **Context.** WP6 renders JSON and text bodies of arbitrary size. The body must
+  outlive the handler, because the transport (or the WP3 recorder) reads the
+  committed response AFTER `dispatch` returns, and it must be released exactly
+  once — `odin test` enables memory tracking, so a leak turns the suite red.
+  WP2 deliberately left this open: `Response.body` is documented as a
+  non-owning view, and "WP6 defines the concrete allocation and lifetime of a
+  rendered response". Nothing in the codebase owns request-lifetime storage
+  yet. WP4 and WP5 avoided the question entirely by writing into fixed
+  request-local buffers (`allow_buffer`, `error_buffer`), which works only
+  because a 405 `Allow` value and a 400 envelope have a computable worst case.
+  A user payload does not.
+- **Options.** (A) the internal `Response` OWNS dynamically rendered bodies:
+  allocated with `context.allocator`, ownership transferred only after the
+  render completes, released exactly once by a private idempotent teardown the
+  response driver calls after capture. (B) pull WP7's request-lifetime arena
+  (ADR-006) forward and render into it. (C) render into a fixed request-local
+  buffer, as WP4/WP5 do. (D) `context.temp_allocator`.
+- **Benefits.** A keeps WP6 self-contained, adds no subpackage, crosses no work
+  package boundary, and stays entirely behind `@(private)`. B is the eventual
+  end state and would not need redoing.
+- **Costs.** A introduces an ownership rule that WP7's arena will probably
+  absorb — but `Response` is fully internal, so that churn is invisible to
+  applications. B makes WP6 absorb a file and a decision the plan assigns to
+  WP7, and widens the checker's file-set contract.
+- **Risks.** C is REJECTED outright: it would cap response size at a number no
+  work package ratified, turning an internal storage choice into a public
+  behavioral limit. D is REJECTED: ADR-007 restricts the temp allocator to
+  immediate scratch, and a temp-allocated body would have to survive across the
+  dispatch boundary — exactly the dangling-view class of bug the ownership
+  rules exist to prevent.
+- **Evidence.** WP5 established that fixed request-local storage is correct for
+  BOUNDED content and measured it as allocation-free; the same measurement is
+  what shows it cannot generalize to an unbounded payload.
+- **Decision.** **A.** The WP7 arena is NOT anticipated. When it lands it may
+  replace this mechanism without any public API change, because neither
+  `Response`, nor the ownership flag, nor the teardown is exported.
+- **Doc impact.** `web/response.odin` ownership comments, WP6 plan entry,
+  architecture spec §Response helpers, memory-model (Phase 4).
+- **Reversibility.** HIGH — everything involved is package-private.
+
 ---
 
 ## Acceptance ledger
@@ -304,6 +347,7 @@ recommendation · documentation impact · reversibility.
 | 011 | exp-10 + comparative audit | **ACCEPTED** — void handler; typed observer later |
 | 012 | WP7 repeated-binding prototype | **PROPOSED** — must close before WP7 implementation |
 | 013 | Phase-4 proxy corpus | **PROPOSED / DEFERRED** — must close before trusted-proxy code |
+| 014 | WP6 ownership decision | **ACCEPTED** — Response owns rendered bodies; no WP7 arena |
 
 No accepted Phase-1 ADR has been reopened. ADR-012 is a new, narrowly owned WP7
 decision; ADR-005, ADR-010, and ADR-013 remain owned by later gates and cannot

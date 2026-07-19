@@ -300,8 +300,65 @@ runs on the pinned toolchain.
 - **Deps.** WP2/WP4; exp-04/09. **Rollback.** signatures stable, bodies swap.
 
 ## WP6 — JSON responses and error envelope
+- **Execution status.** **COMPLETE** — verified by a full green `build/check.sh`
+  on dev-2026-07-nightly:819fdc7 (PASS=10 FAIL=0 SKIP=0; WP6 internal 36/36 and
+  public 14/14; ledgers 32 + 2 = 34 unchanged; G-11 still green; 33 mutation
+  cases rejected). The public surface did not move.
 - **Objective.** `json/text/ok/created/no_content` + envelope; failures before
   commit.
+- **Pointer-payload prototype (ADR-003 / OQ-14 follow-up).** Run and recorded,
+  NOT adopted. On 819fdc7 a one-level `reflect`-based dereference marshals a
+  `^User` cleanly, refuses a nil pointer, and still fails a `^^User` and a proc
+  value. Value-only remains the baseline; adopting dereference needs a ratified
+  amendment. Evidence is in the WP6 PR, not versioned in the repo.
+- **Cost note.** The first implementation imported `core:log` for the marshal
+  diagnostic and, because Odin links an imported package whether or not it is
+  referenced, added ~37 KiB (`core:log`/`core:os`/`core:strconv`/terminal) to
+  EVERY application — measured 47,768 -> 84,584 bytes on a consumer that never
+  responds. Making the report parametric did not help (the cost is the import,
+  not the reference). The framework now talks to `context.logger` directly with
+  a static message; residual cost for a non-responding app is +240 bytes, and
+  the JSON encoder stays out of applications that never render JSON.
+- **Decisions ratified in WP6.**
+  - **D1 — the internal `Response` OWNS dynamically rendered bodies**
+    (ADR-014, human decision 2026-07-19). Bodies produced by `json` and `text`,
+    and envelopes with a dynamic message, are allocated with
+    `context.allocator`. Ownership transfers to the `Response` only after the
+    render COMPLETES, so a failed render never leaves a half-owned buffer. The
+    `Response` privately records that it owns the body and which allocator made
+    it; a private, idempotent teardown releases it exactly once and returns the
+    struct to zero. The response DRIVER calls that teardown after the response
+    has been captured or written — today that is `web.test_request`, after the
+    recorder has made its own copies; the WP8 adapter must do the same. No
+    public cleanup symbol is created, and WP7's request arena is NOT
+    anticipated: it may replace this mechanism later with no public change.
+  - **D2 — two private commit modes.** `response_commit` is kept unchanged for
+    BORROWED bodies (static constants and fixed request-local buffers), and a
+    minimal `response_commit_owned` transfers an allocation. The rules are:
+    an already-committed response is never re-rendered and never allocates; an
+    owned body that cannot be committed is freed immediately by the commit
+    primitive, so ownership is always either transferred or destroyed and never
+    dropped; a rejected attempt changes neither status, headers, body nor
+    ownership; teardown never frees a borrowed body; and one `Response` never
+    holds two allocations.
+  - **D3 — `Content-Type` is fixed internally.** JSON responses and every
+    envelope get `application/json`; `text` gets
+    `text/plain; charset=utf-8`; `no_content` gets NO `Content-Type` and an
+    empty body. The automatic 405 emits `Allow` FIRST and `Content-Type`
+    second, deterministically. Header names and values are static strings and
+    the pair array lives in request-local storage on the `Context`, so no
+    header is ever a view into a dead frame. No public header API is added.
+  - **D4 — `bad_request` becomes a wire code.** `web.bad_request` needs one,
+    so `bad_request` joins the normative code list in `docs/errors.md`. This
+    adds no public symbol.
+  - **D5 — the automatic 404/405 bodies are STATIC constants, not marshalled.**
+    Their code and message are fixed, so rendering them through the encoder
+    would make `dispatch` — reachable from every application that calls
+    `web.app()` — link the JSON marshaller and allocate per 404. Emitting them
+    as compile-time byte constants through the borrowed commit path keeps
+    `dispatch` allocation-free (the WP4 `dispatch allocates nothing` test still
+    holds) and keeps the encoder out of applications that never render JSON.
+    The same reasoning keeps the WP5 extractor envelopes on their fixed buffer.
 - **Spec.** §Response; §Std Errors; AMEND-2 (`field` optional); planning/public-api-guardrails.md
   G-01/G-04/G-09.
 - **Files.** `web/respond.odin`, `web/errors.odin`.

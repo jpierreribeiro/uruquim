@@ -11,6 +11,8 @@
 // 404/405/501 belongs to WP4/WP9.
 package web
 
+import "core:mem"
+
 // Response is the package-internal response state for one request.
 //
 // It holds exactly what the commit guard needs to be provable: the status,
@@ -23,16 +25,28 @@ package web
 // WP6. Without internal header storage, WP4 could not express or test its own
 // contract.
 //
-// Neither `headers` nor `body` is OWNED by Response at this stage: both are
-// views over storage owned by whoever called the commit primitive. WP6 defines
-// the concrete allocation and lifetime of a rendered response, and may reshape
-// this struct freely — nothing here is public API.
+// OWNERSHIP (amended in WP6, ADR-014). `headers` is always BORROWED: every
+// header name and value is a static string, and the pair array lives in
+// request-local storage on the Context. `body` is EITHER borrowed — a static
+// constant such as the automatic 404 envelope, or the fixed request-local
+// buffer the WP5 extractor errors use — OR owned, when a responder rendered it
+// dynamically. `owned_body` says which, and `body_allocator` records who made
+// the allocation so the teardown cannot disagree with the renderer about how to
+// release it.
+//
+// WP7 may replace this with the request-lifetime arena (ADR-006) without any
+// public change: neither this struct, nor the flag, nor the teardown is
+// exported.
 @(private)
 Response :: struct {
 	status:    Status,
 	headers:   []Header_Pair,
 	body:      []u8,
 	committed: bool,
+
+	// WP6 — true when `body` is an allocation this Response must release.
+	owned_body:     bool,
+	body_allocator: mem.Allocator,
 }
 
 // response_commit records a response exactly once and reports whether it did.
@@ -71,4 +85,145 @@ response_commit :: proc(res: ^Response, status: Status, headers: []Header_Pair, 
 	res.body = body
 	res.committed = true
 	return true
+}
+
+// response_commit_owned records a response whose body is an ALLOCATION, and
+// takes ownership of it.
+//
+// It is the WP6 counterpart of `response_commit` (ADR-014, plan D2), and the
+// two differ in exactly one respect: what happens to `body`.
+//
+// OWNERSHIP IS ALWAYS RESOLVED. On success the allocation belongs to the
+// Response and is released by `response_destroy`. On rejection — a response was
+// already committed — the allocation is FREED HERE, immediately, because the
+// caller rendered it before discovering the guard would refuse it and nothing
+// else can own it afterwards. Returning false while leaving the buffer to the
+// caller would leak on a path a handler triggers simply by responding twice.
+//
+// A caller must therefore treat `body` as CONSUMED by this call in both
+// outcomes, and must never read or free it afterwards.
+//
+// A rejected attempt leaves status, headers, body and ownership exactly as the
+// first commit left them, exactly like `response_commit`.
+@(private)
+response_commit_owned :: proc(
+	res: ^Response,
+	status: Status,
+	headers: []Header_Pair,
+	body: []u8,
+	allocator: mem.Allocator,
+) -> bool {
+	if res.committed {
+		delete_slice(body, allocator)
+		return false
+	}
+
+	res.status = status
+	res.headers = headers
+	res.body = body
+	res.committed = true
+	res.owned_body = true
+	res.body_allocator = allocator
+	return true
+}
+
+// response_destroy releases an owned body exactly once and returns the response
+// to its zero state.
+//
+// WHO CALLS IT. The response DRIVER, after the response has been captured or
+// written — never the handler and never `dispatch`. Today the only driver is
+// `web.test_request`, which calls this after the recorder has made its own
+// owned copies; the WP8 transport adapter must do the same once it exists.
+// There is deliberately NO public cleanup symbol: response lifetime is
+// framework business, and an application that had to remember to free a
+// response would be a worse API than one that cannot see the response at all.
+//
+// It is IDEMPOTENT. Zeroing clears `owned_body`, so a second call frees
+// nothing. `web.destroy` is specified as call-once, but a teardown that
+// corrupts the heap when called twice is a worse failure than one that does
+// nothing.
+//
+// It never frees a BORROWED body — a static constant or the fixed request-local
+// envelope buffer — because `owned_body` is false for those.
+@(private)
+response_destroy :: proc(res: ^Response) {
+	if res.owned_body {
+		delete_slice(res.body, res.body_allocator)
+	}
+	res^ = Response{}
+}
+
+// ---------------------------------------------------------------------------
+// WP6 — response headers (plan D3).
+//
+// Phase 1 sets exactly one header kind of its own, `Content-Type`, plus the
+// `Allow` that WP4 already produced for a 405. There is NO public header API and
+// no content negotiation: the values below are fixed, and an application that
+// needs something else is asking for a Phase-2 feature.
+//
+// Every name and value is a STATIC string, and the pair array they are written
+// into is request-local storage on the Context. Nothing here is allocated, so
+// nothing here is torn down.
+// ---------------------------------------------------------------------------
+
+// RESPONSE_HEADER_MAX is the Phase-1 worst case: a 405 carries `Allow` and
+// `Content-Type`, and nothing carries more.
+@(private)
+RESPONSE_HEADER_MAX :: 2
+
+@(private)
+CONTENT_TYPE_HEADER_NAME :: "Content-Type"
+
+// The exact ratified media types. `charset=utf-8` is spelled on the text type
+// and NOT on the JSON one, because RFC 8259 defines JSON as UTF-8 and registers
+// no charset parameter for `application/json`, while `text/plain` needs one to
+// avoid a latin-1 default.
+@(private)
+CONTENT_TYPE_JSON :: "application/json"
+
+@(private)
+CONTENT_TYPE_TEXT :: "text/plain; charset=utf-8"
+
+// response_json_headers returns the single `Content-Type: application/json`
+// pair, written into the caller's request-local storage.
+//
+// The returned slice VIEWS `ctx.private.response_headers`, so it is valid
+// exactly as long as the Context is — which is as long as the committed
+// response is readable.
+@(private)
+response_json_headers :: proc(ctx: ^Context) -> []Header_Pair {
+	ctx.private.response_headers[0] = Header_Pair {
+		name  = CONTENT_TYPE_HEADER_NAME,
+		value = CONTENT_TYPE_JSON,
+	}
+	return ctx.private.response_headers[:1]
+}
+
+// response_text_headers is the `text/plain` counterpart.
+@(private)
+response_text_headers :: proc(ctx: ^Context) -> []Header_Pair {
+	ctx.private.response_headers[0] = Header_Pair {
+		name  = CONTENT_TYPE_HEADER_NAME,
+		value = CONTENT_TYPE_TEXT,
+	}
+	return ctx.private.response_headers[:1]
+}
+
+// response_allow_headers returns `Allow` FIRST and `Content-Type` second, in
+// that fixed order (plan D3).
+//
+// The order is a property of the framework, never of anything a request can
+// influence, so two deployments emit byte-identical 405 headers. `allow` is a
+// view over `ctx.private.allow_buffer`, which lives on the same Context.
+@(private)
+response_allow_headers :: proc(ctx: ^Context, allow: string) -> []Header_Pair {
+	ctx.private.response_headers[0] = Header_Pair {
+		name  = ALLOW_HEADER_NAME,
+		value = allow,
+	}
+	ctx.private.response_headers[1] = Header_Pair {
+		name  = CONTENT_TYPE_HEADER_NAME,
+		value = CONTENT_TYPE_JSON,
+	}
+	return ctx.private.response_headers[:2]
 }

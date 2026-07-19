@@ -290,10 +290,17 @@ wp4_app_commits_404_on_path_miss :: proc(t: ^testing.T) {
 	testing.expect(t, ctx.private.response.committed, "app() must commit a 404")
 	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
 
-	// WP4 uses an EMPTY body. The standardized JSON envelope is WP6 and is not
-	// implemented early (D4).
-	testing.expect_value(t, len(ctx.private.response.body), 0)
-	testing.expect_value(t, len(ctx.private.response.headers), 0)
+	// AMENDED IN WP6. WP4 committed an EMPTY body because the standardized
+	// envelope was not yet owned by any shipped work package; WP6 supplies it as
+	// a static constant. The routing DECISION under test — that a path miss is a
+	// 404 — is unchanged.
+	testing.expect_value(
+		t,
+		string(ctx.private.response.body),
+		`{"error":{"code":"not_found","message":"Route not found"}}`,
+	)
+	testing.expect_value(t, len(ctx.private.response.headers), 1)
+	testing.expect_value(t, ctx.private.response.headers[0].name, "Content-Type")
 }
 
 @(test)
@@ -322,7 +329,13 @@ wp4_app_commits_405_when_path_exists_under_another_method :: proc(t: ^testing.T)
 	wp4_run(&a, &ctx, .DELETE, "/users")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Method_Not_Allowed)
-	testing.expect_value(t, len(ctx.private.response.body), 0)
+
+	// AMENDED IN WP6: the 405 body is now the standardized envelope.
+	testing.expect_value(
+		t,
+		string(ctx.private.response.body),
+		`{"error":{"code":"method_not_allowed","message":"Method not allowed"}}`,
+	)
 }
 
 @(test)
@@ -340,12 +353,16 @@ wp4_405_also_applies_to_a_parametric_path :: proc(t: ^testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 7. `Allow` is exactly ONE header, named exactly `Allow`, in the canonical
-//    order GET, POST, PUT, PATCH, DELETE.
+// 7. `Allow` is named exactly `Allow`, comes FIRST, and lists methods in the
+//    canonical order GET, POST, PUT, PATCH, DELETE.
+//
+//    AMENDED IN WP6: a 405 now also carries `Content-Type`, so there are two
+//    headers and `Allow` is the first of them (WP6 D3). The `Allow` value
+//    itself is unchanged.
 // ---------------------------------------------------------------------------
 
 @(test)
-wp4_allow_is_exactly_one_header_with_the_exact_name :: proc(t: ^testing.T) {
+wp4_allow_is_the_first_header_with_the_exact_name :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
 
@@ -355,11 +372,12 @@ wp4_allow_is_exactly_one_header_with_the_exact_name :: proc(t: ^testing.T) {
 	wp4_run(&a, &ctx, .PUT, "/users")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Method_Not_Allowed)
-	testing.expect_value(t, len(ctx.private.response.headers), 1)
+	testing.expect_value(t, len(ctx.private.response.headers), 2)
 
-	// The name is exactly `Allow` — not `allow`, not `ALLOW`.
+	// The name is exactly `Allow` — not `allow`, not `ALLOW` — and it is FIRST.
 	testing.expect_value(t, ctx.private.response.headers[0].name, "Allow")
 	testing.expect_value(t, ctx.private.response.headers[0].value, "GET")
+	testing.expect_value(t, ctx.private.response.headers[1].name, "Content-Type")
 }
 
 @(test)
@@ -380,7 +398,7 @@ wp4_allow_uses_the_canonical_method_order :: proc(t: ^testing.T) {
 	wp4_run(&a, &ctx, .UNKNOWN, "/r")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Method_Not_Allowed)
-	testing.expect_value(t, len(ctx.private.response.headers), 1)
+	testing.expect_value(t, len(ctx.private.response.headers), 2)
 	testing.expect_value(t, ctx.private.response.headers[0].name, "Allow")
 	testing.expect_value(
 		t,
@@ -423,7 +441,7 @@ wp4_allow_has_no_duplicates :: proc(t: ^testing.T) {
 	ctx: Context
 	wp4_run(&a, &ctx, .PUT, "/dup")
 
-	testing.expect_value(t, len(ctx.private.response.headers), 1)
+	testing.expect_value(t, len(ctx.private.response.headers), 2)
 	testing.expect_value(t, ctx.private.response.headers[0].value, "GET, POST")
 }
 
@@ -887,7 +905,12 @@ wp4_uninterpretable_pattern_does_not_contribute_to_allow :: proc(t: ^testing.T) 
 	wp4_run(&a, &ctx, .DELETE, "/a/x/y")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
-	testing.expect_value(t, len(ctx.private.response.headers), 0)
+
+	// AMENDED IN WP6: a 404 carries a Content-Type, but still no `Allow` — the
+	// property under test is that an uninterpretable pattern contributes no
+	// method, and that is unchanged.
+	testing.expect_value(t, len(ctx.private.response.headers), 1)
+	testing.expect_value(t, ctx.private.response.headers[0].name, "Content-Type")
 }
 
 @(test)

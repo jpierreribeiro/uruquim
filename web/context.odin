@@ -74,7 +74,19 @@ Context_Internal :: struct {
 	// alternative, allocating a string per 405, would put an allocation on a
 	// path that an unauthenticated client can trigger at will.
 	allow_buffer: [ALLOW_VALUE_MAX]u8,
-	allow_header: [1]Header_Pair,
+
+	// WP6 — request-local storage for the committed response's header pairs.
+	//
+	// It replaces WP4's single-slot `allow_header`: a 405 now carries `Allow`
+	// AND `Content-Type`, so two slots are the Phase-1 worst case
+	// (`RESPONSE_HEADER_MAX`). Every name and value stored here is a STATIC
+	// string, or — for `Allow` — a view over `allow_buffer` above, so the array
+	// holds no allocation and needs no teardown.
+	//
+	// It lives on the Context, not in a local, for the same reason
+	// `allow_buffer` does: the committed response holds a VIEW over it and is
+	// read after `dispatch` returns.
+	response_headers: [RESPONSE_HEADER_MAX]Header_Pair,
 
 	// WP5 — request-local storage for the extractor error envelope, on exactly
 	// the same terms as `allow_buffer` above and for exactly the same reason:
