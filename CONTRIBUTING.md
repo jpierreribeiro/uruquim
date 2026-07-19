@@ -122,6 +122,17 @@ must carry the G-09 evidence for every new symbol.
 Sign off commits with your own authorship. Work done with an AI assistant should
 say so in a `Co-Authored-By` trailer.
 
+## Independent review
+
+Work packages are reviewed against `planning/qa-agent.md`, which is written to
+be handed to a reviewer — human or agent — as-is. Its first rule is the one that
+matters: **verify, do not trust.** Every claim in a commit message, a pull
+request, a code comment or a planning document is a hypothesis until someone has
+run it.
+
+If you are reviewing, run the gate yourself and quote your own output. If you
+are submitting, expect the numbers in your description to be reproduced.
+
 ## Decisions you cannot make alone
 
 Accepting an ADR, changing a frozen contract, growing a ledger, choosing a
