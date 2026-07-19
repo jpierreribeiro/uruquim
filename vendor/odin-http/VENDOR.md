@@ -1,6 +1,6 @@
 # Vendored dependency — laytan/odin-http (server root package)
 
-This directory is a **pristine, minimal snapshot** of the root server package of
+This directory is a **minimal snapshot** of the root server package of
 `laytan/odin-http`, used by the Uruquim bootstrap transport adapter
 (`web/internal/transport/`) and by nothing else. No application imports it.
 
@@ -89,10 +89,14 @@ roots `@(init)` procedures unconditionally. This is a toolchain trait, not a
 socket/server symbol — an application that never calls `web.serve` still links
 ZERO socket, listener, connection, or server-teardown symbols (measured with
 `nm`; see the WP8 PR). Neutralizing that `@(init)` would trim it further but
-would require modifying vendored source, which is deliberately avoided here.
+would require another patch; WP9's five patches are all security-motivated, and
+this cost is not.
 
 ## Updating
 
-To move to a different upstream commit, re-copy the root `.odin` files, the
-`LICENSE` and `mod.pkg` from a fresh checkout at the new commit, update the
-table above, and re-run the full gate. Do not edit these files in place.
+To move to a different upstream commit: re-copy the root `.odin` files, the
+`LICENSE` and `mod.pkg` from a fresh checkout at the new commit, re-apply the
+five patches listed above, update the provenance table, and re-run the full
+gate — including the WP9 raw-wire corpus, which is what proves the patches are
+still necessary and still sufficient. Do not make unrelated edits to these
+files.
