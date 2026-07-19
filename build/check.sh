@@ -50,6 +50,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
 bash -n "$URUQUIM_ROOT/build/check_g11_teardown.sh"
 bash -n "$URUQUIM_ROOT/build/check_examples.sh"
 bash -n "$URUQUIM_ROOT/build/check_docs.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase1_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -546,6 +547,14 @@ bash "$URUQUIM_ROOT/build/check_public_api.sh"
 
 echo "--- WP3 mutation checks: forbidden dual-ledger states are rejected ---"
 bash "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
+
+# WP11 — the Phase-1 freeze. Every step above proves a BEHAVIOR; this one proves
+# that the SHAPE of the frozen contract, the dependency set beneath it and the
+# evidence trail behind it are exactly what planning/phase-1-freeze.md records.
+# It runs last on purpose: it is the step that turns a green gate into a freeze,
+# and it should only ever be reached with every behavior already proven.
+echo "--- WP11 Phase-1 spec freeze (signatures, dependencies, evidence) ---"
+env URUQUIM_ODIN_BIN="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_phase1_freeze.sh"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
