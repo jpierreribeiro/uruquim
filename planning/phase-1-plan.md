@@ -130,6 +130,16 @@ runs on the pinned toolchain.
 - **Deps.** WP2. **Rollback.** test-only package.
 
 ## WP4 — Minimal route registration and dispatch
+- **Execution status.** **COMPLETE.** Registration, `:param` matching,
+  order-independent static precedence, per-method isolation, the automatic 404,
+  and the 405 with its exact `Allow` header are merged and test-pinned (35
+  internal + 12 public-surface tests). The public surface did not move: 32
+  application + 2 test-support = 34. Measured cost of routing on a minimal
+  two-route application: 47,880 -> 58,072 bytes (+10,192); an application that
+  registers no route pays +240 bytes (`routes_destroy` plus its
+  `delete_dynamic_array` instantiation, reached by the static edge from
+  `destroy`). Dispatch itself allocates nothing — matching walks the strings in
+  place and the `Allow` value is built into fixed request-local storage.
 - **Objective.** static + `:param` dispatch, no radix; consistent 404;
   minimal 405 (per scope decision).
 - **Spec.** §Routing (observable behavior only); scope-review 405 decision;

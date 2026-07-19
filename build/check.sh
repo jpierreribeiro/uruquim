@@ -54,6 +54,14 @@ bash -n "$URUQUIM_ROOT/ops/ci/run.sh"
 bash -n "$URUQUIM_ROOT/ops/ci/status.sh"
 bash -n "$URUQUIM_ROOT/ops/ci/install-odin.sh"
 
+# `odin test` writes its runner executable into the CURRENT WORKING DIRECTORY.
+# It removes it again on success — but NOT when the test run fails, which drops
+# a ~650 KiB ELF binary into the repository root on exactly the runs a developer
+# is already iterating on. Every test binary is therefore given an explicit
+# `-out:` under one temporary directory, so a red gate can never leave an
+# artifact in the working tree. The directory lives in $TMPDIR, never in the repo.
+URUQUIM_BIN_TMP="$(mktemp -d -t uruquim-test-bin-XXXXXXXX)"
+
 echo "toolchain version: $URUQUIM_VERSION"
 echo "toolchain commit: $URUQUIM_EXPECTED_COMMIT"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
@@ -70,7 +78,7 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
 echo "--- WP1 public API compile contract (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp1-public-api" \
-  "-collection:uruquim=$URUQUIM_ROOT"
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp1-public-api"
 
 # WP2 — the request/response model.
 #
@@ -93,7 +101,7 @@ cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_TMP_PKG/"
 cp "$URUQUIM_ROOT"/tests/wp2-internal/*.odin "$URUQUIM_TMP_PKG/"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_TMP_PKG" \
-  "-collection:uruquim=$URUQUIM_ROOT"
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp2-internal"
 rm -rf "$URUQUIM_TMP_PKG"
 trap - EXIT
 test ! -d "$URUQUIM_TMP_PKG" ||
@@ -103,7 +111,7 @@ echo "PASS: internal tests ran against the real sources; throwaway package remov
 echo "--- WP2 public surface contract (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp2-public-surface" \
-  "-collection:uruquim=$URUQUIM_ROOT"
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp2-public-surface"
 
 # WP2 compile probes. A negative probe must fail to compile AND fail for the
 # stated reason: an unrelated compile error must never be read as proof that a
@@ -182,7 +190,7 @@ cp "$URUQUIM_ROOT"/web/testing/*.odin "$URUQUIM_WP3_TMP/"
 cp "$URUQUIM_ROOT"/tests/wp3-internal/*.odin "$URUQUIM_WP3_TMP/"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_WP3_TMP" \
-  "-collection:uruquim=$URUQUIM_ROOT"
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp3-internal"
 rm -rf "$URUQUIM_WP3_TMP"
 trap - EXIT
 test ! -d "$URUQUIM_WP3_TMP" || fail "the throwaway WP3 machinery-test package was not removed"
@@ -195,7 +203,7 @@ echo "PASS: machinery internal tests ran against the real sources; throwaway pac
 echo "--- WP3 public surface contract, incl. C4 in-memory round trip (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp3-public-surface" \
-  "-collection:uruquim=$URUQUIM_ROOT"
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp3-public-surface"
 
 # WP3 negative probe — `Recorded_Response` has no public `headers` field.
 URUQUIM_WP3_PROBE="$URUQUIM_ROOT/tests/wp3-public-surface/probes/recorded_response_has_no_headers.odin"
@@ -257,7 +265,7 @@ cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP4_TMP/"
 cp "$URUQUIM_ROOT"/tests/wp4-internal/*.odin "$URUQUIM_WP4_TMP/"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_WP4_TMP" \
-  "-collection:uruquim=$URUQUIM_ROOT"
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp4-internal"
 rm -rf "$URUQUIM_WP4_TMP"
 trap - EXIT
 test ! -d "$URUQUIM_WP4_TMP" || fail "the throwaway WP4 internal-test package was not removed"
@@ -271,10 +279,17 @@ echo "PASS: WP4 internal tests ran against the real sources; throwaway package r
 echo "--- WP4 public surface contract: routing, 404, 405, bare (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp4-public-surface" \
-  "-collection:uruquim=$URUQUIM_ROOT"
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp4-public-surface"
 
 echo "--- Phase-1 public API anti-accretion contract ---"
 bash "$URUQUIM_ROOT/build/check_public_api.sh"
 
 echo "--- WP3 mutation checks: forbidden dual-ledger states are rejected ---"
 bash "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
+
+# The gate leaves NO artifact in the working tree.
+rm -rf "$URUQUIM_BIN_TMP"
+if find "$URUQUIM_ROOT" -maxdepth 1 -type f -name 'uruquim-*' -print -quit | grep -q .; then
+  fail "a test-runner binary was left in the repository root"
+fi
+echo "PASS: the gate left no test-runner binary in the working tree"
