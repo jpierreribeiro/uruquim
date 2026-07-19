@@ -70,7 +70,7 @@ Odin does not offer opacity, and claiming it would be false.
 
 The failure mode is silent. A retained view keeps its length and keeps
 pointing at live memory; it simply reads different bytes once the buffer is
-reused. `web/wp2_internal_test.odin` pins this: after reuse, a path view that
+reused. `tests/wp2-internal/wp2_internal_test.odin` pins this: after reuse, a path view that
 read `"/users"` reads `"######"`, while a `strings.clone` of the same view
 still reads `"/users"`.
 
@@ -157,6 +157,9 @@ requires.
 
 At `6850a1c` the gate failed, and failed for the intended reason:
 
+(Paths in this transcript are as they were at `6850a1c`; the internal test
+moved to `tests/wp2-internal/` in `536865f`.)
+
 ```text
 build/check_public_api.sh
   FAIL: web/ file set does not match the Phase-1 contract
@@ -209,6 +212,17 @@ parsing, JSON marshal, error envelope, body binding, the 4 MiB cap, sockets,
 transport adapter, and automatic status decisions. `odin-http` is not imported;
 `web/` still imports only `core:`.
 
+The internal `Response` carries `status`, `headers`, `body` and `committed`.
+`headers` is WP2 state, not deferred work: WP4's ratified contract includes
+"405-when-other-method with exact `Allow` header" (planning/05 §WP4), and WP4
+depends on WP2/WP3, so it lands **before** WP6. Without internal header
+storage, WP4 could not express or test its own contract. `response_commit`
+records status, headers and body **atomically** — a rejected attempt leaves all
+three untouched, because a guard that blocked the status while letting
+replacement headers through would still be a double-write. Response owns
+neither slice at this stage; both are views, and WP6 defines the concrete
+allocation and lifetime of a rendered response.
+
 `response_commit` has **no public caller**. It is exercised only by the WP2
 tests; wiring `web.json`/`web.ok` onto it is WP6.
 
@@ -220,7 +234,7 @@ tests; wiring `web.json`/`web.ok` onto it is WP6.
 | Context has no dynamic/untyped storage and no `response` field | PASS — checker §8d pins the exact field list; negative probe pins `ctx.response` |
 | no public transport type; `Header_Pair` not exported | PASS — checker §6 and two negative probes |
 | no view escapes without a documented explicit copy | PASS — WP2 adds no accessor at all; the only views are `Request`'s own fields, and copy-to-persist is documented and test-pinned |
-| the commit guard is tested on the internal primitive | PASS — no responder call appears in `web/wp2_internal_test.odin` |
+| the commit guard is tested on the internal primitive | PASS — no responder call appears in `tests/wp2-internal/wp2_internal_test.odin` |
 | no automatic 404/405/501 | PASS — checker §8f scans the model's code |
 | no Phase-2+ surface | PASS — checker §3, extended with `Response`, `Header_Pair`, `Params`, `Route_Info`, `method_raw` |
 | no unrelated file modified | PASS — every changed file is WP2's model, its tests, its gate, or the two mandated docs |
@@ -229,48 +243,57 @@ tests; wiring `web.json`/`web.ok` onto it is WP6.
 
 ## Findings
 
-### 1. In-package tests cost every application 41,592 bytes — accepted, with a proposed follow-up
+### 1. `core:testing` in the shipped package — found, then ELIMINATED
 
-`Response`, `response_commit`, `method_from_token` and `Header_Pair` are
-package-private, so testing them directly requires an `@(test)` procedure
-compiled as part of `web`. Every route out of that was probed on `819fdc7` and
-closed:
+Testing package-private declarations requires an `@(test)` procedure compiled
+as part of the package. Doing that inside `web/` linked `core:testing` into
+every application binary. Every alternative was probed on `819fdc7` and closed:
 
 | Attempt | Result |
 |---|---|
 | test file without `#+private` | its declarations ARE exported by `web` (external package names one, exit 0) |
-| `#+private` test file | privacy correct, tests still discovered — **chosen** |
 | `@(test) proc()` without `core:testing` | rejected: "Testing procedures must have a signature type of proc(^testing.T)" |
 | `when ODIN_TEST { import … }` | rejected: "Cannot use 'import' within a 'when' statement" |
 | `#+build test` / `#+build ODIN_TEST` | rejected: build tags are platform-only |
 | `#+build ignore` | excluded from `odin build` AND from `odin test` — "No tests to run" |
 | external test package | cannot name package-private declarations |
 
-The cost is specific to `core:testing`, not to `core:` imports generally, and
-was measured against the real package with a minimal consumer application:
+The cost was specific to `core:testing`, not to `core:` imports generally:
 
 ```text
 core:strings   +248 bytes
 core:mem       +552 bytes
-core:testing   +41,592 bytes   (42,624 -> 84,216)
+core:testing   +41,592 bytes
 ```
 
-This conflicts with the "low hidden cost" mandate of
-`knowledge-base/02-odin-idioms-guidelines.md`, and Odin's own `core:` ships no
-`_test.odin` inside its packages. WP2 accepts it rather than changing ratified
-architecture on its own authority, and contains it: the checker now requires
-`#+private` on every test file under `web/` and forbids `core:testing` in any
-production file, so the surface cannot leak through this door.
+**Resolution (review-approved): the cost is eliminated, not merely contained.**
+The internal tests live in `tests/wp2-internal/`, still declaring
+`package web`. `build/check.sh` assembles a throwaway package — the real
+sources from `web/` plus that file, copied into a `mktemp -d` directory — runs
+`odin test` there, and deletes the directory afterwards, including on failure
+via a trap on the `set -e` exit. The tests see the genuine sources; the shipped
+package ships no test code.
 
-**PROPOSED FOLLOW-UP, for human decision — not applied here.** Move the
-internal-only machinery to `web/internal/…`, exported from that internal
-package and therefore still absent from `uruquim:web`'s public surface, and
-test it from an external package. `core:testing` then leaves the shipped
-package entirely. This is already the direction the plan takes: KB02 states
-that internals live under `web/internal/`, WP3 introduces `web/testing/`, and
-WP4 introduces `web/internal/dispatch/`. Doing it inside WP2 would have meant
-contradicting WP2's ratified file list and relaxing the checker's
-no-subdirectory rule, which is not this work package's call.
+Measured on a minimal consumer application:
+
+```text
+84,216 bytes   test file inside web/          (the rejected arrangement)
+42,592 bytes   as delivered                   (core:testing absent from the binary)
+```
+
+`build/check_public_api.sh` makes this permanent rather than incidental: no
+`*_test.odin` file and no `core:testing` import may exist under `web/`, and
+`tests/wp2-internal/` must exist and really declare `package web`, so the
+harness cannot degrade into testing nothing. A future work package that needs
+internal tests adds them beside this one, never to the shipped package.
+
+**Immediate migration of the model to `web/internal/` was REJECTED in review,
+and is not attempted.** `Response`, `Context`, `Method` and `Header_View` are
+still tightly coupled to the public package; forcing new packages now would
+create conversions, "internal" exports, and complexity before a coherent
+division of responsibilities exists. A future split into internal packages
+happens when those responsibilities actually diverge — not as a side effect of
+where a test file has to live.
 
 ### 2. `web.delete` shadows the builtin `delete` inside the package
 
@@ -295,7 +318,9 @@ WP4 onward does not rediscover it as a mystery.
 Files whose first directive is `#+private` export nothing — verified on the
 pinned toolchain — so they are excluded from the export inventory. This
 narrows the scan to match the compiler; it never widens what may be exported.
-The mutation tests below confirm the assertions still bite.
+No file in `web/` uses it today (the test file that did now lives outside the
+package); the handling stays because a future internal-only production file
+may. The mutation tests below confirm the assertions still bite.
 
 ## GATE
 
@@ -305,7 +330,7 @@ command (`build/check.sh`, invoked by the tracked `.githooks/pre-push` hook).
 ```text
 PASS=10 FAIL=0 SKIP=0                      (throwaway prototype baseline)
 WP1 public API compile contract             1 test  — pass
-WP2 request/response model, internal       11 tests — pass
+WP2 internal behavior (throwaway package)  13 tests — pass, directory removed
 WP2 public surface contract                 5 tests — pass
 WP2 probes                                  4 probes — pass
 public API contract: exported surface is exactly 32 Phase-1 symbols
@@ -313,6 +338,7 @@ PASS: Phase-1 public API anti-accretion contract (WP1 + WP2)
 build/check.sh          exit 0
 build/check_test.sh     exit 0
 git diff --check        exit 0, no binaries, no untracked probes
+minimal application     42,592 bytes; core:testing absent
 ```
 
 The raised checker was mutation-tested to prove it is not vacuous. Each
@@ -328,8 +354,36 @@ mutation was applied to a scratch copy and reverted:
 | add a public `response` field to `Context` | Context field list |
 | return `.Not_Found` from the model | WP2 model decides an HTTP status |
 | add a `header` lookup | exports outside the ratified surface |
+| put a `*_test.odin` file back in `web/` | shipped package carries no test code |
+| import `core:testing` in a production file | would be linked into every binary |
+| drop `headers` from the internal `Response` | Response field list (WP4 needs it) |
+| take headers out of `response_commit` | commit must be atomic across all three |
 
 **WP3 has not been started.**
 
 Status: **COMPLETE — LOCAL PASS**, pending human review of the PR and of
 finding 1.
+
+## Review round 1 — CHANGES_REQUIRED, addressed
+
+Both blockers from the human review of PR #4 are resolved on the same branch;
+nothing was merged.
+
+**Blocker 1 — `core:testing` in the consumer binary.** Resolved by the
+throwaway-package harness, with the ban made permanent in the checker. The
+measured cost is gone: 84,216 → 42,592 bytes, and `core:testing` no longer
+appears in the binary. Immediate migration to `web/internal/` was rejected in
+review and was not attempted; a future split into internal packages happens
+when responsibilities actually diverge. See finding 1.
+
+**Blocker 2 — `Response.headers`.** Resolved. The field exists, the commit
+primitive records status, headers and body atomically, and the checker
+requires both. The previously declared deviation is withdrawn: it no longer
+exists, and the reasoning that produced it was wrong — it treated WP6 as the
+next consumer of response state, when planning/05 makes WP4 the next consumer
+and gives it an `Allow`-header contract to test.
+
+Unchanged and re-verified after both fixes: exactly 32 public symbols;
+`Context{request, private}`; `Response`, `Header_Pair` and
+`Header_View_Internal` unexported; probe diagnostics still distinguish
+"absent" from "private"; `docs/memory-model.md` untouched; WP3 not started.
