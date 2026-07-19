@@ -110,12 +110,12 @@ Phase-2 agent will read.
 |---|---|---|---|
 | 12 | ~~Middleware mechanism prototype~~ **DONE** — ADR-005 accepted with ADR-019 enforcement | PROTOTYPE | ✅ granted |
 | 13 | ~~Fault/recovery feasibility prototype~~ **DONE** — ADR-020 accepted (R-b, zero symbols) | PROTOTYPE | ✅ granted |
-| 14 | Test-support evolution: `test_request` procedure group | SPEC (prototype-backed) | **yes** (test-support ledger grows) |
+| 14 | Test-support evolution: `test_request` gains `body` + `query` | SPEC (prototype-backed) | ✅ granted (ledger stays 2) |
 | 15 | Phase-2 specification, ADR closure, ledger proposal | SPEC | **yes** (ledger) |
 | 16 | Gate restructuring for Phase-2 growth | TESTS | no |
 | 17 | `use` + `next` + flattened chains (app level) | IMPLEMENTATION | no |
 | 18 | `Router` + `mount` + route-level middleware | IMPLEMENTATION | **yes** if the five verbs gain a variadic |
-| 19 | Request header lookup: `header`, `bearer_token` | IMPLEMENTATION | no |
+| 19 | Request header lookup: `header`, `bearer_token`, **and request-header injection in `test_request`** | IMPLEMENTATION | no |
 | 20 | Typed framework-error observer | IMPLEMENTATION | no |
 | 21 | Fault behaviour: driver-500 guarantee, documented | DOCUMENTATION + TESTS | no (decided: ADR-020) |
 | 22 | `logger` middleware | IMPLEMENTATION | no |

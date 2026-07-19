@@ -597,6 +597,23 @@ the stop API at the same time.
   calling `web.body` can never reach its success path in memory — it always sees
   `invalid_json`. The framework's own tests reach it only by copying
   `web/*.odin` into a throwaway package, which a user cannot do.
+- **SCOPE, as accepted by the owner.** **WP14 owns `body` + `query`.** Request
+  **header injection moves to WP19**, together with the `web.header` and
+  `web.bearer_token` lookups that make headers publicly observable — Phase 1
+  exports no header accessor, so a `headers` parameter added now would be
+  **write-only**: settable, and readable by nothing. `Header_Pair` is not
+  exported and no test-only header type is introduced. **Response-header
+  recording stays outside WP14** entirely (see D-14.3).
+
+- **On public impact, corrected.** An earlier note called the choice between a
+  procedure group and a default parameter "no public impact either way". That is
+  wrong, and the distinction is the whole reason for the decision: the **symbol
+  count** is identical, but the **callable contract** is not. A group over
+  private members leaves that contract invisible to the snapshot and free to
+  change; a default parameter puts it in the frozen record. The default
+  parameter is preferred precisely because its full public contract is
+  inspectable and frozen.
+
 - **AMENDED 2026-07-19 — the mechanism changes, the objective does not.** The
   variant is added by a **default parameter on the existing procedure**, not by
   a procedure group. One public name, ledger unchanged at 2, existing call sites

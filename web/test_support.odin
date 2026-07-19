@@ -57,7 +57,28 @@ Recorded_Response :: struct {
 // teardown — this procedure registers it, so eliminating this procedure
 // eliminates it too (planning/public-api-guardrails.md G-11). Every copy the
 // recorder makes is released by `web.destroy(&app)`.
-test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response {
+// The `body` parameter is OPTIONAL and defaults to empty, so every Phase-1 call
+// site keeps working unchanged (WP14, ADR-021 as amended).
+//
+// It is a default parameter rather than a procedure group on purpose. `odin doc`
+// renders a group as `name :: proc{member_a, member_b}` — member names only — so
+// a group over `@(private)` members would pin this symbol's NAME in the freeze
+// snapshot while leaving its parameters free to change. That was measured, and
+// `build/check_phase1_freeze.sh` now rejects the construct. A default parameter
+// keeps the whole signature inside the frozen record, and it is how `core` adds
+// optional behavior everywhere (`allocator := context.allocator`).
+//
+// The body travels the SAME driver path a socket uses: it is placed on the
+// neutral `Inbound` and nothing downstream can tell the two transports apart.
+// That is what makes the 4 MiB cap and the JSON errors identical here and on a
+// real connection (R-10), rather than a claim this facade makes about itself.
+test_request :: proc(
+	a: ^App,
+	method: Method,
+	path: string,
+	body: string = "",
+	query: string = "",
+) -> Recorded_Response {
 	recorder := &a.private.test_transport
 
 	// Register the teardown on first use. This assignment is the ONLY reference
@@ -77,7 +98,23 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 	//      in-memory transport and a real socket structural rather than a
 	//      claim (R-10).
 	ctx: Context
-	driver_run(a, &ctx, transport.Inbound{method = req.method, path = req.path})
+	driver_run(
+		a,
+		&ctx,
+		transport.Inbound{
+			method = req.method,
+			path   = req.path,
+			// Query is carried SEPARATELY from the path, exactly as the real
+			// adapter does it: the transport splits the request target before the
+			// core ever sees it, so a `?` inside `path` is not a query string
+			// here any more than it would be on a socket.
+			query  = query,
+			// A view over the caller's string for the duration of this call. The
+			// core copies whatever it decides to keep, exactly as it does for a
+			// socket, so nothing here outlives the request.
+			body   = transmute([]u8)body,
+		},
+	)
 
 	// 4. The facade hands the internal Response to the recorder as neutral
 	//    values. The header conversion is transient (temp allocator); the

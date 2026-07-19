@@ -169,7 +169,7 @@ Ledger key: **A** = application, **T** = test-support.
 | `text` | A | WP6 | `tests/wp1-public-api/contract_test.odin::wp1_public_api_surface_compiles` | `tests/wp6-internal/wp6_internal_test.odin::wp6_text_copies_the_caller_buffer` | `examples/01-hello-world/main.odin::web.text` | COPIES the caller's string into response-owned memory |
 | `unauthorized` | A | WP6 | `tests/wp1-public-api/contract_test.odin::wp1_public_api_surface_compiles` | `tests/wp6-public-surface/contract_test.odin::wp6_error_helpers_are_observable_end_to_end` | `docs/errors.md::unauthorized` | response owns the envelope |
 | `Recorded_Response` | T | WP3 | `tests/wp3-public-surface/probes/recorded_response_has_no_headers.odin::Recorded_Response` | `tests/wp3-public-surface/contract_test.odin::wp3_two_recorded_responses_survive_until_destroy` | `docs/canonical-patterns.md::Recorded_Response` | `body` is an App-owned copy, valid until `destroy` |
-| `test_request` | T | WP3 | `tests/wp7-public-surface/contract_test.odin::wp7_test_request_signature_is_unchanged` | `tests/wp3-public-surface/contract_test.odin::wp3_test_request_runs_in_memory_without_routing` | `docs/quick-start.md::web.test_request` | lazily allocates recorder state; results owned until `destroy` |
+| `test_request` | T | WP3, amended WP14 | `tests/wp7-public-surface/contract_test.odin::wp7_test_request_signature_is_pinned` | `tests/wp14-public-surface/contract_test.odin::wp14_a_json_body_reaches_the_handler` | `docs/quick-start.md::web.test_request` | lazily allocates recorder state; results owned until `destroy`; `body` is borrowed for the call only |
 
 ### Evidence asymmetries recorded honestly
 
@@ -498,3 +498,103 @@ The freeze becomes effective only when all of the following hold:
 
 Tag, semantic version and release are **not** granted by this document and
 remain the owner's decision. No agent may merge, tag or publish.
+
+
+---
+
+## Amendment 1 — WP14: `test_request` carries an optional body
+
+**Date:** 2026-07-19. **Authority:** owner, ADR-021 (as amended).
+**Ledger effect: none.** 32 application + 2 test-support = 34, unchanged.
+
+Phase 1 froze `test_request` at method + path. The consequence, unnoticed until
+the post-Phase-1 audit measured it, was that a handler calling `web.body` could
+never reach its success path in memory — it always saw `invalid_json`. The
+framework's own tests reached it only by copying `web/*.odin` into a throwaway
+package, which an application cannot do.
+
+The frozen line changes from:
+
+```
+test-support	proc	test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
+```
+
+to:
+
+```
+test-support	proc	test_request :: proc(a: ^App, method: Method, path: string, body: string = "") -> Recorded_Response
+```
+
+**No symbol is added or removed.** The default keeps every existing call site
+compiling and behaving exactly as before, which the gate asserts directly
+(`tests/wp14-public-surface/contract_test.odin::wp14_the_three_argument_form_is_unchanged`).
+
+**Why a default parameter and not a procedure group.** A group over `@(private)`
+members renders in `odin doc` as member names only, so the snapshot would have
+pinned this symbol's *name* while leaving its parameters free to change —
+measured, and now rejected outright by `build/check_phase1_freeze.sh`. A default
+parameter keeps the entire signature inside the frozen record.
+
+**This is the amendment path working, not a breach of it.** Freezing never meant
+"never changes"; it meant "changes only with evidence and a recorded amendment".
+The gate's named assertions still hold — a snapshot cannot be refreshed to
+launder a change, because they encode the decision rather than the current
+state.
+
+### One consequence worth recording
+
+The 4 MiB cap is now reachable in memory, and it returns **413** — which has no
+member in the public `Status` enum, because Phase 1 deliberately kept it private
+(§4). So `Recorded_Response.status` can hold a value that is not a valid
+`Status`, and testing the cap requires an integer comparison:
+
+```odin
+testing.expect_value(t, int(res.status), 413)
+```
+
+That is the frozen design meeting the new capability rather than a defect, but a
+user will meet it the first time they test the cap, so it is pinned by
+`tests/wp14-public-surface/contract_test.odin::wp14_the_body_cap_holds_on_the_memory_transport`.
+
+
+---
+
+## Amendment 2 — WP14: `test_request` carries an optional query string
+
+**Date:** 2026-07-19. **Authority:** owner, ADR-021 (scope as accepted).
+**Ledger effect: none.** 32 application + 2 test-support = 34, unchanged.
+
+`web.query`, `web.query_int` and `web.query_int_or` are frozen Phase-1 symbols,
+and none of them could be exercised through `test_request`: the facade filled
+`Inbound.path` and left `Inbound.query` empty, so every lookup missed. Three
+frozen public procedures were untestable without opening a socket.
+
+The frozen line becomes:
+
+```
+test-support	proc	test_request :: proc(a: ^App, method: Method, path: string, body: string = "", query: string = "") -> Recorded_Response
+```
+
+`query` is a second fully visible default parameter, for the reason in
+Amendment 1: both defaults appear in `odin doc`, so the entire callable contract
+stays inside the frozen record. Query-only calls read
+`web.test_request(&app, .GET, "/search", query = "q=hello")`; the named-argument
+form was verified to compile on the pinned toolchain before the signature was
+frozen.
+
+**Query is carried separately from the path**, exactly as the real adapter does
+it — the transport splits the request target before the core sees it, so a `?`
+inside `path` is not a query string here either. Pinned by
+`tests/wp14-query/contract_test.odin::wp14_query_is_not_part_of_the_route_path`.
+
+### What is deliberately NOT in this amendment
+
+**Request headers.** Phase 1 exports no header accessor, so a `headers`
+parameter would be **write-only** — settable, and readable by nothing. It moves
+to **WP19**, alongside `web.header` and `web.bearer_token`, so it arrives with a
+test that can assert something. `Header_Pair` is not exported and no test-only
+header type is introduced.
+
+**Response-header recording.** `Recorded_Response` still carries only `status`
+and `body`. That decision belongs to Phase 4, where CORS and cookies create the
+first real need.
