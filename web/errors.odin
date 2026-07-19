@@ -442,6 +442,25 @@ ERROR_BODY_INTERNAL ::
 ERROR_BODY_NOT_FOUND_GENERIC ::
 	`{"error":{"code":"not_found","message":"Resource not found"}}`
 
+// WP7 — the two body-binding envelopes are STATIC constants: their code and
+// message are fixed, they carry no `field`, and emitting one is a `copy` of a
+// constant that cannot fail and cannot allocate.
+@(private)
+ERROR_BODY_INVALID_JSON ::
+	`{"error":{"code":"invalid_json","message":"Request body must be valid JSON"}}`
+
+@(private)
+ERROR_BODY_TOO_LARGE ::
+	`{"error":{"code":"body_too_large","message":"Request body exceeds the 4 MiB limit"}}`
+
+// STATUS_BODY_TOO_LARGE carries HTTP 413 WITHOUT adding a public `Status`
+// member. `Status` is a public enum and its member list is frozen (WP7 D3), but
+// an enum value is just its backing integer, so casting 413 in yields a status
+// that serializes as 413 while naming nothing new on the public surface. The
+// transport (WP8) writes `int(status)` on the wire; the number is what matters.
+@(private)
+STATUS_BODY_TOO_LARGE :: Status(413)
+
 // Error_Envelope is the wire shape for an error WITHOUT a field.
 //
 // There are two envelope structs rather than one with `json:",omitempty"`
@@ -553,6 +572,14 @@ error_compose_not_found :: proc(
 Framework_Error :: enum {
 	None,
 	Response_Marshal_Failed,
+	// WP7 — a request body could not be decoded for a reason that is NOT the
+	// client's malformed JSON: an incompatible destination, a nil/non-pointer
+	// destination, or another internal decoder failure. It becomes a 500, never
+	// `invalid_json`.
+	Body_Decode_Failed,
+	// WP7 — `web.body` was called more than once on one request (ADR-012 A). The
+	// body capability is single-use; a second call is a programming error.
+	Body_Consumed_Twice,
 }
 
 // Framework_Report is the typed event. `payload_type` is a `typeid`, so the
@@ -614,6 +641,17 @@ FRAMEWORK_MESSAGE_MARSHAL_FAILED ::
 	"concrete values only, not pointers or procedures (ADR-003). Responding 500."
 
 @(private)
+FRAMEWORK_MESSAGE_BODY_DECODE_FAILED ::
+	"uruquim: request body could not be decoded into the destination type; " +
+	"the JSON is valid but does not fit it, or the destination is invalid. " +
+	"Responding 500."
+
+@(private)
+FRAMEWORK_MESSAGE_BODY_CONSUMED_TWICE ::
+	"uruquim: web.body was called more than once on one request; the body is a " +
+	"single-use capability (ADR-012). The second call decodes nothing."
+
+@(private)
 framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_location) {
 	report := Framework_Report {
 		kind         = kind,
@@ -625,16 +663,17 @@ framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_locat
 		return
 	}
 
+	message: string
 	switch report.kind {
 	case .None:
 		return
 	case .Response_Marshal_Failed:
-		logger.procedure(
-			logger.data,
-			.Error,
-			FRAMEWORK_MESSAGE_MARSHAL_FAILED,
-			logger.options,
-			loc,
-		)
+		message = FRAMEWORK_MESSAGE_MARSHAL_FAILED
+	case .Body_Decode_Failed:
+		message = FRAMEWORK_MESSAGE_BODY_DECODE_FAILED
+	case .Body_Consumed_Twice:
+		message = FRAMEWORK_MESSAGE_BODY_CONSUMED_TWICE
 	}
+
+	logger.procedure(logger.data, .Error, message, logger.options, loc)
 }

@@ -28,6 +28,8 @@
 // "Assignment count mismatch". Do not add the directive.
 package web
 
+import encoding_json "core:encoding/json"
+
 // parse_int_strict parses a WHOLE decimal integer, and nothing else.
 //
 // Package-internal. It is deliberately NOT `strconv.parse_int`: on the pinned
@@ -252,12 +254,99 @@ query_int_or :: proc(ctx: ^Context, name: string, default_value: int) -> (value:
 // body decodes the JSON request body into a caller-owned destination.
 //
 // The destination form keeps ownership and storage explicit. On failure the
-// extractor writes the standardized `invalid_json` or `body_too_large`
-// response itself and returns false.
+// extractor writes the standardized error response itself and returns false, so
+// the canonical handler simply returns:
 //
-// WP1 STUB: always returns false, leaves `dst` untouched, and writes nothing.
-// WP7 implements decoding, the request-lifetime allocator (ADR-006), and the
-// fixed 4 MiB cap.
+//	input: Create_User
+//	if !web.body(ctx, &input) { return }
+//
+// WP7 implements it. The order of operations is normative:
+//
+//  1. SINGLE CONSUMER (ADR-012 A). The body is a one-use capability. The moment
+//     this call begins it is marked consumed — before the limit check and
+//     before the parser — so a first attempt that fails still spends it. A
+//     second call decodes nothing: it logs a private diagnostic and produces a
+//     500 only if no response is committed yet; a response the first call
+//     already committed is left untouched. Never a double commit, no replay.
+//  2. EMPTY body is invalid JSON: 400 `invalid_json`, and NO arena is created.
+//  3. The 4 MiB cap is checked BEFORE the arena and BEFORE the parser. Exactly
+//     `BODY_LIMIT` bytes is allowed; a strictly larger body is 413
+//     `body_too_large`, again with no arena.
+//  4. Decoding runs in strict `.JSON` mode against the request-lifetime arena
+//     (ADR-006), so nested strings and slices are arena-owned and freed in one
+//     shot at request end. On failure:
+//       - a parse-level error (`Invalid_Data`) is the client's malformed JSON:
+//         400 `invalid_json`;
+//       - anything else — an incompatible destination, a nil/non-pointer dst —
+//         is a decoder fault, NOT shown to the client: it is logged through the
+//         typed report and answered with a 500.
+//
+// After `body` returns false, the partial content of `dst` is UNDEFINED and
+// must be discarded. On success `dst` is fully populated and its nested data is
+// valid until the request ends.
 body :: proc(ctx: ^Context, dst: ^$T) -> bool {
+	// 1. Single consumer. A second call never reaches the parser.
+	if ctx.private.body_state == .Consumed {
+		framework_report(T, .Body_Consumed_Twice)
+		// The first response wins: only fill in a 500 if nothing is committed.
+		if !ctx.private.response.committed {
+			error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
+		}
+		return false
+	}
+	ctx.private.body_state = .Consumed
+
+	raw := ctx.request.body
+
+	// 2. Empty body: invalid JSON, no arena.
+	if len(raw) == 0 {
+		error_commit_static(ctx, .Bad_Request, ERROR_BODY_INVALID_JSON)
+		return false
+	}
+
+	// 3. The fixed cap, before the arena and the parser.
+	if len(raw) > BODY_LIMIT {
+		error_commit_static(ctx, STATUS_BODY_TOO_LARGE, ERROR_BODY_TOO_LARGE)
+		return false
+	}
+
+	// 4. Decode into the request-lifetime arena, strict JSON.
+	request_arena_init(ctx)
+	err := encoding_json.unmarshal(raw, dst, .JSON, request_arena_allocator(ctx))
+	if err != nil {
+		if body_error_is_client_json(err) {
+			error_commit_static(ctx, .Bad_Request, ERROR_BODY_INVALID_JSON)
+		} else {
+			// A decoder/destination fault. Log through the typed path while the
+			// response is still uncommitted (R-05), then answer 500.
+			framework_report(T, .Body_Decode_Failed)
+			error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
+		}
+		return false
+	}
+
+	return true
+}
+
+// body_error_is_client_json reports whether an unmarshal error is the CLIENT's
+// malformed JSON (→ 400) rather than a decoder/destination fault (→ 500).
+//
+// `unmarshal_any` validates the whole input with `is_valid` before parsing, so
+// every parse-level failure — empty, truncated, and the rejected JSON5 forms —
+// surfaces as `Unmarshal_Data_Error.Invalid_Data`. A bare `json.Error` would be
+// a parse error too. Everything else — `Unsupported_Type_Error`, a
+// nil/non-pointer destination — means the JSON was well-formed but the
+// destination could not receive it, which is not something the caller can fix
+// by sending different JSON and is therefore not reported as `invalid_json`.
+@(private)
+body_error_is_client_json :: proc(err: encoding_json.Unmarshal_Error) -> bool {
+	switch e in err {
+	case encoding_json.Error:
+		return true
+	case encoding_json.Unmarshal_Data_Error:
+		return e == .Invalid_Data
+	case encoding_json.Unsupported_Type_Error:
+		return false
+	}
 	return false
 }

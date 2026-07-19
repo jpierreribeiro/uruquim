@@ -215,26 +215,10 @@ expect_reject "$T" "altered query_int_or signature" \
 #     delivered feature rather than a forbidden state. The WP6 cases at the end
 #     of this file replace it.
 
-# 20. WP7 machinery starting early.
-T="$(fresh_tree)"; TREES+=("$T")
-printf '\n@(private)\nBODY_LIMIT :: 4194304\n' >>"$T/web/extract.odin"
-expect_reject "$T" "WP7 body cap in the package" \
-  "WP7 construct matching"
-
-# 21. `web.body` implemented early, so the WP7 stub no longer returns false.
-T="$(fresh_tree)"; TREES+=("$T")
-python3 - "$T/web/extract.odin" <<'PY'
-import sys
-p = sys.argv[1]
-s = open(p).read()
-old = "body :: proc(ctx: ^Context, dst: ^$T) -> bool {\n\treturn false\n}"
-if old not in s:
-    sys.exit("MUTATION-SETUP: the body stub was not found in web/extract.odin")
-new = "body :: proc(ctx: ^Context, dst: ^$T) -> bool {\n\treturn true\n}"
-open(p, "w").write(s.replace(old, new, 1))
-PY
-expect_reject "$T" "web.body implemented early" \
-  "web.body is no longer the WP7 stub"
+# 20-21. (RETIRED IN WP7.) These asserted that a body cap and a working
+#     `web.body` did not exist yet. WP7 delivered both, so the mutations now
+#     describe the shipped feature rather than a forbidden state. The WP7 cases
+#     at the end of this file replace them with the positive contract.
 
 # 22. A misspelled error code. Clients match on `code`, so a typo is a silent
 #     compatibility break rather than a visible failure.
@@ -265,10 +249,12 @@ printf '\n@(private)\nwp6_bad_render :: proc(ctx: ^Context) {\n\tdata, _ := enco
 expect_reject "$T" "encoder used by the interim dispatcher" \
   "the WP4 dispatcher marshals a response"
 
-# 24. The encoder imported by a file that must stay encoder-free.
+# 24. The encoder imported by a file that must stay encoder-free. `extract.odin`
+#     legitimately imports it since WP7 (body decoding), so the mutation targets
+#     the dispatcher, which must never marshal.
 T="$(fresh_tree)"; TREES+=("$T")
-printf '\nimport _ "core:encoding/json"\n' >>"$T/web/extract.odin"
-expect_reject "$T" "encoder imported outside respond.odin/errors.odin" \
+printf '\nimport _ "core:encoding/json"\n' >>"$T/web/dispatch_match.odin"
+expect_reject "$T" "encoder imported into the dispatcher" \
   "the JSON encoder is imported outside"
 
 # 25. Response teardown exported. Response lifetime is framework business; an
@@ -350,3 +336,105 @@ expect_reject "$T" "response_commit_owned removed" \
   "internal WP6 declaration 'response_commit_owned' is missing"
 
 echo "PASS: WP6 mutation checks (9 forbidden response states all rejected)"
+
+# ---------------------------------------------------------------------------
+# WP7 mutation checks — the section-10d body-binding guardrails must REJECT the
+# states they claim to forbid. Several are structural greps over the source of
+# `body`; a grep that passes on a bad tree is worse than no grep, so each is
+# exercised against a tree that actually contains the defect.
+# ---------------------------------------------------------------------------
+
+# 32. The 4 MiB cap removed entirely.
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/extract.odin" <<'PY2'
+import sys, re
+p = sys.argv[1]; s = open(p).read()
+# Drop the whole "if len(raw) > BODY_LIMIT { ... }" block.
+s = re.sub(r"\tif len\(raw\) > BODY_LIMIT \{\n(?:.*\n)*?\t\}\n", "", s, count=1)
+open(p, "w").write(s)
+PY2
+expect_reject "$T" "4 MiB cap removed" \
+  "does not compare the body length against BODY_LIMIT"
+
+# 33. `>` weakened to `>=`, which would reject exactly 4 MiB.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/len(raw) > BODY_LIMIT/len(raw) >= BODY_LIMIT/' "$T/web/extract.odin"
+expect_reject "$T" "cap comparison weakened to >=" \
+  "exactly 4 MiB would be rejected"
+
+# 34. Parsing before the limit check — swap the two so unmarshal precedes the cap.
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/extract.odin" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+# Move the limit guard to AFTER the unmarshal by deleting it and re-inserting a
+# copy below the unmarshal line. Simplest: relocate the guard past the parse.
+guard_start = s.index("\tif len(raw) > BODY_LIMIT {")
+guard_end = s.index("\t}\n", guard_start) + len("\t}\n")
+guard = s[guard_start:guard_end]
+s = s[:guard_start] + s[guard_end:]
+anchor = "\terr := encoding_json.unmarshal("
+i = s.index(anchor)
+# Insert the guard right after the unmarshal statement's line.
+line_end = s.index("\n", i) + 1
+s = s[:line_end] + guard + s[line_end:]
+open(p, "w").write(s)
+PY2
+expect_reject "$T" "parse before the cap" \
+  "parses before checking the 4 MiB cap"
+
+# 35. Decoding with context.allocator instead of the request arena.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/request_arena_allocator(ctx)/context.allocator/' "$T/web/extract.odin"
+expect_reject "$T" "unmarshal into context.allocator" \
+  "does not decode into the request arena allocator"
+
+# 36. Dropping strict .JSON mode (defaulting to JSON5).
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/unmarshal(raw, dst, .JSON, /unmarshal(raw, dst, /' "$T/web/extract.odin"
+expect_reject "$T" "strict JSON mode dropped" \
+  "does not unmarshal in strict .JSON mode"
+
+# 37. The arena teardown removed from the driver.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i '/request_arena_destroy(&ctx)/d' "$T/web/test_support.odin"
+expect_reject "$T" "arena teardown removed from the driver" \
+  "does not call request_arena_destroy"
+
+# 38. The body capability consumed AFTER the parse (allowing a second decode).
+T="$(fresh_tree)"; TREES+=("$T")
+python3 - "$T/web/extract.odin" <<'PY2'
+import sys
+p = sys.argv[1]; s = open(p).read()
+line = "\tctx.private.body_state = .Consumed\n"
+assert line in s, "MUTATION-SETUP: consume line not found"
+s = s.replace(line, "", 1)  # remove the early consume
+# Re-insert it AFTER the unmarshal call's line.
+anchor = "\terr := encoding_json.unmarshal("
+i = s.index(anchor); line_end = s.index("\n", i) + 1
+s = s[:line_end] + line + s[line_end:]
+open(p, "w").write(s)
+PY2
+expect_reject "$T" "capability consumed after parse" \
+  "consumes the capability after parsing"
+
+# 39. A public member added to the Status enum for 413.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/^\tMethod_Not_Allowed    = 405,/\tMethod_Not_Allowed    = 405,\n\tPayload_Too_Large     = 413,/' \
+  "$T/web/respond.odin"
+expect_reject "$T" "public 413 Status member" \
+  "a 413 member was added to the public Status enum"
+
+# 40. A configurable body limit smuggled in.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\n@(private)\nset_body_limit :: proc(a: ^App, n: int) {}\n' >>"$T/web/app.odin"
+expect_reject "$T" "configurable body limit" \
+  "WP7 non-goal matching"
+
+# 41. A new public symbol in the arena machinery.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nBody_Arena :: struct {}\n' >>"$T/web/request_arena.odin"
+expect_reject "$T" "public symbol in the arena machinery" \
+  "exports symbols outside the ratified Phase-1 surface"
+
+echo "PASS: WP7 mutation checks (10 forbidden body-binding states all rejected)"
