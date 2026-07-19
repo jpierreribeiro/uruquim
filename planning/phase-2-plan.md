@@ -336,8 +336,17 @@ the observer, any documentation change, any change to `web/` or `build/`.
 
 ## WP14 — Test-support evolution: `test_request` as a procedure group
 
-**Type: SPEC (prototype-backed). Requires owner approval — the test-support
-ledger grows from 2.**
+**Type: SPEC (prototype-backed). APPROVED by the owner, 2026-07-19 — see
+ADR-021.**
+
+> **Objective sharpened by the approval: stay at ONE public name.** If the
+> variants can be `@(private)` members of the group, the test-support ledger
+> **stays at 2** and only the signature snapshot changes. If the toolchain
+> forbids that, growth goes to the minimum and the number is reported before it
+> is adopted. Either way this lands as a **freeze amendment** —
+> `build/phase1-public-signatures.txt`, the manifest and the gate numbers
+> updated together, with evidence — which is the door WP11 built, not a way
+> around it.
 
 * **Objective.** Resolve audit A-1: make body- and header-carrying requests
   testable in memory, using an explicit Odin **procedure group** — how
