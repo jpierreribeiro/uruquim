@@ -1,4 +1,4 @@
-# 21 — External Research Synthesis
+# 24 — External Research Synthesis
 
 Status: **REVIEWED PLANNING INPUT.** This document integrates the external
 reports under `referencias/` without promoting them to specification. Where a

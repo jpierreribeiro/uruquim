@@ -18,8 +18,10 @@ Everything in `referencias/` is research input, not specification.
   superseded by compiled Experiment 10 and accepted ADR-011.
 
 The reviewed cross-report synthesis lives in
-`planning/21-external-research-synthesis.md`. The phase-owned research queue
-lives in `planning/22-future-research-backlog.md`.
+`planning/24-external-research-synthesis.md`. The phase-owned research queue
+lives in `planning/25-future-research-backlog.md`. Numbers 21–23 are reserved
+for the accepted pre-WP3 amendment, the human-reviewed WP3 prompt, and the WP3
+gate record.
 
 Accepted project-specific lessons are restated in planning documents so an
 agent never needs to infer policy from raw research.
