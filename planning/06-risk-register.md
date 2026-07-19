@@ -138,6 +138,59 @@ Scale: probability/impact ∈ {Low, Med, High}.
   phase, or remove it before 1.0 rather than preserve a second canonical path.
 - **Resolution.** continuous; audited at every WP gate and frozen at WP11.
 
+## R-15 · Repeated body binding has ambiguous semantics
+- **Prob** Med · **Impact** Med (surprising replay, repeated parsing, or double
+  error response).
+- **Signals.** two calls to `web.body` both decode; invalid first bind leaves an
+  undocumented state; test and real transports behave differently.
+- **Mitigation.** ADR-012 plus a disposable WP7 state-machine prototype before
+  implementation; pin the second-call contract in behavior tests.
+- **Fallback.** single-consumer body capability with explicit programmer-error
+  diagnostics and the existing single-commit guard.
+- **Resolution.** WP7 before production body binding.
+
+## R-16 · Reusable request storage retains a giant allocation
+- **Prob** Med · **Impact** High (one adversarial request permanently raises
+  process RSS across otherwise small traffic).
+- **Signals.** retained capacity follows peak body size; memory does not return
+  near baseline after a giant request and arena reset.
+- **Mitigation.** Phase-3 benchmark of oversize bypass and retention caps;
+  record peak and retained memory, not only allocation count.
+- **Fallback.** release oversize allocations at request end even if common-path
+  buffers remain reusable.
+- **Resolution.** Phase-3 allocator gate.
+
+## R-17 · HTTP framing differs between real adapters
+- **Prob** Med · **Impact** High (request smuggling, connection desynchronization,
+  or green in-memory tests masking unsafe wire behavior).
+- **Signals.** adapters disagree on `CL+TE`, duplicate lengths, bad chunks,
+  truncation, whitespace, or unread request bodies.
+- **Mitigation.** separate semantic and raw-wire conformance matrices in WP9;
+  use RFC 9110/9112 as protocol authority.
+- **Fallback.** close the connection on ambiguous/unconsumed framing rather
+  than attempt reuse; quarantine a non-conforming adapter.
+- **Resolution.** WP9 and every future adapter gate.
+
+## R-18 · Raw request paths create unbounded observability cardinality
+- **Prob** Med · **Impact** High (metrics memory growth and exporter overload).
+- **Signals.** `/users/1`, `/users/2`, and random 404 paths become distinct
+  metric series; exporter queue grows under path scans.
+- **Mitigation.** retain stable route identity internally; 404 has no route
+  pattern, 405 retains the matched pattern; bounded non-blocking delivery.
+- **Fallback.** omit the route attribute when no match exists; drop bounded
+  events with an explicit dropped-events counter.
+- **Resolution.** Phase-3 router contract / Phase-4 observability.
+
+## R-19 · Forwarded client address is trusted automatically
+- **Prob** Low before feature exists · **Impact** High (spoofed audit, rate
+  limits, allowlists, or security decisions).
+- **Signals.** direct clients can change the effective address with
+  `Forwarded`/`X-Forwarded-For`; private CIDRs are implicitly trusted.
+- **Mitigation.** ADR-013; connected peer is authoritative by default; explicit
+  CIDR allowlist and right-to-left chain evaluation; preserve original peer.
+- **Fallback.** ignore all forwarding headers.
+- **Resolution.** Phase-4 security gate before implementation.
+
 ## Heat summary
 
 | Risk | Prob | Impact | Phase |
@@ -156,7 +209,14 @@ Scale: probability/impact ∈ {Low, Med, High}.
 | R-12 scope creep | Med | Med | WP11 |
 | R-13 pointer JSON | High when used | Med | WP1/WP6 |
 | R-14 API accretion | Med | High | Every WP / WP11 |
+| R-15 body replay ambiguity | Med | Med | WP7 |
+| R-16 retained giant buffer | Med | High | P3 |
+| R-17 framing divergence | Med | High | WP9/every adapter |
+| R-18 metric cardinality | Med | High | P3/P4 |
+| R-19 trusted-proxy spoofing | Low before feature | High | P4 |
 
-The local R-01 condition and all Phase-1 decision blockers are resolved.
-Remaining risks are owned by their implementation work packages or later
-phase gates.
+The local R-01 condition and all blockers from the original Phase-1 Spec Gate
+are resolved. Newly identified R-15/OQ-15 is explicitly owned and blocks only
+WP7 implementation until its prototype and human decision. Remaining risks are
+owned by their implementation work packages or later phase gates. External
+research created no permission to implement future-phase features early.

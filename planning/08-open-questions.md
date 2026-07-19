@@ -1,8 +1,10 @@
 # 08 — Open Questions
 
-Status: **PHASE-1 CRITICAL QUESTIONS RESOLVED.** Human decisions on 2026-07-18
-closed OQ-2, OQ-3, OQ-4, OQ-5, OQ-6, and OQ-14. Remaining questions are
-implementation checks or owned by later phases.
+Status: **MIXED.** Human decisions on 2026-07-18 closed the original Phase-1
+Spec Gate questions OQ-2, OQ-3, OQ-4, OQ-5, OQ-6, and OQ-14. Research added
+OQ-15 as the next implementation-blocking decision, owned narrowly by WP7; it
+does not block WP3–WP6. All other remaining questions are implementation checks
+or owned by later phases.
 
 ## Critical (block a WP)
 
@@ -63,6 +65,15 @@ implementation checks or owned by later phases.
 - **Non-blocking WP6 follow-up.** Prototype one-level pointer dereference. If
   clean, propose a spec amendment; if not, keep value-only.
 
+### OQ-15 · Repeated `web.body` call semantics
+- **Owner.** WP7 / API owner.
+- **Evidence required.** Disposable pinned-toolchain prototype covering a
+  successful first bind, invalid first bind, empty body, and a second bind;
+  demonstrate that the selected diagnostic cannot double-commit.
+- **Deadline.** before WP7 production implementation.
+- **Proposed direction.** ADR-012 option A: a request body has one canonical
+  typed consumer. Do not infer replay merely because Phase 1 buffers input.
+
 ## Non-critical (deferred, no WP blocked)
 
 ### OQ-7 · Onion vs pre-order middleware
@@ -90,6 +101,27 @@ Phase 5 optional layer. Not Phase 1.
 ### OQ-13 · Collection name (`uruquim:web`) final?
 Chosen; confirm in WP0. Trivial to change before 1.0.
 
+### OQ-16 · Trusted proxy policy
+Phase-4 security gate (ADR-013). Default remains connected-peer only; no
+forwarding header is trusted before the ADR and corpus are accepted.
+
+### OQ-17 · Graceful drain definition
+Phase-4 prototype using test transport and one real adapter must define
+admission stop, in-flight work, absolute deadline, forced close, and exactly-once
+cleanup before an ADR is proposed.
+
+### OQ-18 · Public route-pattern accessor
+No current use case justifies one. Phase 3 preserves route identity internally
+for 405 and future instrumentation; public exposure remains FUTURE.
+
+### OQ-19 · Adaptive overload policy
+Deferred until deterministic bounded admission and shedding work independently.
+Signals, thresholds, hysteresis, and recovery remain research.
+
+### OQ-20 · Multipart temporary-file ownership
+Phase 4. Prototype cleanup, quotas, persistence transfer, disk-full, timeout,
+and disconnect behavior before proposing an ownership ADR.
+
 ## Routing table
 
 | OQ | Critical? | Blocks | Due |
@@ -101,4 +133,6 @@ Chosen; confirm in WP0. Trivial to change before 1.0.
 | OQ-5 | resolved | — | accepted 2026-07-18 |
 | OQ-6 | resolved/deferred | P3 implementation only | accepted policy |
 | OQ-14 | resolved baseline | WP6 ergonomic probe only | accepted baseline |
+| OQ-15 | yes | WP7 implementation | before WP7 code |
 | OQ-7..13 | no | — | deferred |
+| OQ-16..20 | no (phase-owned) | P4/Future features only | owning phase gate |

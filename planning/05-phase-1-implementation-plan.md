@@ -181,14 +181,21 @@ runs on the pinned toolchain.
 
 ## WP7 — JSON body binding
 - **Objective.** `body(ctx,&dst)->bool`, request allocator, fixed 4 MiB body cap.
-- **Spec.** §body; ADR-006; scope-review body-limit decision.
+- **Spec.** §body; ADR-006; proposed ADR-012; scope-review body-limit decision.
 - **Files.** `web/extract.odin` (`body`), `web/internal/memory/request_arena.odin`.
 - **API.** `body`.
-- **Tests first.** valid nested bind into arena; empty/invalid→false+envelope;
-  over-limit→`body_too_large` before parse (ports of exp-03).
-- **Min impl.** `json.unmarshal(^$T, arena_allocator)`; size check.
-- **Done.** exp-03 behaviors pass; ownership documented.
-- **Risks.** unmarshal ignoring substituted allocator → R-06 (from exp-03).
+- **Tests first.** before production code, run a disposable repeated-binding
+  prototype covering successful first bind, invalid first bind, empty body,
+  and a second call. After ADR-012 is decided: valid nested bind into arena;
+  empty/invalid→false+envelope; over-limit→`body_too_large` before parse;
+  repeated-call behavior pinned without double-commit (ports of exp-03).
+- **Min impl.** `json.unmarshal(^$T, arena_allocator)`; size check; the smallest
+  request-body state required by accepted ADR-012. No replay cache unless that
+  ADR explicitly accepts one.
+- **Done.** exp-03 behaviors pass; ADR-012 is accepted with compiling evidence;
+  ownership and consumption semantics are documented.
+- **Risks.** unmarshal ignoring substituted allocator → R-06 (from exp-03);
+  ambiguous repeated binding → R-15.
 - **Deps.** WP2/WP6; exp-03. **Rollback.** body isolated.
 
 ## WP8 — Bootstrap real transport adapter
@@ -209,17 +216,26 @@ runs on the pinned toolchain.
   test transport still proves the core.
 
 ## WP9 — Transport conformance baseline
-- **Objective.** one suite both transports must pass.
+- **Objective.** semantic conformance for every transport plus wire/framing
+  conformance for every real HTTP adapter.
 - **Spec.** §Three test suites; cross-phase invariant.
 - **Files.** `web/testing/conformance.odin`
-  (`transport_contract_test(t, factory)`).
+  (`transport_contract_test(t, factory)`); adapter-owned raw HTTP corpus.
 - **API.** internal test API.
-- **Tests first.** request conversion, body lifetime, header normalization,
-  response commit, connection close/stop (ports of exp-08 + adapter).
-- **Min impl.** factory-parameterized suite run against test transport + odin-http.
-- **Done.** both transports green; the bootstrap cannot shape the design.
-- **Risks.** a conformance item only satisfiable by one backend → surfaces a
-  real boundary defect (good).
+- **Tests first.** semantic matrix: request conversion, body lifetime, header
+  normalization, response commit, connection close/stop (ports of exp-08 +
+  adapter). Real-adapter wire matrix: conflicting `Content-Length` and
+  `Transfer-Encoding`, duplicate/non-identical lengths, malformed chunking,
+  truncated bodies, invalid whitespace, unread-body disposal versus close,
+  and `Expect: 100-continue`.
+- **Min impl.** factory-parameterized semantic suite run against test transport
+  + odin-http; raw-byte wire harness run only against real adapters. The core
+  does not acquire a parser ABI merely to make the test transport imitate TCP.
+- **Done.** both transports pass semantic conformance; the bootstrap adapter
+  passes the Phase-1 wire corpus; unsupported cases are explicitly documented,
+  never silently accepted.
+- **Risks.** a semantic item satisfiable by only one backend surfaces a real
+  boundary defect; wire behavior divergence → R-17.
 - **Deps.** WP3/WP8. **Rollback.** suite is additive.
 
 ## WP10 — Phase 1 documentation and examples

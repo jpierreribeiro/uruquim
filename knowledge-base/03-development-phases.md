@@ -249,9 +249,17 @@ public API change.
 
 ### Spec Gate checklist
 
+- [ ] disposable router shootout compares pointer-radix, index-radix, and a
+      hybrid/data-oriented layout on the pinned toolchain; the production node
+      shape is selected from recorded lookup latency, allocations, footprint,
+      and build cost rather than external-framework claims
 - [ ] radix node shape; precedence rules; duplicate/conflict rules
 - [ ] path normalization policy; 405 and OPTIONS policy
 - [ ] param representation; arena lifetime contract
+- [ ] oversize-allocation bypass and reusable-buffer retention policy selected
+      from normal, burst, and giant-request memory measurements
+- [ ] internal stable route identity/pattern contract: successful match and 405
+      preserve it; 404 has none; no public accessor is implied
 - [ ] default limit/timeout values for `web.app()`
 
 ### Test Gate checklist
@@ -261,6 +269,11 @@ public API change.
 - [ ] per-method routing isolated; 405 when route exists on another method
 - [ ] matched pattern preserved for instrumentation
 - [ ] fuzz/property tests for insert+lookup invariants
+- [ ] benchmark compares peak and retained memory after a giant request, not
+      only common-path allocation count
+- [ ] optional debug-only lifetime probe validates the pinned
+      `base:sanitizer` poison/unpoison behavior and documents its false-negative
+      window; it adds no release hot-path check and is not a safety guarantee
 - [ ] configured body limit overrides the 4 MiB default; oversized body still
       produces `body_too_large`; timeout behavior covered
 
@@ -280,21 +293,33 @@ Harden for serious use.
 
 ### Scope (required)
 
-- graceful shutdown robustness (in-flight requests covered)
+- graceful shutdown robustness: stop admission, finish admitted work until an
+  absolute deadline, force-close remaining work, cleanup exactly once; details
+  remain transport-private
+- trusted-proxy security policy: forwarding headers ignored by default,
+  explicit trusted networks, original peer preserved; ADR required before code
 - CORS middleware; secure headers middleware
 - cookies helpers
-- file uploads (fully specified multipart contract)
+- file uploads (fully specified multipart contract with request-owned temporary
+  resources, explicit persistence transfer, quotas, and failure cleanup; JSON
+  never spills implicitly to disk)
 - static file serving
 - structured logging; observability hooks (route-pattern keyed metrics and
-  tracing points)
+  tracing points) with bounded non-blocking delivery and no raw-path fallback
+- deterministic bounded admission/load shedding; adaptive overload control is
+  future research and cannot replace the deterministic mechanism
 - load tests
 - allocator/lifetime audit
 
 ### Gates (summary)
 
-- Spec: shutdown guarantees; upload/static contracts; telemetry hook points
-- Test: shutdown with in-flight requests; upload limits; recovery+telemetry
-  interaction; load-test baseline recorded
+- Spec: shutdown guarantees after a two-transport prototype; trusted-proxy ADR;
+  upload ownership/quotas; static contracts; telemetry hook points and queue
+  bounds; deterministic shedding policy
+- Test: shutdown with slow headers/body/writer, keep-alive and deadline races;
+  proxy spoofing and IPv4/IPv6 chain corpus; upload limits plus disk-full,
+  disconnect and timeout cleanup; 200/404/405 route-cardinality behavior;
+  blocked exporter cannot block a handler; shedding/load-test baseline recorded
 - Implementation: hardening middleware done; audit completed; examples
   `07-crud`, `08-postgres`, `09-file-upload`, `10-observability`; docs
   `memory-model.md`, `middleware.md`, `cookbook.md` complete
@@ -330,6 +355,10 @@ API.
   introduced separately in Phase 3)
 - validation story decision (explicit vs tag-based), prototype-gated, never
   requiring a generator
+- adaptive overload controller, only after deterministic bounded admission and
+  shedding have passed Phase-4 tests
+- public read-only route-pattern access, only if a real application use case
+  cannot be served by internal instrumentation hooks
 - project templates
 
 ## Exit Criteria for the Project Core
