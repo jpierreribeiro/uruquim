@@ -423,6 +423,43 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp7-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp7-public-surface"
 
+# WP8 — the real transport adapter, the response-driver finalization, and one
+# end-to-end socket round-trip.
+#
+# The driver finalization and the neutral-boundary conversions are
+# package-private, so the internal tests run in a THROWAWAY package like
+# WP2-WP7.
+echo "--- WP8 driver finalization and boundary, internal behavior (throwaway package) ---"
+URUQUIM_WP8_TMP="$(mktemp -d -t uruquim-wp8-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP8_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP8_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp8-internal/*.odin "$URUQUIM_WP8_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP8_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp8-internal"
+rm -rf "$URUQUIM_WP8_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP8_TMP" || fail "the throwaway WP8 internal-test package was not removed"
+echo "PASS: WP8 internal tests ran against the real sources; throwaway package removed"
+
+# WP8 transport boundary compile probes — the one-way dependency (ADR-009).
+#
+# C1: the adapter package compiles standalone (it names no web type).
+echo "--- WP8 probe: web/internal/transport compiles standalone ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" check "$URUQUIM_ROOT/web/internal/transport" \
+  "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point
+echo "PASS: the transport adapter compiles as standalone neutral code"
+
+# WP8 real-socket round-trip. It binds a loopback port, so it runs under an
+# EXTERNAL timeout and is the only test that touches a real socket. It cleans up
+# its server and thread even on failure, and never sends SIGINT to this runner.
+echo "--- WP8 real-socket contract: GET /ping, POST JSON, 413, clean stop (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp8-socket" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp8-socket" ||
+  fail "the WP8 real-socket contract did not pass within the timeout"
+
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
 # actually asserted.

@@ -313,14 +313,34 @@ if test "$URUQUIM_ACTUAL_FILES" != "$URUQUIM_EXPECTED_FILES_SORTED"; then
   fail "web/ file set does not match the Phase-1 contract (WP1 seven + WP2 three + WP3 facade + WP4 two + WP7 request_arena)"
 fi
 
-# WP3 permits exactly ONE subdirectory, `web/testing/` (the machinery). It does
-# NOT relax the general ban: `web/internal/` and any other subdirectory remain
-# out of scope until their own work packages.
+# WP3 added `web/testing/`; WP8 adds `web/internal/` (the private transport
+# boundary and adapter). No other subdirectory is permitted. Both are internal:
+# neither adds a symbol to the application ledger, which the inventory below
+# still pins at exactly 32.
 URUQUIM_WEB_SUBDIRS="$(find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)"
-if test "$URUQUIM_WEB_SUBDIRS" != "testing"; then
-  echo "--- web/ subdirectories (only 'testing' is allowed) ---" >&2
+URUQUIM_WEB_SUBDIRS_EXPECTED="$(printf 'internal\ntesting\n')"
+if test "$URUQUIM_WEB_SUBDIRS" != "$URUQUIM_WEB_SUBDIRS_EXPECTED"; then
+  echo "--- web/ subdirectories (only 'internal' and 'testing' are allowed) ---" >&2
   echo "$URUQUIM_WEB_SUBDIRS" >&2
-  fail "web/ has an unexpected subdirectory; WP3 permits only web/testing/"
+  fail "web/ has an unexpected subdirectory; Phase 1 permits only web/testing/ and web/internal/"
+fi
+
+# WP8 — the transport boundary and adapter live under web/internal/transport/.
+# It is a SEPARATE package that must never import `uruquim:web` (the one-way
+# boundary, ADR-009 / WP8 D1); the adapter is the only place the backend may be
+# imported. These are static guards; the compile probes back them.
+URUQUIM_WEB_INTERNAL="$URUQUIM_WEB/internal"
+if test -d "$URUQUIM_WEB_INTERNAL"; then
+  URUQUIM_INTERNAL_SUBDIRS="$(find "$URUQUIM_WEB_INTERNAL" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)"
+  if test "$URUQUIM_INTERNAL_SUBDIRS" != "transport"; then
+    echo "--- web/internal subdirectories (only 'transport' is allowed) ---" >&2
+    echo "$URUQUIM_INTERNAL_SUBDIRS" >&2
+    fail "web/internal/ has an unexpected subdirectory; WP8 permits only web/internal/transport/"
+  fi
+  URUQUIM_TRANSPORT="$URUQUIM_WEB_INTERNAL/transport"
+  if grep -nE '"uruquim:web"' "$URUQUIM_TRANSPORT"/*.odin; then
+    fail "web/internal/transport imports uruquim:web; the transport boundary is one-way (ADR-009 / WP8 D1)"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
