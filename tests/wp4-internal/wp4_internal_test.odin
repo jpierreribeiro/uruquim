@@ -761,6 +761,13 @@ wp4_dispatch_allocates_nothing :: proc(t: ^testing.T) {
 	get(&a, "/users/:id", wp4_noop_handler)
 	post(&a, "/users/:id", wp4_noop_handler)
 
+	// AMENDED IN WP17 (ADR-023): the FIRST miss lazily builds the App-owned
+	// miss chain — a one-time App-lifetime allocation, not a per-request one.
+	// One warm-up miss moves that build outside the measurement, exactly the
+	// WP12 P9 protocol; every dispatch measured below still allocates nothing.
+	warm: Context
+	wp4_run(&a, &warm, .GET, "/warmup-miss")
+
 	after_registration := len(track.allocation_map)
 
 	// Matching, parameter capture, the 404 path, and the 405 + `Allow` path all

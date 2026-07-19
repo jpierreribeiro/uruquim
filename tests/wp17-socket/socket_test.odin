@@ -16,12 +16,50 @@
 // timeout, the WP8/WP9 socket-suite rule).
 package wp17_socket
 
+import "core:log"
 import "core:net"
+import "core:strings"
 import "core:sync"
 import "core:testing"
 import "core:thread"
 import "core:time"
 import web "uruquim:web"
+
+// The poison report and the serve refusal are EXPECTED Error-level `uruquim:`
+// log lines; the pinned test runner records Error output as a failure, so the
+// test swallows exactly those and forwards everything else (the WP8 idiom).
+@(private = "file")
+Quiet :: struct {
+	inner: log.Logger,
+}
+
+@(private = "file")
+quiet_logger_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	record := (^Quiet)(data)
+	if level == .Error && strings.contains(text, "uruquim:") {
+		return
+	}
+	if record.inner.procedure != nil {
+		record.inner.procedure(record.inner.data, level, text, options, location)
+	}
+}
+
+@(private = "file")
+quiet_logger :: proc(record: ^Quiet) -> log.Logger {
+	record.inner = context.logger
+	return log.Logger {
+		procedure = quiet_logger_proc,
+		data = rawptr(record),
+		lowest_level = .Debug,
+		options = context.logger.options,
+	}
+}
 
 // A port set disjoint from the WP8/WP9 candidates, so parallel suites cannot
 // collide.
@@ -57,6 +95,9 @@ refusal_serve_thread :: proc() {
 
 @(test)
 wp17_serve_refuses_to_start_on_a_poisoned_app :: proc(t: ^testing.T) {
+	quiet: Quiet
+	context.logger = quiet_logger(&quiet)
+
 	fixture: Refusal_Fixture
 	fixture.app = web.app()
 	fixture.port = WP17_CANDIDATE_PORTS[0]

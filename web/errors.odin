@@ -589,6 +589,11 @@ Framework_Error :: enum {
 	Invalid_Serve_Port,
 	// WP8 — the transport could not bind/listen on the requested port.
 	Serve_Listen_Failed,
+	// WP17 — `web.use` was called after a route was registered, or after the
+	// first dispatch; the application is rejected fail-closed (ADR-019, and the
+	// ADR-023 first-dispatch sub-decision). The spec proposes this exact name
+	// for the Phase-2 public observer (WP20).
+	Use_After_Route,
 }
 
 // Framework_Report is the typed event. `payload_type` is a `typeid`, so the
@@ -673,6 +678,28 @@ FRAMEWORK_MESSAGE_INVALID_PORT ::
 FRAMEWORK_MESSAGE_LISTEN_FAILED ::
 	"uruquim: web.serve could not bind/listen on the requested port; returning."
 
+// The owner-approved ADR-019 diagnostic (planning/phase-2-spec.md §5),
+// verbatim. The `use()` call site additionally appends the count of
+// already-registered routes and the first unprotectable pattern through a
+// fixed buffer (web/middleware.odin) — never through `core:fmt`.
+@(private)
+FRAMEWORK_MESSAGE_USE_AFTER_ROUTE ::
+	"uruquim: web.use was called after a route was already registered; " +
+	"ordered middleware cannot protect routes registered before it (ADR-019). " +
+	"Register every web.use before the first web.get/post/put/patch/delete/mount. " +
+	"This application is rejected fail-closed: every request will answer 500 " +
+	"and web.serve will refuse to start."
+
+// The ADR-023 member of the same fail-closed family: `use()` after the first
+// dispatch. There is no pattern to name — the offence is temporal.
+@(private)
+FRAMEWORK_MESSAGE_USE_AFTER_DISPATCH ::
+	"uruquim: web.use was called after the application had already dispatched " +
+	"a request; the middleware set must be complete before the first dispatch " +
+	"(ADR-019/ADR-023). Register every web.use before the first registration " +
+	"or request. This application is rejected fail-closed: every request will " +
+	"answer 500 and web.serve will refuse to start."
+
 @(private)
 framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_location) {
 	report := Framework_Report {
@@ -701,6 +728,8 @@ framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_locat
 		message = FRAMEWORK_MESSAGE_INVALID_PORT
 	case .Serve_Listen_Failed:
 		message = FRAMEWORK_MESSAGE_LISTEN_FAILED
+	case .Use_After_Route:
+		message = FRAMEWORK_MESSAGE_USE_AFTER_ROUTE
 	}
 
 	logger.procedure(logger.data, .Error, message, logger.options, loc)

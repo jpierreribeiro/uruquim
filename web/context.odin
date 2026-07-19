@@ -110,6 +110,24 @@ Context_Internal :: struct {
 	// rewrite the bytes the first response is still pointing at.
 	error_buffer: [ERROR_BODY_MAX]u8,
 
+	// WP17 — the middleware chain cursor (ADR-005). `chain` is a VIEW over the
+	// App-owned pool, materialised by `chain_enter` for this request only; it
+	// owns nothing and is never freed. `chain_index` is MONOTONIC: `next` reads
+	// it, advances it, then calls that step, and it is never rewound — with the
+	// terminal step inside the bound, that is what makes a second `next()` a
+	// silent no-op (ADR-022 item 3, the WP12 integrator's constraint).
+	chain:       []Handler,
+	chain_index: int,
+
+	// WP17 — the precomputed miss decision (ADR-023). `dispatch` holds the App
+	// and decides 404-vs-405 BEFORE entering the miss chain; the terminal — an
+	// ordinary Handler, which receives only this Context — acts on the record.
+	// This is what keeps the deliberately-absent App back-pointer absent.
+	// `miss_allow` is a view over `allow_buffer` below, request-local like
+	// everything else here.
+	miss_kind:  Miss_Kind,
+	miss_allow: string,
+
 	// WP7 — the single-consumer body capability (ADR-012 A). `.Fresh` is the
 	// zero value, so a new Context begins with the body available. `web.body`
 	// moves it to `.Consumed` on its first call, before the limit and parse.

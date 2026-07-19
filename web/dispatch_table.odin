@@ -50,13 +50,23 @@ import "core:strings"
 // `/`, more than one `:param`, or an unnamed `:`. Invalid entries stay in the
 // table but are skipped by both lookup and the `Allow` builder, so they never
 // match and never make a path look "known". See `pattern_classify`.
+// WP17: `chain_start`/`chain_len` name this route's flattened chain as an
+// INDEX PAIR into the App-owned pool — never a `[]Handler`. WP12 P8 measured a
+// stored slice dangling into `0xAAAAAAAAAAAAAAAA` the moment the pool
+// reallocates, and P8b measured the same defect reading back CORRECTLY on the
+// plain heap; index pairs are immune by construction because dispatch
+// re-slices the pool's CURRENT storage (spec §2.2). `handler` remains the
+// route's own terminal step, stored for its own sake (the pattern's identity),
+// and it is also the last element inside the chain's bound.
 @(private)
 Route_Entry :: struct {
-	method:    Method,
-	pattern:   string,
-	handler:   Handler,
-	has_param: bool,
-	valid:     bool,
+	method:      Method,
+	pattern:     string,
+	handler:     Handler,
+	has_param:   bool,
+	valid:       bool,
+	chain_start: int,
+	chain_len:   int,
 }
 
 // Route_Param is the captured path parameter for one request.
@@ -128,6 +138,12 @@ route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handle
 	owned := strings.clone(pattern, a.private.routes.allocator)
 	has_param, valid := pattern_classify(owned)
 
+	// WP17: flatten `globals ++ handler` into the App-owned pool NOW, at
+	// registration — never at dispatch (spec §2.2). The set of globals is fixed
+	// by the ADR-019 guard before any route exists, so a chain flattened here
+	// can never be stale.
+	chain_start, chain_len := chain_flatten(a, handler)
+
 	append(
 		&a.private.routes,
 		Route_Entry {
@@ -136,6 +152,8 @@ route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handle
 			handler = handler,
 			has_param = has_param,
 			valid = valid,
+			chain_start = chain_start,
+			chain_len = chain_len,
 		},
 	)
 }

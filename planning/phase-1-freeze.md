@@ -598,3 +598,43 @@ header type is introduced.
 **Response-header recording.** `Recorded_Response` still carries only `status`
 and `body`. That decision belongs to Phase 4, where CORS and cookies create the
 first real need.
+
+## Amendment 3 — WP17: middleware (`use`, `next`) joins the application ledger
+
+**Date:** 2026-07-19. **Authority:** owner — the approved Phase-2 ledger
+(`planning/phase-2-spec.md` §9.2, PR #30 review) assigns `use` and `next` to
+WP17 under ADR-005 and ADR-019, both settled.
+**Ledger effect: application 32 → 34.** 34 application + 2 test-support = 36.
+The Phase-1 core of 32 symbols is unchanged: no frozen signature moved, no
+field was added to a public type, and `odin doc` renders the two new rows and
+nothing else (the snapshot diff at this amendment was exactly two added
+lines).
+
+The two recorded lines:
+
+```
+application	proc	next :: proc(ctx: ^Context)
+application	proc	use :: proc(a: ^App, middleware: Handler)
+```
+
+There is NO `Middleware` type (D-12.1: a distinct proc type converts implicitly
+in both directions on the pinned toolchain — no call-site cost, no protection
+either). Chains are flattened at registration into an App-owned pool and routes
+store index pairs, never `[]Handler` (spec §2.2, WP12 P8). Post-`next`
+behaviour is specified and tested (ADR-022 = B1). App-level middleware observe
+404/405 misses, in `bare()` too (ADR-023). `use()` after any registration or
+after the first dispatch rejects the application fail-closed with the
+owner-approved diagnostic (ADR-019; the diagnostic additionally names the count
+of already-registered routes and the first unprotectable pattern, composed
+through a fixed buffer — no `core:fmt`).
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `use` | A | WP17 | `tests/wp17-public-surface/contract_test.odin::wp17_use_and_next_signatures_are_pinned` | `tests/wp17-public-surface/contract_test.odin::wp17_mis_ordered_auth_program_does_not_serve_the_protected_route` | `docs/middleware.md::web.use` | App owns the global list and chain pool; lazy; freed once by `destroy` |
+| `next` | A | WP17 | `tests/wp17-public-surface/contract_test.odin::wp17_use_and_next_signatures_are_pinned` | `tests/wp17-internal/wp17_internal_test.odin::wp17_second_next_is_a_silent_noop_and_the_handler_runs_once` | `docs/middleware.md::web.next` | reads the per-request cursor; allocates nothing; never rewinds |
+
+One consequence recorded honestly: the §11 forwarded-items table still lists
+middleware as "forwarded to Phase 2" — that stays true as a statement about
+Phase 1. This amendment is the record that Phase 2 (WP17) delivered it.

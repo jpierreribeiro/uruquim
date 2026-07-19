@@ -147,6 +147,45 @@ check_ping :: proc() -> bool {
 	return res.status == .OK && res.body == "pong"
 }
 
+// fragment: phase2/middleware-use
+// The canonical WP17 shape: every `use` BEFORE the first route. A middleware
+// is an ordinary Handler that calls `web.next` to run the rest of the chain.
+middleware_app :: proc() {
+	app := web.app()
+	defer web.destroy(&app)
+
+	web.use(&app, require_auth) // before any route — the order is enforced
+	web.get(&app, "/admin/users", list_users)
+
+	web.serve(&app, 8080)
+}
+
+// fragment: phase2/middleware-guard
+// A guard: respond and return WITHOUT calling next to short-circuit. The
+// credential here is a query token only because header lookup is a later work
+// package; the pattern is the point.
+require_auth :: proc(ctx: ^web.Context) {
+	token, found := web.query(ctx, "token")
+	if !found || token != "expected" {
+		web.unauthorized(ctx, "authentication required")
+		return
+	}
+	web.next(ctx)
+}
+
+list_users :: proc(ctx: ^web.Context) {
+	web.ok(ctx, []User{{id = 1, name = "Ada"}})
+}
+
+// fragment: phase2/middleware-unwind
+// Code after `next` runs as the chain unwinds — the response is committed by
+// then, so read, never write (a late response attempt is rejected and the
+// first response survives).
+observe_outcome :: proc(ctx: ^web.Context) {
+	web.next(ctx)
+	// the request is fully answered here
+}
+
 // The fixtures are compiled as a test package, so one live assertion keeps the
 // runner honest about actually having built them.
 @(test)

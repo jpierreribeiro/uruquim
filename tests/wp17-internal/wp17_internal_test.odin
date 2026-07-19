@@ -112,6 +112,20 @@ wp17_logged :: proc(sink: ^Wp17_Sink) -> string {
 	return string(sink.log_buf[:sink.log_n])
 }
 
+// wp17_capture_logger installs the capture logger for tests that DELIBERATELY
+// trigger a framework diagnostic (the poison family, the driver 500): the
+// pinned test runner records Error-level log lines as test failures, so an
+// expected diagnostic must be captured, not printed (the WP6/WP8 idiom).
+@(private = "file")
+wp17_capture_logger :: proc(sink: ^Wp17_Sink) -> runtime.Logger {
+	return runtime.Logger {
+		procedure    = wp17_capture_logger_proc,
+		data         = sink,
+		lowest_level = .Debug,
+		options      = context.logger.options,
+	}
+}
+
 @(private = "file")
 wp17_contains :: proc(haystack: string, needle: string) -> bool {
 	if len(needle) == 0 {
@@ -201,7 +215,7 @@ wp17_mw_neither :: proc(ctx: ^Context) {
 wp17_mw_allocating :: proc(ctx: ^Context) {
 	scratch := make([]u8, 48)
 	scratch[0] = 1
-	delete(scratch)
+	delete_slice(scratch)
 	next(ctx)
 }
 
@@ -382,6 +396,7 @@ wp17_next_from_the_handler_is_a_noop :: proc(t: ^testing.T) {
 wp17_neither_next_nor_respond_is_finalized_to_the_driver_500 :: proc(t: ^testing.T) {
 	sink: Wp17_Sink
 	context.user_ptr = &sink
+	context.logger = wp17_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -454,6 +469,7 @@ wp17_global_middleware_observe_a_405_with_allow_intact :: proc(t: ^testing.T) {
 wp17_bare_miss_enters_and_unwinds_the_chain_committing_nothing :: proc(t: ^testing.T) {
 	sink: Wp17_Sink
 	context.user_ptr = &sink
+	context.logger = wp17_capture_logger(&sink)
 
 	a := bare()
 	defer destroy(&a)
@@ -477,6 +493,7 @@ wp17_bare_miss_enters_and_unwinds_the_chain_committing_nothing :: proc(t: ^testi
 wp17_use_after_a_registered_route_poisons_the_app_fail_closed :: proc(t: ^testing.T) {
 	sink: Wp17_Sink
 	context.user_ptr = &sink
+	context.logger = wp17_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -502,6 +519,8 @@ wp17_use_after_a_registered_route_poisons_the_app_fail_closed :: proc(t: ^testin
 
 @(test)
 wp17_use_after_the_first_dispatch_is_rejected_fail_closed :: proc(t: ^testing.T) {
+	sink: Wp17_Sink
+	context.logger = wp17_capture_logger(&sink)
 	a := app()
 	defer destroy(&a)
 
@@ -518,6 +537,8 @@ wp17_use_after_the_first_dispatch_is_rejected_fail_closed :: proc(t: ^testing.T)
 
 @(test)
 wp17_bare_enforces_the_fail_closed_guard_identically :: proc(t: ^testing.T) {
+	sink: Wp17_Sink
+	context.logger = wp17_capture_logger(&sink)
 	a := bare()
 	defer destroy(&a)
 

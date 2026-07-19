@@ -21,20 +21,25 @@ a standardized JSON envelope.
 - **Responses:** JSON, text, `204`, and five error responders.
 - **Automatic errors:** `404` for an unknown path, `405` with an exact `Allow`
   header for a known path under another method — both with a JSON envelope.
+- **Middleware:** `web.use` before any route, `web.next` inside; onion order,
+  short-circuit, misses observed. Ordering is enforced fail-closed.
 - **Testing:** `web.test_request` runs a request through real routing without a
   socket.
 - **HTTP/1 safety:** ambiguous or malformed framing (`CL`+`TE`, duplicate
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available in Phase 1** — do not emit any of it: middleware, route groups,
-typed application state, panic recovery (Phase 2); configurable limits and
-read/write timeouts (Phase 3); graceful shutdown with a deadline (Phase 4);
-request header lookup (Phase 2). See the appendix.
+**Not available yet** — do not emit any of it: route organisation
+(`Router`/`mount`), request header lookup, the error observer, the built-in
+logger and request-ID middleware (all later Phase-2 work packages);
+configurable limits and read/write timeouts (Phase 3); graceful shutdown with
+a deadline (Phase 4). Panic recovery does not exist and never will: Odin has
+no recoverable panic (ADR-020). See the appendix.
 
-**Two ledgers.** The application API is exactly **32** symbols. The test-support
-API is a separate ledger of exactly **2**. Union: **34**. Do not fold them
-together and do not invent a third form.
+**Two ledgers.** The application API is exactly **34** symbols (32 frozen in
+Phase 1, plus `use` and `next` from WP17). The test-support API is a separate
+ledger of exactly **2**. Union: **36**. Do not fold them together and do not
+invent a third form.
 
 ## Application
 
@@ -322,10 +327,41 @@ All errors share one envelope:
 is **omitted entirely** — never `null`, never `""`. `docs/errors.md` documents
 each code.
 
+## Middleware
+
+```text
+use(&app, middleware)   register; MUST come before the first route
+next(ctx)               run the rest of the chain from inside a middleware
+```
+
+A middleware is an ordinary `Handler`. `use` after any route — or after the
+first dispatched request — REJECTS the application fail-closed: every request
+answers `500` and `web.serve` refuses to start. Register every `use` first.
+
+<!-- fragment: phase2/middleware-guard -->
+```odin
+require_auth :: proc(ctx: ^web.Context) {
+	token, found := web.query(ctx, "token")
+	if !found || token != "expected" {
+		web.unauthorized(ctx, "authentication required")
+		return
+	}
+	web.next(ctx)
+}
+```
+
+Chains run in `use` order and unwind in reverse (`A>B>C>H<C<B<A`). Returning
+without calling `next` short-circuits: nothing downstream runs and your
+response wins. Code after `next` runs at unwind, when the response is already
+committed — read there, never write (a late response attempt is rejected; the
+first response survives). A second `next()` is a no-op; the handler runs
+exactly once. Middleware also observe automatic `404`/`405` responses.
+`docs/middleware.md` has the full contract.
+
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-32 application symbols.
+34 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
@@ -345,10 +381,10 @@ check_ping :: proc() -> bool {
 ```
 
 It drives the REAL routing and the real response pipeline with no socket, so a
-result here matches what a real client gets. It takes a method and a path and
-nothing else: there is no query, header or body argument. `Recorded_Response`
-exposes `status` and `body` only — there is no public way to read response
-headers.
+result here matches what a real client gets. `body` and `query` are optional
+parameters (defaulting to empty); there is no header argument yet.
+`Recorded_Response` exposes `status` and `body` only — there is no public way
+to read response headers.
 
 `body` stays valid until `web.destroy(&app)`.
 
@@ -403,11 +439,10 @@ only so an agent recognizes the names and refuses them.
 
 <!-- phase: 2; unavailable -->
 ```odin
-// Phase 2 — unavailable in Phase 1.
-web.use(&app, web.logger())
-web.use(&app, web.recovery())
+// Later Phase-2 work packages — unavailable today.
 value, found := web.header(ctx, "x-api-key")
 token, found := web.bearer_token(ctx)
+web.use(&app, web.logger)      // the built-in logger does not exist yet
 ```
 
 <!-- phase: 3; unavailable -->
@@ -425,12 +460,15 @@ web.serve_with(&app, web.Serve_Config{host = "0.0.0.0", port = 8080})
 ```
 
 Other names reserved for later phases, none of which exist today:
-`web.next`, `web.router`, `web.mount`, `web.serve_transport`,
+`web.router`, `web.mount`, `web.serve_transport`,
 `web.body_limit`, `web.bytes`, `web.redirect`, `web.conflict`.
+`web.recovery` is reserved and will NEVER exist (ADR-020).
 
 Phase boundaries in one line each:
 
-- **Phase 2** — middleware, panic recovery, header lookup, auth helpers.
+- **Phase 2** — middleware (delivered), route organisation, header lookup,
+  the typed error observer, the built-in logger and request-ID middleware.
+  No panic recovery — Odin has no recoverable panic (ADR-020).
 - **Phase 3** — route groups, typed application state, configurable limits and
   read/write timeouts.
 - **Phase 4** — graceful shutdown with a deadline, security hardening.

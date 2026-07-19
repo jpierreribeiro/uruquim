@@ -467,49 +467,50 @@ list_users :: proc(ctx: ^web.Context) {
 }
 ```
 
-## Middleware (Phase 2 — unavailable in Phase 1)
+## Middleware (delivered in Phase 2, WP17)
 
-> Available from Phase 2. It does not exist in Phase 1. CORS is a Phase-4
-> built-in.
+**Every `web.use` comes before the first route, and this is enforced**: `use`
+after any registration — or after the first dispatched request — rejects the
+whole application fail-closed (every request answers `500`, `web.serve`
+refuses to start, a diagnostic names the unprotectable pattern). Ordering is a
+security boundary: the mis-ordered program the prototype measured served a
+protected route to an unauthenticated caller with a healthy `200`.
 
-Attach:
+Attach, one middleware per call, in the order they should run:
 
-<!-- phase: 2; unavailable -->
+<!-- fragment: phase2/middleware-use -->
 ```odin
-web.use(&app,
-	web.logger(),
-	web.recovery(),
-	web.cors(web.Cors_Config{
-		allowed_origins = {"https://example.com"},
-	}),
-)
+web.use(&app, require_auth) // before any route — the order is enforced
+web.get(&app, "/admin/users", list_users)
 ```
 
-Write (Phase 2, unavailable — a gate: allow or reject, then `web.next`):
+Write — an ordinary handler; allow by calling `web.next`, reject by responding
+and returning without it:
 
-<!-- phase: 2; unavailable -->
+<!-- fragment: phase2/middleware-guard -->
 ```odin
 require_auth :: proc(ctx: ^web.Context) {
-	token, found := web.bearer_token(ctx)
-	if !found {
-		web.unauthorized(ctx, "missing bearer token")
+	token, found := web.query(ctx, "token")
+	if !found || token != "expected" {
+		web.unauthorized(ctx, "authentication required")
 		return
 	}
-
-	if !auth.token_is_valid(token) {
-		web.unauthorized(ctx, "invalid bearer token")
-		return
-	}
-
 	web.next(ctx)
 }
 ```
 
-Returning without calling `web.next` short-circuits the chain (Phase 2, unavailable).
+(`web.bearer_token` is a later Phase-2 work package; until it lands, examples
+carry the credential in a query parameter.)
+
+Chains unwind in reverse order; code after `next` runs when the response is
+already committed — read there, never write. A second `next()` is a no-op.
+Middleware also observe the automatic `404`/`405`. Full contract:
+`docs/middleware.md`.
 
 Middleware gates requests, logs, and sets response metadata. It does NOT hand
 values to handlers — there is no `ctx.user_data`, no `locals`, no
-`map[string]any`, by design.
+`map[string]any`, by design. Recovery middleware does not exist and never
+will (ADR-020): Odin has no recoverable panic. CORS is a Phase-4 built-in.
 
 ## Auth / dependencies (Phase 2 — unavailable in Phase 1)
 
@@ -559,23 +560,23 @@ web.use(&admin, require_auth)
 Do not stack both on the same route — that duplicates validation. Pick the
 extractor when you need the user, the gate when you don't.
 
-## Route groups (Phase 3 — unavailable in Phase 1)
+## Route organisation (Phase 2, next work package — unavailable today)
 
-> Available from Phase 2. They do not exist in Phase 1.
+> `Router` and `mount` arrive with the next Phase-2 work package.
+> `web.group` is rejected and stays unavailable in every future phase
+> (ADR-024): once a Router can be mounted at a prefix, `group` would be a
+> second canonical way to do one operation.
 
 Explicit router values; no configuration callbacks:
 
-<!-- phase: 3; unavailable -->
+<!-- phase: 2; unavailable -->
 ```odin
-api := web.router("/api")
+api := web.router()
 
 web.get(&api, "/users", list_users)
 web.post(&api, "/users", create_user)
 
-admin := web.group(&api, "/admin", require_admin)
-web.get(&admin, "/stats", stats)
-
-web.mount(&app, &api)
+web.mount(&app, "/api", &api)
 ```
 
 ## Testing

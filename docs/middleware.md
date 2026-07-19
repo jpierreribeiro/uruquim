@@ -1,10 +1,129 @@
 # Middleware
 
-> Placeholder — the middleware surface starts in Phase 2; production
-> hardening middleware is completed in Phase 4. No middleware API exists in
-> Phase 1.
+Middleware arrived in Phase 2 (WP17): `web.use` registers it, `web.next` runs
+the rest of the chain. A middleware is an **ordinary handler** — the frozen
+`proc(ctx: ^web.Context)` shape. There is no `Middleware` type, no
+configuration object, and no second registration form.
 
-Will document: the `web.use` surface, exact ordering semantics (global →
-outer groups → inner groups → route → handler), onion/unwind behavior,
-short-circuiting, the built-in middleware catalog and their configs, and how
-to write custom middleware (a plain handler calling `web.next`).
+## Ordering is a security boundary — register `use` first
+
+Every `web.use` must come before the first route registration. This is
+**enforced, not advised**: `use` after any `get`/`post`/`put`/`patch`/`delete`
+— or after the first dispatched request — rejects the whole application
+fail-closed. Every request then answers `500`, `web.serve` refuses to start,
+and a diagnostic naming the first unprotectable pattern is logged.
+
+The rule exists because the alternative was measured. A prototype allowed this
+program, which reads as "my admin routes and my auth middleware" and looks
+correct:
+
+<!-- pseudocode: the rejected mis-ordered shape -->
+```odin
+web.get(&app, "/admin/users", admin_users) // looks protected. WAS NOT.
+web.use(&app, require_auth)
+web.get(&app, "/admin/keys", admin_keys)   // was protected.
+```
+
+`/admin/users` served its response — an authentication bypass with no error,
+no warning, and no runtime symptom, produced by moving one line. A rule
+enforced only by a paragraph is not enforced, so the framework refuses the
+program instead.
+
+The canonical shape:
+
+<!-- fragment: phase2/middleware-use -->
+```odin
+app := web.app()
+defer web.destroy(&app)
+
+web.use(&app, require_auth) // before any route — the order is enforced
+web.get(&app, "/admin/users", list_users)
+
+web.serve(&app, 8080)
+```
+
+## Writing middleware
+
+Call `web.next(ctx)` to run the rest of the chain — later middleware, then the
+route handler. Return **without** calling `next` to short-circuit: nothing
+downstream runs, and your response is what the client receives.
+
+<!-- fragment: phase2/middleware-guard -->
+```odin
+require_auth :: proc(ctx: ^web.Context) {
+	token, found := web.query(ctx, "token")
+	if !found || token != "expected" {
+		web.unauthorized(ctx, "authentication required")
+		return
+	}
+	web.next(ctx)
+}
+```
+
+(Request-header lookup is a later Phase-2 work package; until it lands, a
+credential travels as a query parameter in examples like this one.)
+
+## Execution order
+
+Middleware run in `use` order and unwind in exactly the reverse order — the
+chain is an onion:
+
+```text
+use(A); use(B); use(C); get("/x", H)   =>   A > B > C > H < C < B < A
+```
+
+Code after `next` runs as your frame resumes, which is what makes timing and
+"log the status we actually sent" possible:
+
+<!-- fragment: phase2/middleware-unwind -->
+```odin
+observe_outcome :: proc(ctx: ^web.Context) {
+	web.next(ctx)
+	// the request is fully answered here
+}
+```
+
+Rules you can rely on, each pinned by a test:
+
+- **After `next` returns, the response is committed.** A response attempt from
+  unwind code is rejected by the single-commit guard and the first response
+  survives byte-identically. Read on the way out; never write.
+- **A second `next()` call is a silent no-op.** The handler runs exactly once.
+- **`next()` from a route handler is a no-op** — the chain is exhausted.
+- **A middleware that neither calls `next` nor responds** leaves the response
+  uncommitted; the driver answers the standard `500`, exactly as it does for a
+  handler that forgot to respond.
+
+## Misses are observed
+
+App-level middleware run on **every** dispatch, including a `404` (no route)
+and a `405` (path known under another method). The automatic envelope and the
+`Allow` header are unchanged; your middleware simply sees the request enter
+and unwind. Once audit or rate-limit middleware exist, "misses are invisible"
+is exactly the hole an attacker probes — so they are not invisible.
+
+`web.bare()` keeps the same observation mechanism with no response policy: on
+a miss the chain runs, nothing is committed, and the driver's `500`
+finalization applies, as always under `bare()`.
+
+## Costs, stated plainly
+
+- Dispatch through a middleware chain allocates **zero** bytes; chains are
+  flattened once, at registration.
+- The machinery present but unused costs about 1.8 KiB of binary (measured;
+  see the WP17 record).
+- The chain runs by recursion: each middleware holds a stack frame while the
+  rest runs (~80 bytes each in a debug build, ~16 with `-o:speed`). The
+  practical depth bound is around one hundred thousand on the default stack —
+  and **exceeding it is a segfault, not a diagnostic**. A realistic
+  application registers fewer than twenty.
+
+## What does not exist
+
+- **No route-level middleware parameters.** The five registration signatures
+  are frozen; a route needing its own guard gets it when the `Router` work
+  package lands (route organisation is the next work package, Phase 2).
+- **No recovery middleware, ever.** Odin has no recoverable panic; a faulting
+  handler aborts the process (ADR-020). Run under a supervisor.
+- **No built-in catalog yet.** The logging and request-ID middleware are later
+  Phase-2 work packages.

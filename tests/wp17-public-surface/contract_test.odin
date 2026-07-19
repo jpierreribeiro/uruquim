@@ -14,8 +14,44 @@
 // tests' marks.
 package test_wp17_public
 
+import "core:log"
+import "core:strings"
 import "core:testing"
 import web "uruquim:web"
+
+// Tests that DELIBERATELY trigger a framework diagnostic (the ADR-019 poison
+// report, the driver 500) must swallow the expected `uruquim:` Error line:
+// the pinned test runner records Error-level log output as a test failure
+// (the WP6/WP8 idiom). Everything else is forwarded to the runner's logger.
+Quiet :: struct {
+	inner: log.Logger,
+}
+
+quiet_logger_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	record := (^Quiet)(data)
+	if level == .Error && strings.contains(text, "uruquim:") {
+		return
+	}
+	if record.inner.procedure != nil {
+		record.inner.procedure(record.inner.data, level, text, options, location)
+	}
+}
+
+quiet_logger :: proc(record: ^Quiet) -> log.Logger {
+	record.inner = context.logger
+	return log.Logger {
+		procedure = quiet_logger_proc,
+		data = rawptr(record),
+		lowest_level = .Debug,
+		options = context.logger.options,
+	}
+}
 
 NOT_FOUND_ENVELOPE :: `{"error":{"code":"not_found","message":"Route not found"}}`
 METHOD_NOT_ALLOWED_ENVELOPE :: `{"error":{"code":"method_not_allowed","message":"Method not allowed"}}`
@@ -176,6 +212,8 @@ wp17_public_middleware_observe_a_404_and_a_405 :: proc(t: ^testing.T) {
 wp17_public_bare_miss_is_observed_and_stays_unanswered :: proc(t: ^testing.T) {
 	sink: Sink
 	context.user_ptr = &sink
+	quiet: Quiet
+	context.logger = quiet_logger(&quiet)
 
 	a := web.bare()
 	defer web.destroy(&a)
@@ -196,6 +234,9 @@ wp17_public_bare_miss_is_observed_and_stays_unanswered :: proc(t: ^testing.T) {
 
 @(test)
 wp17_mis_ordered_auth_program_does_not_serve_the_protected_route :: proc(t: ^testing.T) {
+	quiet: Quiet
+	context.logger = quiet_logger(&quiet)
+
 	a := web.app()
 	defer web.destroy(&a)
 
