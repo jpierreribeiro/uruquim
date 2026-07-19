@@ -1,53 +1,51 @@
-// WP1 — COMPILING PUBLIC API SKELETON. NO HTTP BEHAVIOR.
+// WP4 — ROUTE REGISTRATION: the five public Phase-1 registration procedures.
 //
-// This file declares the five Phase-1 route registration procedures. It stores
-// no route, validates no pattern, and dispatches nothing. Route groups
-// (`router`, `group`, `mount`) and middleware (`use`, `next`) are Phase 2 and
-// are deliberately absent.
+// Each one is a single delegation to the package-private `route_register`
+// (web/dispatch_table.odin), so there is exactly one place where a route is
+// cloned, classified and stored. Matching and dispatch live in
+// web/dispatch_match.odin.
+//
+// Route groups (`router`, `group`, `mount`) and middleware (`use`, `next`) are
+// Phase 2 and are deliberately absent.
 package web
 
 // get registers a handler for GET requests matching `pattern`.
 //
-// `pattern` is a route pattern such as "/users" or "/users/:id", not a
-// concrete request path.
+// `pattern` is a route pattern such as "/users" or "/users/:id", not a concrete
+// request path. It must begin with `/`; `/` itself is a valid pattern; a
+// `:param` occupies exactly one whole path segment, and the Phase-1 dispatcher
+// supports at most one per pattern. There is no wildcard.
 //
-// WP1 STUB: the registration is discarded. WP4 introduces the dispatch table,
-// pattern validation, static-over-parameter precedence, and conflict detection.
+// OWNERSHIP: `pattern` is COPIED. The App owns its copy until `destroy`, so the
+// caller may reuse or free its own storage immediately after registering.
+//
+// MATCHING: paths are compared segment by segment, with NO normalization —
+// `/users` and `/users/` are different patterns, and percent-encoding and dot
+// segments are not decoded. A static route always wins over a parametric one
+// that also matches, regardless of which was registered first. Registration
+// conflicts are not diagnosed in Phase 1; that, and the normalization policy,
+// belong to Phase 3.
 get :: proc(a: ^App, pattern: string, handler: Handler) {
+	route_register(a, .GET, pattern, handler)
 }
 
-// post registers a handler for POST requests matching `pattern`.
-//
-// WP1 STUB: the registration is discarded. See `get`.
+// post registers a handler for POST requests matching `pattern`. See `get` for
+// the pattern, ownership and matching rules.
 post :: proc(a: ^App, pattern: string, handler: Handler) {
+	route_register(a, .POST, pattern, handler)
 }
 
-// put registers a handler for PUT requests matching `pattern`.
-//
-// WP1 STUB: the registration is discarded. See `get`.
+// put registers a handler for PUT requests matching `pattern`. See `get`.
 put :: proc(a: ^App, pattern: string, handler: Handler) {
+	route_register(a, .PUT, pattern, handler)
 }
 
-// patch registers a handler for PATCH requests matching `pattern`.
-//
-// WP1 STUB: the registration is discarded. See `get`.
+// patch registers a handler for PATCH requests matching `pattern`. See `get`.
 patch :: proc(a: ^App, pattern: string, handler: Handler) {
+	route_register(a, .PATCH, pattern, handler)
 }
 
-// delete registers a handler for DELETE requests matching `pattern`.
-//
-// WP1 STUB: the registration is discarded. See `get`.
+// delete registers a handler for DELETE requests matching `pattern`. See `get`.
 delete :: proc(a: ^App, pattern: string, handler: Handler) {
-}
-
-// dispatch is the core-private request dispatcher.
-//
-// WP3 STUB: it performs NO routing and produces NO automatic response — it
-// leaves `ctx` exactly as it received it, with the response uncommitted. It
-// exists so `web.test_request` has a real core dispatch call to drive; WP4
-// replaces this body with the route table, `:param` matching, the standardized
-// 404, and the minimal 405 with its `Allow` header. Deliberately NOT a fake
-// 200/echo: an uncommitted response is the honest WP3 result.
-@(private)
-dispatch :: proc(ctx: ^Context) {
+	route_register(a, .DELETE, pattern, handler)
 }

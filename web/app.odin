@@ -23,9 +23,22 @@ App :: struct {
 // this for safety guarantees (ADR-008, "Scope of the guarantee").
 @(private)
 App_Internal :: struct {
-	// WP1 skeleton marker. No route table, allocator, default policy, or
-	// production transport is wired yet; those belong to WP4, WP7 and WP8.
-	skeleton_only: bool,
+	// WP4 route table: a flat array of registered routes, owned by the App.
+	// It is LAZY — this zero value holds no allocation, so `app()`/`bare()`
+	// still allocate nothing and an application that registers no route never
+	// creates a table. `destroy` frees it, and every pattern it owns, exactly
+	// once. The entry type and the whole matching strategy are internal: Phase 3
+	// replaces this table wholesale without any public change.
+	routes: [dynamic]Route_Entry,
+
+	// WP4 default-policy flag: whether dispatch installs the automatic 404 and
+	// 405. `app()` sets it; `bare()` leaves it false. It is the mechanism behind
+	// the documented app()/bare() distinction, and it deliberately is NOT
+	// middleware — Phase 2 owns that.
+	//
+	// The remaining Phase-1 defaults are not here yet: the fixed 4 MiB body cap
+	// is WP7, and no allocator or production transport is wired before WP8.
+	default_responses: bool,
 
 	// WP3 test-support state (the in-memory `web.test_request` transport). It is
 	// LAZY: this zero value holds no allocation, so `app()`/`bare()` allocate
@@ -38,21 +51,27 @@ App_Internal :: struct {
 
 // app creates an application with the progressive Phase-1 defaults.
 //
-// WP1 STUB: returns a zero App and configures nothing. The Phase-1 default
-// policy contract — fixed 4 MiB request-body cap, standardized 404, and
-// minimal 405 with an `Allow` header — is delivered by WP4 and WP7. Recovery is
-// Phase 2; configurable limits and timeouts are Phase 3; graceful shutdown
-// hardening is Phase 4. This stub claims none of them.
+// WP4 delivers two of them: a consistent 404 for an unmatched path, and a
+// minimal 405 — with an exact `Allow` header listing the methods registered for
+// that path — when the path exists under a different method. Both bodies are
+// EMPTY until WP6 defines the standardized error envelope.
+//
+// Still NOT delivered, and not claimed: the fixed 4 MiB request-body cap (WP7),
+// panic recovery (Phase 2), configurable limits and read/write timeouts
+// (Phase 3), and graceful shutdown hardening (Phase 4).
+//
+// It allocates nothing. The route table is created on the first registration.
 app :: proc() -> App {
-	return App{}
+	return App{private = App_Internal{default_responses = true}}
 }
 
 // bare creates an application with none of the default middleware or policies,
 // for callers that want full control.
 //
-// WP1 STUB: returns a zero App. Because `app` installs no defaults yet either,
-// the two are not yet observably different; WP4 onward makes the distinction
-// real.
+// WP4 makes the distinction real for the first time. A `bare` application still
+// dispatches every route it registers, but it installs NO automatic 404 and no
+// automatic 405: an unmatched request simply leaves the response uncommitted,
+// and deciding what to do about it belongs to the caller.
 bare :: proc() -> App {
 	return App{}
 }
@@ -61,10 +80,17 @@ bare :: proc() -> App {
 //
 // Call it exactly once, on the original value returned by `app` or `bare`.
 //
+// WP4: releases the route table and every pattern the App cloned at
+// registration, exactly once. It is a no-op for an application that registered
+// no route.
+//
 // WP3: releases the test-support state if `test_request` was ever used, exactly
 // once. It remains a no-op for an application that never called `test_request`
-// — the recorder is inactive and frees nothing. There is still no production
-// transport, route table, or allocator to release; those arrive in WP4/WP7/WP8.
+// — the recorder is inactive and frees nothing.
+//
+// There is still no production transport or allocator to release; those arrive
+// in WP7/WP8.
 destroy :: proc(a: ^App) {
+	routes_destroy(a)
 	testing.destroy(&a.private.test_transport)
 }

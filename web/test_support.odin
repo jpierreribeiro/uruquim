@@ -40,10 +40,14 @@ Recorded_Response :: struct {
 // test_request drives one in-memory request through dispatch and returns the
 // recorded response, WITHOUT binding a socket or port.
 //
-// WP3 ships no router: the private `dispatch` stub commits nothing, so the
-// returned `Recorded_Response` carries the ZERO status and an EMPTY body. That
-// is intentional — there is no fabricated 200 and no echoed path. WP4 fills in
-// `dispatch` and this same procedure begins returning real routed responses.
+// WP4 wired routing, so this now returns REAL routed results: a registered
+// route's handler runs, an unknown path on `web.app()` produces a 404, and a
+// path registered under another method produces a 405. Only `web.destroy` and
+// the recorder stand between the caller and the framework's own dispatch.
+//
+// A handler that responds with nothing still yields the ZERO status and an
+// EMPTY body — the framework does not fabricate a 200 on a handler's behalf.
+// The public responders that would fill in a body are WP6.
 //
 // The App's test-support state is created LAZILY here, on the first call, using
 // `context.allocator`. An application that never calls `test_request` allocates
@@ -62,9 +66,10 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 		path   = req.path,
 	}
 
-	// 3. The core-private dispatch stub. WP3 has no routing, so it commits
-	//    nothing and the response stays uncommitted.
-	dispatch(&ctx)
+	// 3. The core-private dispatcher. It takes the App explicitly, because the
+	//    route table is owned by the App and the Context holds no back-pointer
+	//    to it.
+	dispatch(a, &ctx)
 
 	// 4. The facade hands the internal Response to the recorder as neutral
 	//    values. The header conversion is transient (temp allocator); the
@@ -82,28 +87,6 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 
 	// 5. The facade returns the public shape.
 	return Recorded_Response{status = Status(status_int), body = body}
-}
-
-// method_token converts a `Method` back to its on-the-wire token for the neutral
-// request builder. It is the inverse of `method_from_token` for the Phase-1 set;
-// `.UNKNOWN` maps to the empty token, which converts back to `.UNKNOWN`.
-@(private)
-method_token :: proc(method: Method) -> string {
-	switch method {
-	case .GET:
-		return "GET"
-	case .POST:
-		return "POST"
-	case .PUT:
-		return "PUT"
-	case .PATCH:
-		return "PATCH"
-	case .DELETE:
-		return "DELETE"
-	case .UNKNOWN:
-		return ""
-	}
-	return ""
 }
 
 // response_headers_neutral converts the framework's private header pairs into

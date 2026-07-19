@@ -49,30 +49,55 @@ wp4_run :: proc(a: ^App, ctx: ^Context, method: Method, path: string) {
 	dispatch(a, ctx)
 }
 
-// A handler that records that it ran, and how many times. Each test owns its
-// own counter: the pinned test runner executes tests in parallel, so a shared
-// counter would race.
-
-@(private = "file")
-wp4_static_hits: int
+// Handlers that commit a DISTINGUISHING body. Which one ran is then read back
+// from the test's own Context, which is race-free: the pinned runner executes
+// tests in parallel, so any counter shared by two tests would race.
+//
+// Only ONE handler can run per dispatch — `dispatch` returns immediately after
+// invoking it — so the recorded body identifies the winner unambiguously.
 
 @(private = "file")
 wp4_static_handler :: proc(ctx: ^Context) {
-	wp4_static_hits += 1
 	response_commit(&ctx.private.response, .OK, nil, transmute([]u8)string("static"))
 }
 
 @(private = "file")
-wp4_param_hits: int
-
-@(private = "file")
 wp4_param_handler :: proc(ctx: ^Context) {
-	wp4_param_hits += 1
 	response_commit(&ctx.private.response, .OK, nil, transmute([]u8)string("param"))
 }
 
 @(private = "file")
 wp4_noop_handler :: proc(ctx: ^Context) {
+}
+
+// Invocation counters. Each belongs to EXACTLY ONE test, so no two parallel
+// tests ever touch the same counter.
+
+@(private = "file")
+wp4_once_hits: int
+
+@(private = "file")
+wp4_once_handler :: proc(ctx: ^Context) {
+	wp4_once_hits += 1
+	response_commit(&ctx.private.response, .OK, nil, transmute([]u8)string("static"))
+}
+
+@(private = "file")
+wp4_bare_hits: int
+
+@(private = "file")
+wp4_bare_handler :: proc(ctx: ^Context) {
+	wp4_bare_hits += 1
+	response_commit(&ctx.private.response, .OK, nil, transmute([]u8)string("static"))
+}
+
+@(private = "file")
+wp4_root_hits: int
+
+@(private = "file")
+wp4_root_handler :: proc(ctx: ^Context) {
+	wp4_root_hits += 1
+	response_commit(&ctx.private.response, .OK, nil, transmute([]u8)string("static"))
 }
 
 // ---------------------------------------------------------------------------
@@ -84,15 +109,15 @@ wp4_static_route_matches_and_runs_handler_once :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
 
-	// A closure-free handler cannot capture `hits`, so this test uses the
-	// file-level counter and asserts on its delta.
-	before := wp4_static_hits
-	get(&a, "/health", wp4_static_handler)
+	// A handler cannot capture a local, so the count lives in a counter this
+	// test is the only user of.
+	before := wp4_once_hits
+	get(&a, "/health", wp4_once_handler)
 
 	ctx: Context
 	wp4_run(&a, &ctx, .GET, "/health")
 
-	testing.expect_value(t, wp4_static_hits - before, 1)
+	testing.expect_value(t, wp4_once_hits - before, 1)
 	testing.expect(t, ctx.private.response.committed, "the handler must have responded")
 	testing.expect_value(t, ctx.private.response.status, Status.OK)
 	testing.expect_value(t, string(ctx.private.response.body), "static")
@@ -214,27 +239,22 @@ wp4_static_beats_param_when_static_registered_first :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
 
-	before_static := wp4_static_hits
-	before_param := wp4_param_hits
-
 	get(&a, "/users/me", wp4_static_handler)
 	get(&a, "/users/:id", wp4_param_handler)
 
 	ctx: Context
 	wp4_run(&a, &ctx, .GET, "/users/me")
 
+	// Only one handler runs per dispatch, so the committed body names the
+	// winner. Reading it from this test's own Context keeps the assertion free
+	// of any state shared with the parallel sibling test below.
 	testing.expect_value(t, string(ctx.private.response.body), "static")
-	testing.expect_value(t, wp4_static_hits - before_static, 1)
-	testing.expect_value(t, wp4_param_hits - before_param, 0)
 }
 
 @(test)
 wp4_static_beats_param_when_param_registered_first :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
-
-	before_static := wp4_static_hits
-	before_param := wp4_param_hits
 
 	// The reverse order. A table that simply returned its first match would
 	// pass the previous test and fail this one.
@@ -245,14 +265,12 @@ wp4_static_beats_param_when_param_registered_first :: proc(t: ^testing.T) {
 	wp4_run(&a, &ctx, .GET, "/users/me")
 
 	testing.expect_value(t, string(ctx.private.response.body), "static")
-	testing.expect_value(t, wp4_static_hits - before_static, 1)
-	testing.expect_value(t, wp4_param_hits - before_param, 0)
 
-	// A path the static route does not cover still reaches the parametric one.
+	// A path the static route does not cover still reaches the parametric one,
+	// so the static-first scan does not simply hide parametric routes.
 	ctx2: Context
 	wp4_run(&a, &ctx2, .GET, "/users/42")
 	testing.expect_value(t, string(ctx2.private.response.body), "param")
-	testing.expect_value(t, wp4_param_hits - before_param, 1)
 }
 
 // ---------------------------------------------------------------------------
@@ -491,13 +509,13 @@ wp4_bare_dispatches_registered_routes :: proc(t: ^testing.T) {
 	a := bare()
 	defer destroy(&a)
 
-	before := wp4_static_hits
-	get(&a, "/health", wp4_static_handler)
+	before := wp4_bare_hits
+	get(&a, "/health", wp4_bare_handler)
 
 	ctx: Context
 	wp4_run(&a, &ctx, .GET, "/health")
 
-	testing.expect_value(t, wp4_static_hits - before, 1)
+	testing.expect_value(t, wp4_bare_hits - before, 1)
 	testing.expect_value(t, ctx.private.response.status, Status.OK)
 }
 
@@ -648,14 +666,16 @@ wp4_static_pattern_is_app_owned_too :: proc(t: ^testing.T) {
 	defer delete_slice(pattern)
 	copy(pattern, transmute([]u8)string("/health"))
 
-	get(&a, string(pattern), wp4_noop_handler)
+	get(&a, string(pattern), wp4_static_handler)
 	slice.fill(pattern, '#')
 
 	ctx: Context
 	wp4_run(&a, &ctx, .GET, "/health")
 
+	// The route still matched, so the App kept its own copy of "/health"
+	// instead of a view that now reads "#######".
+	testing.expect_value(t, string(ctx.private.response.body), "static")
 	testing.expect_value(t, ctx.private.response.status, Status.OK)
-	testing.expect(t, ctx.private.response.committed)
 }
 
 // ---------------------------------------------------------------------------
@@ -750,13 +770,13 @@ wp4_root_path_is_matchable :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
 
-	before := wp4_static_hits
-	get(&a, "/", wp4_static_handler)
+	before := wp4_root_hits
+	get(&a, "/", wp4_root_handler)
 
 	ctx: Context
 	wp4_run(&a, &ctx, .GET, "/")
 
-	testing.expect_value(t, wp4_static_hits - before, 1)
+	testing.expect_value(t, wp4_root_hits - before, 1)
 	testing.expect_value(t, ctx.private.response.status, Status.OK)
 }
 

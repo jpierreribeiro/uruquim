@@ -37,16 +37,45 @@ import web "uruquim:web"
 // The public responders do not work yet (WP6), so a handler cannot commit a
 // response from outside the package. A side-effect counter is therefore the
 // honest way to observe that dispatch reached the handler.
+//
+// Each counter belongs to EXACTLY ONE test. The pinned runner executes tests in
+// parallel, so a counter shared by two of them would make both their deltas
+// race — and a routing test that is flaky under parallelism is worse than no
+// routing test, because it teaches the next reader to re-run until green.
 
-wp4_get_hits: int
-wp4_post_hits: int
+wp4_once_hits: int
 
-wp4_get_handler :: proc(ctx: ^web.Context) {
-	wp4_get_hits += 1
+wp4_once_handler :: proc(ctx: ^web.Context) {
+	wp4_once_hits += 1
 }
 
-wp4_post_handler :: proc(ctx: ^web.Context) {
-	wp4_post_hits += 1
+wp4_iso_get_hits: int
+wp4_iso_post_hits: int
+
+wp4_iso_get_handler :: proc(ctx: ^web.Context) {
+	wp4_iso_get_hits += 1
+}
+
+wp4_iso_post_handler :: proc(ctx: ^web.Context) {
+	wp4_iso_post_hits += 1
+}
+
+wp4_param_hits: int
+
+wp4_param_handler :: proc(ctx: ^web.Context) {
+	wp4_param_hits += 1
+}
+
+wp4_bare_hits: int
+
+wp4_bare_handler :: proc(ctx: ^web.Context) {
+	wp4_bare_hits += 1
+}
+
+wp4_owned_hits: int
+
+wp4_owned_handler :: proc(ctx: ^web.Context) {
+	wp4_owned_hits += 1
 }
 
 wp4_silent_handler :: proc(ctx: ^web.Context) {
@@ -62,12 +91,12 @@ wp4_registered_route_is_reached_exactly_once :: proc(t: ^testing.T) {
 	app := web.app()
 	defer web.destroy(&app)
 
-	before := wp4_get_hits
-	web.get(&app, "/health", wp4_get_handler)
+	before := wp4_once_hits
+	web.get(&app, "/health", wp4_once_handler)
 
 	res := web.test_request(&app, .GET, "/health")
 
-	testing.expect_value(t, wp4_get_hits - before, 1)
+	testing.expect_value(t, wp4_once_hits - before, 1)
 
 	// The handler responded with nothing, so the response stays UNCOMMITTED:
 	// zero status, empty body. The framework does not invent a 200 for a
@@ -86,19 +115,19 @@ wp4_methods_are_isolated_publicly :: proc(t: ^testing.T) {
 	app := web.app()
 	defer web.destroy(&app)
 
-	before_get := wp4_get_hits
-	before_post := wp4_post_hits
+	before_get := wp4_iso_get_hits
+	before_post := wp4_iso_post_hits
 
-	web.get(&app, "/users", wp4_get_handler)
-	web.post(&app, "/users", wp4_post_handler)
+	web.get(&app, "/users", wp4_iso_get_handler)
+	web.post(&app, "/users", wp4_iso_post_handler)
 
 	web.test_request(&app, .GET, "/users")
-	testing.expect_value(t, wp4_get_hits - before_get, 1)
-	testing.expect_value(t, wp4_post_hits - before_post, 0)
+	testing.expect_value(t, wp4_iso_get_hits - before_get, 1)
+	testing.expect_value(t, wp4_iso_post_hits - before_post, 0)
 
 	web.test_request(&app, .POST, "/users")
-	testing.expect_value(t, wp4_get_hits - before_get, 1)
-	testing.expect_value(t, wp4_post_hits - before_post, 1)
+	testing.expect_value(t, wp4_iso_get_hits - before_get, 1)
+	testing.expect_value(t, wp4_iso_post_hits - before_post, 1)
 }
 
 @(test)
@@ -132,14 +161,14 @@ wp4_param_route_matches :: proc(t: ^testing.T) {
 	app := web.app()
 	defer web.destroy(&app)
 
-	before := wp4_get_hits
-	web.get(&app, "/users/:id", wp4_get_handler)
+	before := wp4_param_hits
+	web.get(&app, "/users/:id", wp4_param_handler)
 
 	web.test_request(&app, .GET, "/users/42")
-	testing.expect_value(t, wp4_get_hits - before, 1)
+	testing.expect_value(t, wp4_param_hits - before, 1)
 
 	web.test_request(&app, .GET, "/users/anything-else")
-	testing.expect_value(t, wp4_get_hits - before, 2)
+	testing.expect_value(t, wp4_param_hits - before, 2)
 }
 
 // ---------------------------------------------------------------------------
@@ -219,12 +248,12 @@ wp4_bare_dispatches_but_installs_no_defaults :: proc(t: ^testing.T) {
 	app := web.bare()
 	defer web.destroy(&app)
 
-	before := wp4_get_hits
-	web.get(&app, "/health", wp4_get_handler)
+	before := wp4_bare_hits
+	web.get(&app, "/health", wp4_bare_handler)
 
 	// Registered routes still dispatch.
 	web.test_request(&app, .GET, "/health")
-	testing.expect_value(t, wp4_get_hits - before, 1)
+	testing.expect_value(t, wp4_bare_hits - before, 1)
 
 	zero: web.Status
 
@@ -277,8 +306,8 @@ wp4_app_owns_its_pattern_copy :: proc(t: ^testing.T) {
 	defer delete(pattern)
 	copy(pattern, transmute([]u8)string("/users/:id"))
 
-	before := wp4_get_hits
-	web.get(&app, string(pattern), wp4_get_handler)
+	before := wp4_owned_hits
+	web.get(&app, string(pattern), wp4_owned_handler)
 
 	// The caller reuses its buffer immediately after registering. An App that
 	// silently retained the caller's view would now hold a dangling pattern.
@@ -287,7 +316,7 @@ wp4_app_owns_its_pattern_copy :: proc(t: ^testing.T) {
 	}
 
 	web.test_request(&app, .GET, "/users/42")
-	testing.expect_value(t, wp4_get_hits - before, 1)
+	testing.expect_value(t, wp4_owned_hits - before, 1)
 }
 
 // ---------------------------------------------------------------------------
