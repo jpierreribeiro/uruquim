@@ -625,9 +625,63 @@ runs on the pinned toolchain.
 - **Deps.** WP3/WP8. **Rollback.** suite is additive.
 
 ## WP10 — Phase 1 documentation and examples
+- **Execution status.** **COMPLETE** — verified by a full green
+  `build/check.sh` on dev-2026-07-nightly:819fdc7 (exit 0, PASS=10 FAIL=0
+  SKIP=0, ledgers 32 + 2 = 34). The three examples compile in the gate, the
+  38 Odin blocks in the active documents are classified, and documentation
+  parity is enforced against the canonical inventory. `git diff origin/main --
+  web vendor` is empty: no production code was touched.
+- **What was repaired.** The README still described WP1/WP2 as the current
+  state and said the project "is still not a functional HTTP server";
+  `docs/quick-start.md` was a placeholder; `docs/ai-context.md` contradicted
+  itself about a silent handler (zero status vs 500), called shipped responders
+  stubs, and recommended `serve_with`, which does not exist;
+  `docs/canonical-patterns.md` carried the same `serve_with` recommendation and
+  a pre-WP2 status header.
+- **Cost.** Documentation and examples only: no byte is added to any
+  application binary. The gate grew from ~89 s to ~118 s (+29 s) for the three
+  example builds, the doc-fixture test and the parity scan. Example binaries
+  total ~2.85 MB and are built in a `mktemp` directory removed even on failure.
 - **Objective.** examples 01-03 compile in the verification gate; ai-context
   parity; AMEND-3/-4
   applied to docs.
+- **Decisions ratified in WP10.**
+  - **D1 — every Odin block in an active document is CLASSIFIED.** A reader (or
+    an agent) must never have to guess whether a snippet is copyable today.
+    Each block carries exactly one HTML marker immediately above it:
+    - `<!-- compile: examples/<dir>/main.odin -->` — a complete program that
+      IS the named example file;
+    - `<!-- fragment: phase1/<name> -->` — a Phase-1 fragment, covered by a
+      compilable fixture in `tests/wp10-doc-fixtures/`;
+    - `<!-- phase: N; unavailable -->` — future API, not usable today;
+    - `<!-- pseudocode: <topic> -->` — deliberately not copyable.
+    An unclassified Odin block fails the gate. Documents that are themselves
+    future placeholders (`cookbook`, `middleware`, `memory-model`) are marked as
+    such at the top and are not scanned as active.
+  - **D2 — parity reads the CANONICAL inventory, never a second list.**
+    `build/check_docs.sh` extracts the 32 application symbols and the 2
+    test-support symbols from `build/check_public_api.sh` itself, so the
+    reference cannot drift from the package while both look green. It asserts
+    every application symbol appears in the active Phase-1 reference, that the
+    two test-support symbols appear only in their own section, and that no
+    future-phase name appears inside an active section.
+  - **D3 — the three examples ARE the compile contract.** `examples/` contains
+    exactly `01-hello-world`, `02-json-api`, `03-route-params`. Each is a
+    self-contained `package main` compiled by `build/check_examples.sh` into a
+    `mktemp` directory that is removed even on failure — no binary is ever
+    written inside `examples/` or committed. Examples are compiled, never RUN:
+    `web.serve` blocks.
+  - **D4 — Phase-1 documentation states delivered behavior only (AMEND-3).**
+    `web.app()` today gives: the standardized 404, the minimal 405 with `Allow`,
+    a buffered body with a fixed 4 MiB cap, the WP9 framing rejections, and a
+    working bootstrap server. Panic recovery (Phase 2), configurable limits and
+    read/write timeouts (Phase 3), and graceful shutdown with a deadline
+    (Phase 4) are named as future in the same breath. The delivered set is never
+    described as "production-ready".
+  - **D5 — WP10 changes no production code.** `git diff origin/main -- web
+    vendor` must be empty. If a document cannot be written truthfully without a
+    production fix, the work package STOPS and reports CHANGES_REQUIRED rather
+    than documenting incorrect behavior.
 - **Spec.** §AI-Friendly API Rules; audit AMEND-3/-4; planning/public-api-guardrails.md G-08/G-09.
 - **Files.** `examples/01-hello-world`, `02-json-api`, `03-route-params`;
   doc edits (proposed, not part of code freeze).

@@ -48,6 +48,8 @@ bash -n "$URUQUIM_ROOT/build/check_test.sh"
 bash -n "$URUQUIM_ROOT/build/check_public_api.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
 bash -n "$URUQUIM_ROOT/build/check_g11_teardown.sh"
+bash -n "$URUQUIM_ROOT/build/check_examples.sh"
+bash -n "$URUQUIM_ROOT/build/check_docs.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -520,6 +522,24 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
 # actually asserted.
 echo "--- G-11 test-support teardown cost (nm) ---"
 env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_g11_teardown.sh"
+
+# WP10 — the three Phase-1 examples are part of the compatibility contract:
+# they compile in this gate, or the documentation that teaches them is wrong.
+# WP10 — the documentation fragments compile. A `<!-- fragment: -->` marker in a
+# doc claims the snippet is real Phase-1 code; this is what makes that true.
+echo "--- WP10 documentation fragments (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp10-doc-fixtures" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp10-doc-fixtures"
+
+echo "--- WP10 example programs (odin build) ---"
+env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_examples.sh"
+
+# WP10 — documentation parity. It reads the canonical ledger out of
+# check_public_api.sh, so the reference cannot drift from the package while both
+# still look green.
+echo "--- WP10 documentation parity ---"
+bash "$URUQUIM_ROOT/build/check_docs.sh"
 
 echo "--- Phase-1 public API anti-accretion contract ---"
 bash "$URUQUIM_ROOT/build/check_public_api.sh"

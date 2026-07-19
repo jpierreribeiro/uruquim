@@ -1,149 +1,237 @@
 # Error Responses
 
-> Phase-1 wire contract ratified at the 2026-07-18 Spec Gate; full captured
-> examples are completed with WP6/WP10 implementation evidence.
->
-> **Implemented as of WP6:** the two extractor errors (`invalid_path_parameter`,
-> `invalid_query_parameter`) plus every general responder —
-> `bad_request`, `unauthorized`, `forbidden`, `not_found`, `internal_error` —
-> and the automatic `not_found` (404) and `method_not_allowed` (405). All carry
-> the standardized envelope and a `Content-Type: application/json`, and all are
-> test-pinned by parsing the emitted bytes with the official `core:encoding/json`
-> parser in strict JSON mode.
->
-> **Implemented as of WP7:** `invalid_json` (HTTP 400) and `body_too_large`
-> (HTTP 413), produced by `web.body`. All Phase-1 error codes now exist.
-
-Documents the standardized error envelope (part of the compatibility
-contract):
+Every error Uruquim produces is JSON, with one envelope shape:
 
 ```json
-{
-  "error": {
-    "code": "invalid_path_parameter",
-    "message": "Path parameter 'id' must be an integer",
-    "field": "id"
-  }
-}
+{"error": {"code": "...", "message": "...", "field": "..."}}
 ```
 
-`field` is optional and is omitted when no concrete input field caused the
-error. It is present for errors such as `invalid_path_parameter` and
-`invalid_query_parameter`; it is absent for general 404/405/500 responses.
+- `code` is stable. Match on it, not on the message.
+- `message` is human-readable and may be reworded.
+- `field` is present **only** when a specific input field caused the error —
+  that is, only for `invalid_path_parameter` and `invalid_query_parameter`. For
+  every other code it is **omitted entirely**: never `null`, never `""`.
 
-Initial code list: `invalid_path_parameter`, `invalid_query_parameter`,
-`invalid_json`, `body_too_large`, `bad_request`, `not_found`,
-`method_not_allowed`, `unauthorized`, `forbidden`, `internal_error`.
+Every error carries `Content-Type: application/json`.
 
-> **Amendment (WP6, D4).** `bad_request` was added to the list above. The
-> public helper `web.bad_request(ctx, message)` was ratified in WP1 and needs a
-> wire code like every other error responder; the original list simply omitted
-> one. This adds no public symbol and changes no signature.
+All examples below were captured from a running server.
 
-Phase-1 policy:
+## The ten Phase-1 codes
 
-- request bodies larger than the fixed 4 MiB cap produce `body_too_large`;
-- a known path registered for another method produces
-  `method_not_allowed` (HTTP 405) and the required `Allow` header;
-- a JSON marshal failure is logged server-side before one complete
-  `internal_error` response is written, and only before commit; partial JSON
-  is forbidden.
-
-## Implemented in WP7
-
-`web.body(ctx, &dst)` decodes the JSON request body into `dst` and returns a
-bool. On failure it commits the response itself; the handler just returns.
-
-| Condition | HTTP | `code` | `message` |
+| `code` | HTTP | Producer | `field`? |
 |---|---|---|---|
-| empty body, malformed JSON, or rejected JSON5 | 400 | `invalid_json` | `Request body must be valid JSON` |
-| body larger than 4 MiB | 413 | `body_too_large` | `Request body exceeds the 4 MiB limit` |
+| `invalid_path_parameter` | 400 | `web.path_int` | yes |
+| `invalid_query_parameter` | 400 | `web.query_int`, `web.query_int_or` | yes |
+| `invalid_json` | 400 | `web.body` | no |
+| `body_too_large` | 413 | `web.body` (enforced by the transport) | no |
+| `bad_request` | 400 | `web.bad_request` | no |
+| `unauthorized` | 401 | `web.unauthorized` | no |
+| `forbidden` | 403 | `web.forbidden` | no |
+| `not_found` | 404 | `web.not_found`, and the automatic route miss | no |
+| `method_not_allowed` | 405 | automatic, when the path exists under another method | no |
+| `internal_error` | 500 | `web.internal_error`, and the framework itself | no |
 
-Neither carries a `field`. Notes:
+---
 
-- **Values, ownership, lifetime.** Decoded nested strings and slices live in a
-  request-lifetime arena and are valid until the request ends. Copy explicitly
-  to keep them (the same rule as every request view). After `web.body` returns
-  **false**, the partial content of `dst` is UNDEFINED and must be discarded.
-- **Single consumer (ADR-012).** A request body has exactly one typed consumer.
-  The capability is spent the moment the first `web.body` call begins — even if
-  that call fails — so a second call decodes nothing: it logs a server-side
-  diagnostic and produces a 500 only if no response is committed yet, otherwise
-  it leaves the first response untouched. Never a double commit, no replay.
-- **The 4 MiB cap is fixed**, checked before the parser and before any arena is
-  created. Exactly 4 MiB (4·1024·1024 bytes) is accepted; only a strictly
-  larger body is a 413. A per-application limit is a later-phase feature.
-- **Strict JSON.** Decoding uses strict JSON: comments, unquoted keys and
-  single-quoted strings are rejected as `invalid_json`. (On the pinned toolchain
-  the parser leniently ignores any content AFTER a complete top-level value —
-  a trailing comma, a trailing comment, or trailing bytes; that is a documented
-  toolchain deviation, not a promise.)
-- **Client vs server faults.** Malformed JSON is the client's error → 400
-  `invalid_json`. Well-formed JSON that does not fit the destination type, or a
-  decoder-internal failure, is NOT shown as invalid JSON: it is logged on the
-  server and answered with `internal_error`/500.
+### `invalid_path_parameter` — 400
 
-## Implemented in WP5
+**Producer:** `web.path_int`. **Field:** the parameter name.
 
-Both codes are HTTP 400 and both always carry `field`. The exact messages:
+**Message:** `Path parameter '<name>' must be an integer`
 
-| Producer | Condition | `code` | `message` |
-|---|---|---|---|
-| `web.path_int` | absent, empty, malformed or out of range | `invalid_path_parameter` | `Path parameter '<name>' must be an integer` |
-| `web.query_int` | absent | `invalid_query_parameter` | `Query parameter '<name>' is required` |
-| `web.query_int`, `web.query_int_or` | present but not a valid integer | `invalid_query_parameter` | `Query parameter '<name>' must be an integer` |
-
-Captured example — `GET /users/banana` against `web.get(&app, "/users/:id", h)`
-where `h` calls `web.path_int(ctx, "id")`:
+Absent, empty, malformed and out-of-range all produce the SAME message. That is
+deliberate: distinguishing "the route never captured that name" would describe
+the server's own routing to the caller, and it is an application bug rather than
+something the client can fix.
 
 ```json
 {"error":{"code":"invalid_path_parameter","message":"Path parameter 'id' must be an integer","field":"id"}}
 ```
 
-Notes on the WP5 envelope specifically:
+Integers are strict decimal: an optional `-` then ASCII digits. `+5`, `0x10`,
+`1_000`, `1.5` and surrounding whitespace are all rejected.
 
-- The four path failure modes collapse into ONE message on purpose.
-  Distinguishing "absent" from "malformed" would describe the server's routing
-  to the caller: a name the handler asked for but the route never captured is
-  an application bug, not something the client can act on. The query case
-  distinguishes them because both are caller-fixable.
-- `field` carries the parameter name, JSON-escaped. Names are bounded at 64
-  escaped bytes; truncation lands on an escape boundary, so the envelope is
-  valid JSON for any name.
-- The response is committed through the single-commit guard, so continued
-  handler code cannot replace it, and an extractor that fails after a response
-  was already committed changes nothing.
-- **Amended in WP6:** these envelopes now carry `Content-Type: application/json`.
-  The body still lives on the fixed request-local buffer, so the WP5
-  allocation-free error path is unchanged.
+---
 
-## Implemented in WP6
+### `invalid_query_parameter` — 400
 
-Every general error responder, plus the two automatic errors. None carries a
-`field`. All carry `Content-Type: application/json`.
+**Producer:** `web.query_int` and `web.query_int_or`. **Field:** the parameter
+name.
 
-| Producer | HTTP | `code` | `message` |
-|---|---|---|---|
-| `web.bad_request(ctx, m)` | 400 | `bad_request` | `m`, verbatim |
-| `web.unauthorized(ctx, m)` | 401 | `unauthorized` | `m`, verbatim |
-| `web.forbidden(ctx, m)` | 403 | `forbidden` | `m`, verbatim |
-| `web.not_found(ctx, r)` | 404 | `not_found` | `Resource '<r>' not found` |
-| `web.internal_error(ctx)` | 500 | `internal_error` | `Internal server error` |
-| automatic (unknown path) | 404 | `not_found` | `Route not found` |
-| automatic (wrong method) | 405 | `method_not_allowed` | `Method not allowed` |
+Two messages, because both are things the caller can act on:
 
-Notes on the WP6 envelopes:
+| Condition | Message |
+|---|---|
+| absent (required by `query_int`) | `Query parameter '<name>' is required` |
+| present but not a valid integer | `Query parameter '<name>' must be an integer` |
 
-- The `message` of `bad_request`/`unauthorized`/`forbidden` is returned
-  VERBATIM, so pass a caller-facing explanation, never an internal diagnostic.
-  `internal_error` takes no message on purpose: failure detail is logged on the
-  server, never sent to the client.
-- `not_found` takes the resource NAME (`"user"`), not a full sentence.
-- The automatic 404/405 bodies are static constants; the responders that carry
-  arbitrary text render through the official encoder, which escapes the message.
-  All are validated as strict JSON in the tests.
-- Success responses: `web.json`/`web.ok`/`web.created` set
-  `Content-Type: application/json`; `web.text` sets
-  `text/plain; charset=utf-8`; `web.no_content` sets none and sends an empty
-  204. A rejected payload (a pointer or procedure) is logged server-side and
-  answered with one complete `internal_error`; no partial body escapes.
+```json
+{"error":{"code":"invalid_query_parameter","message":"Query parameter 'page' is required","field":"page"}}
+```
+
+```json
+{"error":{"code":"invalid_query_parameter","message":"Query parameter 'limit' must be an integer","field":"limit"}}
+```
+
+`web.query_int_or` uses its default **only** when the key is absent. `?limit=`
+is present with an empty value, so it is a 400 — not the default. `web.query`
+never produces this error: it reports presence and returns.
+
+---
+
+### `invalid_json` — 400
+
+**Producer:** `web.body`. **No field.**
+
+**Message:** `Request body must be valid JSON`
+
+```json
+{"error":{"code":"invalid_json","message":"Request body must be valid JSON"}}
+```
+
+Triggered by an empty body, malformed JSON, and JSON5 constructs (comments,
+unquoted keys, single-quoted strings), which strict JSON rejects.
+
+Well-formed JSON that does not fit the destination type is **not** this error:
+that is a server-side fault, logged and answered as `internal_error`.
+
+---
+
+### `body_too_large` — 413
+
+**Producer:** `web.body`, but enforced by the transport as it reads. **No
+field.**
+
+**Message:** `Request body exceeds the 4 MiB limit`
+
+```json
+{"error":{"code":"body_too_large","message":"Request body exceeds the 4 MiB limit"}}
+```
+
+The cap is a fixed 4 MiB (4·1024·1024 bytes). Exactly 4 MiB is accepted; only a
+strictly larger body is rejected. The check happens **before** the handler runs,
+so the limit holds even for a handler that never calls `web.body`. A
+configurable limit is Phase 3.
+
+---
+
+### `bad_request` — 400
+
+**Producer:** `web.bad_request(ctx, message)`. **No field.**
+
+**Message:** your message, verbatim.
+
+```json
+{"error":{"code":"bad_request","message":"email is required"}}
+```
+
+The message reaches the client unchanged, so pass a caller-facing explanation —
+never an internal diagnostic.
+
+---
+
+### `unauthorized` — 401 and `forbidden` — 403
+
+**Producers:** `web.unauthorized(ctx, message)` and
+`web.forbidden(ctx, message)`. **No field.** Message verbatim.
+
+```json
+{"error":{"code":"unauthorized","message":"authentication required"}}
+```
+
+```json
+{"error":{"code":"forbidden","message":"insufficient permission"}}
+```
+
+---
+
+### `not_found` — 404
+
+**Producer:** `web.not_found(ctx, resource)`, and the automatic route miss.
+**No field.**
+
+Two messages, from two sources:
+
+| Source | Message |
+|---|---|
+| `web.not_found(ctx, "user")` | `Resource 'user' not found` |
+| automatic, unknown path | `Route not found` |
+
+```json
+{"error":{"code":"not_found","message":"Resource 'user' not found"}}
+```
+
+```json
+{"error":{"code":"not_found","message":"Route not found"}}
+```
+
+Pass the resource NAME (`"user"`), not a sentence. The automatic 404 comes from
+`web.app()`; `web.bare()` installs no automatic response.
+
+---
+
+### `method_not_allowed` — 405
+
+**Producer:** automatic, when the path exists under a different method. **No
+field.**
+
+**Message:** `Method not allowed`
+
+```json
+{"error":{"code":"method_not_allowed","message":"Method not allowed"}}
+```
+
+The response also carries an `Allow` header listing only the methods registered
+for that path, always in the order `GET, POST, PUT, PATCH, DELETE`, comma-and-
+space separated, without duplicates. A method outside the Phase-1 set follows
+the same 404/405 rules and never produces a 501.
+
+---
+
+### `internal_error` — 500
+
+**Producer:** `web.internal_error(ctx)`, and the framework itself. **No field.**
+
+**Message:** `Internal server error`
+
+```json
+{"error":{"code":"internal_error","message":"Internal server error"}}
+```
+
+`internal_error` takes no message on purpose: failure detail is logged on the
+server, never returned to the client. The framework produces it in three cases,
+each logged first:
+
+- a response payload the JSON encoder cannot serialize (a pointer or a
+  procedure — Phase-1 payloads are values);
+- a request body that is valid JSON but does not fit the destination type;
+- a handler that returns without responding. HTTP has no zero status, so the
+  driver logs the mistake and answers 500.
+
+---
+
+## Protocol errors (before a request exists)
+
+These are **not** application errors and do **not** use the envelope above. When
+the request line or headers are malformed there is no framework-owned request
+yet, so the transport answers or simply closes the connection. Your handler
+never runs.
+
+| Condition | Result |
+|---|---|
+| `Content-Length` together with `Transfer-Encoding` | 400, connection closed |
+| more than one `Content-Length` (even if identical) | 400, connection closed |
+| comma-list, negative, signed, non-decimal or overflowing `Content-Length` | 400, connection closed |
+| any `Transfer-Encoding` other than a single final `chunked` | 400, connection closed |
+| malformed chunked body (bad size, truncated, missing CRLF or terminator) | rejected, connection closed |
+| a fixed body that ends before its declared length | rejected, connection closed |
+| whitespace before a header name or colon, obs-fold continuation | 400, connection closed |
+| invalid request line | rejected, connection closed |
+| `Expect: 100-continue` | 417, connection closed |
+
+In every one of these cases: the handler does not run, the connection is
+closed, and no trailing bytes are reinterpreted as a second request. A rejected
+request may be answered with a status or closed outright — both are acceptable,
+and neither carries a JSON body.
+
+`docs/transport-conformance.md` explains the policy and how it is proven.
