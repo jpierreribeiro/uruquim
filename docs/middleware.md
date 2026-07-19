@@ -110,8 +110,10 @@ finalization applies, as always under `bare()`.
 
 - Dispatch through a middleware chain allocates **zero** bytes; chains are
   flattened once, at registration.
-- The machinery present but unused costs about 1.8 KiB of binary (measured;
-  see the WP17 record).
+- The machinery present but unused costs **+2,424 bytes** of binary in a
+  default build, **+1,488** with `-o:speed` (measured on the hello-world
+  example against the Phase-1 baseline; a program that never calls `use` does
+  not even link it).
 - The chain runs by recursion: each middleware holds a stack frame while the
   rest runs (~80 bytes each in a debug build, ~16 with `-o:speed`). The
   practical depth bound is around one hundred thousand on the default stack —

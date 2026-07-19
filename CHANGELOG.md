@@ -10,9 +10,21 @@ tag exists, and cutting one is an owner decision.
 
 Phase 1 is complete and its public contracts are frozen. What "frozen" means,
 symbol by symbol with the evidence behind each, is in
-`planning/phase-1-freeze.md`.
+`planning/phase-1-freeze.md`. Phase 2 has begun; its growth is recorded as
+freeze amendments.
 
 ### Added
+
+- **Middleware** (Phase 2, WP17): `web.use` and `web.next` — onion execution
+  with exact reverse unwind, total short-circuit, and a monotonic per-request
+  cursor (a second `next()` is a no-op; the handler runs exactly once).
+  App-level middleware observe automatic `404`/`405` responses, under
+  `web.bare()` too. **Ordering is enforced fail-closed**: `use` after any
+  registered route — or after the first dispatched request — rejects the
+  application (every request answers `500`, `web.serve` refuses to start, and
+  the diagnostic names the unprotectable pattern). Chains are flattened at
+  registration; dispatch through a five-middleware chain allocates zero bytes.
+  Application ledger 32 → 34 (freeze Amendment 3).
 
 - A working bootstrap HTTP server: `web.serve(&app, port)` binds a real port
   behind a private transport boundary.
