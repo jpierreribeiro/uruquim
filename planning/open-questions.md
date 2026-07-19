@@ -136,3 +136,20 @@ and disconnect behavior before proposing an ownership ADR.
 | OQ-15 | yes | WP7 implementation | before WP7 code |
 | OQ-7..13 | no | — | deferred |
 | OQ-16..20 | no (phase-owned) | P4/Future features only | owning phase gate |
+
+## Added after the Phase-1 freeze (post-Phase-1 audit)
+
+None of these blocks Phase-2 planning. Each names the work package that will
+decide it. **No decision below is accepted** — they are recorded so that the
+owning WP does not rediscover them.
+
+| OQ | Question | Recommended direction | Decided by | Owner approval? |
+|---|---|---|---|---|
+| OQ-21 | How does test-support grow so a JSON body can be tested in memory? | an explicit Odin procedure group `test_request :: proc{...}`, matching how `core:strings`/`core:net` add variants without creating a second name | first Phase-2 WP that needs it | **yes** — the test-support ledger grows beyond 2 |
+| OQ-22 | Onion (post-`next`) middleware, or pre-order only? | prototype both on the bootstrap transport before choosing; the fit audit flags post-`next` as a foreign-abstraction risk | Phase-2 prototype WP | **yes** — it sets the shape of everything after it |
+| OQ-23 | Should `Recorded_Response` ever carry headers? | not yet; needed for CORS, cookies and cache validators, which are all Phase 4 | Phase-4 WP that needs it | yes |
+| OQ-24 | Configurable limits: an options struct with a package default constant, or individual setter procedures? | the options-struct shape, on `core:net`'s `DEFAULT_TCP_OPTIONS` precedent | Phase-3 limits WP | yes |
+| OQ-25 | Does the framework ever terminate TLS, or is reverse-proxy termination the documented deployment? | document proxy termination as the supported path; treat in-process TLS as an optional package at most | Phase-4 spec gate | **yes** — materially changes Phase-4 scope |
+| OQ-26 | What is the supported-Odin-version policy, given the pin is a nightly and `core:os` is mid-redesign in that very build? | state a single pinned version as the contract and re-pin deliberately | Phase-2 documentation WP | yes |
+| OQ-27 | Does `ops/ci` stay, or move to `tools/`? | left open by the local cleanup plan | Phase-2 housekeeping WP | no |
+| OQ-28 | Which licence? | MIT matches the vendored dependency and is lowest-friction | corrective PR, before Phase 2 | **yes** — cannot be defaulted by an agent |
