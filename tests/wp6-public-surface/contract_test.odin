@@ -21,6 +21,41 @@ import "core:strings"
 import "core:testing"
 import web "uruquim:web"
 
+// Wp6_Log_Filter drops the framework's own Error-level diagnostics (they begin
+// with "uruquim:") and forwards everything else. `odin test` counts any Error
+// record as a failure, so a test that deliberately drives a path the framework
+// logs on installs this to keep the runner honest without hiding real failures.
+// It is declared on the caller's stack, so it allocates nothing.
+Wp6_Log_Filter :: struct {
+	inner: log.Logger,
+}
+
+wp6_filter_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	filter := (^Wp6_Log_Filter)(data)
+	if level == .Error && strings.contains(text, "uruquim:") {
+		return
+	}
+	if filter.inner.procedure != nil {
+		filter.inner.procedure(filter.inner.data, level, text, options, location)
+	}
+}
+
+wp6_swallow_framework_log :: proc(filter: ^Wp6_Log_Filter) -> log.Logger {
+	filter.inner = context.logger
+	return log.Logger {
+		procedure = wp6_filter_proc,
+		data = rawptr(filter),
+		lowest_level = .Debug,
+		options = context.logger.options,
+	}
+}
+
 User :: struct {
 	id:   int    `json:"id"`,
 	name: string `json:"name"`,
@@ -251,16 +286,23 @@ wp6_automatic_405_carries_an_envelope :: proc(t: ^testing.T) {
 }
 
 @(test)
-wp6_bare_still_produces_no_automatic_response :: proc(t: ^testing.T) {
+wp6_bare_installs_no_route_policy_and_the_driver_finalizes_the_miss :: proc(t: ^testing.T) {
 	a := web.bare()
 	defer web.destroy(&a)
 	web.get(&a, "/known", ok_handler)
 
+	// bare() commits nothing for an unmatched route at the CORE — no automatic
+	// 404/405. HTTP cannot send a zero status, so the DRIVER finalizes the miss
+	// to a 500 (WP8 D5); its diagnostic is swallowed so the runner does not count
+	// it as a failure. The property under test is that bare() adds no route
+	// policy — which is exactly why the miss reaches the driver at all.
+	filter: Wp6_Log_Filter
+	context.logger = wp6_swallow_framework_log(&filter)
+
 	res := web.test_request(&a, .GET, "/absent")
 
-	zero: web.Status
-	testing.expect_value(t, res.status, zero)
-	testing.expect_value(t, res.body, "")
+	testing.expect_value(t, res.status, web.Status.Internal_Server_Error)
+	expect_envelope(t, res.body, "internal_error", "Internal server error")
 }
 
 // ---------------------------------------------------------------------------

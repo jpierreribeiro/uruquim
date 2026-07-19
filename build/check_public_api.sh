@@ -500,20 +500,25 @@ done
 # ---------------------------------------------------------------------------
 # 4. Context is not an extension bag (planning/public-api-guardrails.md G-03)
 #
-# WP1 introduces no `any`, no dynamic bag, and no rawptr anywhere in web/.
-# Phase 3 may introduce ONE private, typeid-validated rawptr for app_with_state
-# (ADR-004); when it does, this check is narrowed spec-first to exported
-# declarations rather than deleted.
+# `any`, a dynamic bag, and the handler-error result types are forbidden
+# ANYWHERE in web/. `rawptr` is forbidden only in EXPORTED declarations: WP8
+# introduces ONE private `rawptr` — the neutral transport-callback user pointer
+# in `serve_dispatch` — which is the boundary between the core and the untyped
+# backend callback, exactly the narrowing this check anticipated (and the shape
+# Phase 3 will reuse for app_with_state's typeid-validated rawptr, ADR-004). It
+# never appears in a public signature.
 # ---------------------------------------------------------------------------
 if grep -nE '^[[:space:]]*(user_data|locals|values)[[:space:]]*:' <<<"$URUQUIM_WEB_CODE"; then
   fail "web/ declares an untyped request-local storage field (planning/public-api-guardrails.md G-03)"
 fi
-for URUQUIM_BAG in 'map\[string\]any' 'map\[any\]any' '\bany\b' '\brawptr\b' \
+for URUQUIM_BAG in 'map\[string\]any' 'map\[any\]any' '\bany\b' \
   'Handler_Error' 'Handler_Outcome'; do
   if grep -nE "$URUQUIM_BAG" <<<"$URUQUIM_WEB_CODE"; then
     fail "web/ uses a forbidden construct matching /$URUQUIM_BAG/ (planning/public-api-guardrails.md G-03, ADR-011)"
   fi
 done
+# `rawptr` is banned only in EXPORTED declarations (G-03 narrowing); that check
+# runs in section 6 below, once the exported-block extraction is available.
 
 # The machinery is production code too: no `any`, no `rawptr`, no state bag, no
 # duplicated public web type. It moves data as neutral records only.
@@ -571,6 +576,14 @@ uruquim_exported_blocks() {
 }
 
 URUQUIM_EXPORTED_BLOCKS="$(uruquim_exported_blocks)"
+
+# G-03 (narrowed): `rawptr` is forbidden in EXPORTED declarations, never in the
+# whole package — WP8's one private `rawptr` is the neutral transport-callback
+# user pointer in `serve_dispatch`, which appears in no public signature.
+if grep -nE '\brawptr\b' <<<"$URUQUIM_EXPORTED_BLOCKS"; then
+  fail "web/ exposes rawptr in an exported declaration (planning/public-api-guardrails.md G-03)"
+fi
+
 # Word-bounded: `Internal_Server_Error` is an HTTP status name, not a
 # transport type, and must not be reported as leakage.
 for URUQUIM_TYPE in '\bTransport\b' '\bSocket\b' '\bTCP\b' '\bConnection\b' \
@@ -988,7 +1001,7 @@ grep -qE 'request_arena_destroy\(' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" ||
 #           configurability and replay specifically — a per-request `body_limit`
 #           FIELD, a setter, a size knob, a replay/cache — without matching the
 #           fixed `BODY_LIMIT` constant that the cap legitimately uses.
-for URUQUIM_WP7_BAN in 'set_body_limit' 'max_body' 'body_replay' '\breplay\b' \
+for URUQUIM_WP7_BAN in 'set_body_limit' 'max_body_size' 'body_replay' '\breplay\b' \
   'body_cache' 'Body_Cache' 'body_limit[[:space:]]*:' 'configurable'; do
   if grep -nE "$URUQUIM_WP7_BAN" <<<"$URUQUIM_WEB_CODE"; then
     fail "web/ contains a WP7 non-goal matching /$URUQUIM_WP7_BAN/ (no configurable limit, replay or cache)"

@@ -100,6 +100,9 @@ dial_with_retry :: proc(port: int) -> (sock: net.TCP_Socket, ok: bool) {
 	return {}, false
 }
 
+// send_request sends `raw` and returns the response as an OWNED string the
+// caller must delete. It reads until the peer closes (we always send
+// Connection: close).
 @(private = "file")
 send_request :: proc(port: int, raw: string) -> (response: string, ok: bool) {
 	sock, dialed := dial_with_retry(port)
@@ -113,8 +116,8 @@ send_request :: proc(port: int, raw: string) -> (response: string, ok: bool) {
 		return "", false
 	}
 
-	// Read until the peer closes (we always send Connection: close).
 	b := strings.builder_make()
+	defer strings.builder_destroy(&b)
 	buf: [4096]u8
 	for {
 		n, rerr := net.recv_tcp(sock, buf[:])
@@ -125,7 +128,7 @@ send_request :: proc(port: int, raw: string) -> (response: string, ok: bool) {
 			break
 		}
 	}
-	return strings.to_string(b), true
+	return strings.clone(strings.to_string(b)), true
 }
 
 @(test)
@@ -151,13 +154,16 @@ wp8_real_server_serves_and_stops :: proc(t: ^testing.T) {
 				"GET /ping must carry the text Content-Type",
 			)
 			testing.expect_value(t, ping_hits, 1)
+			delete(res)
 
 			// POST JSON: WP7 must receive and decode the body over the real wire.
 			body := `{"name":"grace"}`
+			length := int_to_string(len(body))
+			defer delete(length)
 			post := strings.concatenate(
 				{
 					"POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: ",
-					int_to_string(len(body)),
+					length,
 					"\r\nConnection: close\r\n\r\n",
 					body,
 				},
@@ -165,35 +171,44 @@ wp8_real_server_serves_and_stops :: proc(t: ^testing.T) {
 			defer delete(post)
 			echo_res, echo_ok := send_request(candidate, post)
 			testing.expect(t, echo_ok, "POST /echo must get a response")
-			testing.expect(t, strings.contains(echo_res, "grace"), "the decoded body must echo back")
+			if echo_ok {
+				testing.expect(t, strings.contains(echo_res, "grace"), "the decoded body must echo back")
+				delete(echo_res)
+			}
 			testing.expect_value(t, echo_seen_name, "grace")
 
 			// Over-limit body: 413, exact envelope, handler NOT run.
-			oversized := make([]u8, 4 * 1024 * 1024 + 1)
-			defer delete(oversized)
-			for &c in oversized {
-				c = 'x'
-			}
+			//
+			// The cap is enforced on the declared Content-Length before the body
+			// is read, so the request DECLARES an oversized length without sending
+			// the megabytes — which is both the real over-limit case and what lets
+			// the client receive the 413 rather than reset on a rejected send.
+			big_length := int_to_string(4 * 1024 * 1024 + 1)
+			defer delete(big_length)
 			big := strings.concatenate(
 				{
 					"POST /big HTTP/1.1\r\nHost: localhost\r\nContent-Length: ",
-					int_to_string(len(oversized)),
+					big_length,
 					"\r\nConnection: close\r\n\r\n",
-					string(oversized),
 				},
 			)
 			defer delete(big)
 			big_res, big_ok := send_request(candidate, big)
 			testing.expect(t, big_ok, "the over-limit POST must get a response")
-			testing.expect(t, strings.contains(big_res, "413"), "an over-limit body must be 413")
-			testing.expect(
-				t,
-				strings.contains(big_res, `"code":"body_too_large"`),
-				"the 413 must carry the WP7 body_too_large envelope",
-			)
+			if big_ok {
+				testing.expect(t, strings.contains(big_res, "413"), "an over-limit body must be 413")
+				testing.expect(
+					t,
+					strings.contains(big_res, `"code":"body_too_large"`),
+					"the 413 must carry the WP7 body_too_large envelope",
+				)
+				delete(big_res)
+			}
 			testing.expect_value(t, big_hits, 0)
 
 			served = true
+		} else if ok {
+			delete(res)
 		}
 
 		// Stop this server (whether or not it was the working one) and join.
@@ -237,7 +252,7 @@ int_to_string :: proc(n: int) -> string {
 	i := len(buf)
 	v := n
 	if v == 0 {
-		return "0"
+		return strings.clone("0")
 	}
 	for v > 0 {
 		i -= 1

@@ -1,20 +1,126 @@
-// WP8 — CANONICAL SERVER ENTRY POINT AND THE RESPONSE DRIVER FINALIZATION.
+// WP8 — CANONICAL SERVER ENTRY POINT, THE DISPATCH BRIDGE, AND THE RESPONSE
+// DRIVER FINALIZATION.
 //
 // `serve` runs the real bootstrap HTTP server behind the private transport
-// boundary. `serve_with` and `serve_transport` are Advanced API and remain
-// absent from Phase 1.
+// boundary (`web/internal/transport`). This file is the ONLY place `web`
+// imports the transport, and the transport is the only thing that imports the
+// backend — the one-way boundary of ADR-009. `serve_with` and `serve_transport`
+// are Advanced API and remain absent from Phase 1.
 package web
 
-// serve runs the application's HTTP server on the given port.
+import "core:mem"
+import transport "uruquim:web/internal/transport"
+
+// serve runs the application's HTTP server on the given port and blocks until
+// the server stops.
 //
-// This is the canonical entry point. Transport selection is resolved inside
-// the framework and is never part of the public API, which is what keeps the
+// This is the canonical entry point. Transport selection is resolved inside the
+// framework and is never part of the public API, which is what keeps the
 // eventual move to the future official `core:net/http` package invisible to
 // applications.
 //
-// WP8 RED STUB: still returns immediately and serves nothing. The bootstrap
-// adapter is wired in the BOOTSTRAP commit.
+// It validates the port (1..65535); an invalid port is logged and `serve`
+// returns WITHOUT binding. A bind/listen failure is likewise logged and
+// returns. On success it listens on IPv4 Any and blocks while serving. Full
+// graceful-shutdown deadlines are Phase 4; configurable timeouts are Phase 3.
 serve :: proc(a: ^App, port: int) {
+	if port < 1 || port > 65535 {
+		framework_report(App, .Invalid_Serve_Port)
+		return
+	}
+
+	cfg := transport.Config {
+		port     = port,
+		max_body = BODY_LIMIT,
+		dispatch = serve_dispatch,
+		user     = a,
+	}
+	if err := transport.serve(cfg); err != .None {
+		framework_report(App, .Serve_Listen_Failed)
+	}
+}
+
+// serve_dispatch is the bridge the transport calls per request. It builds a
+// Context from the neutral request, runs the core, copies the response OUT into
+// transport-owned storage, and performs request teardown — all before it
+// returns (WP8 D2/D4). The transport writes `out` to the wire afterwards.
+//
+// CLEANUP ORDER (WP8 D4), fixed and total: dispatch/commit -> copy out ->
+// response_destroy -> request_arena_destroy. It runs on every path — a routed
+// 2xx, an extractor 4xx, the automatic 404/405, the over-limit 413, and the
+// driver's 500 — and leaves no request-local view behind.
+@(private)
+serve_dispatch :: proc(
+	user: rawptr,
+	inbound: transport.Inbound,
+	out: ^transport.Outbound,
+	allocator: mem.Allocator,
+) {
+	a := (^App)(user)
+
+	ctx: Context
+
+	if inbound.over_limit {
+		// The adapter rejected the body for length BEFORE the handler. The core
+		// authors the WP7 413 envelope; the handler never runs (WP8 D3).
+		error_commit_static(&ctx, STATUS_BODY_TOO_LARGE, ERROR_BODY_TOO_LARGE)
+	} else {
+		ctx.request = Request {
+			method  = method_from_token(inbound.method),
+			path    = inbound.path,
+			query   = inbound.query,
+			headers = header_view_from_pairs(inbound_header_pairs(inbound, allocator)),
+			body    = inbound.body,
+		}
+		dispatch(a, &ctx)
+		driver_finalize(&ctx)
+	}
+
+	// Copy the committed response into transport-owned storage BEFORE tearing
+	// down the request, so the adapter never holds a view into freed memory.
+	transport.copy_response(
+		out,
+		int(ctx.private.response.status),
+		response_headers_neutral_transport(ctx.private.response.headers, allocator),
+		ctx.private.response.body,
+		allocator,
+	)
+
+	response_destroy(&ctx.private.response)
+	request_arena_destroy(&ctx)
+}
+
+// inbound_header_pairs converts the neutral request headers into the core's
+// Header_Pair view, in the caller's allocator. The pairs are views over the
+// same transport-owned storage as `inbound`, valid only for this dispatch.
+@(private)
+inbound_header_pairs :: proc(inbound: transport.Inbound, allocator: mem.Allocator) -> []Header_Pair {
+	if len(inbound.headers) == 0 {
+		return nil
+	}
+	pairs := make([]Header_Pair, len(inbound.headers), allocator)
+	for header, i in inbound.headers {
+		pairs[i] = Header_Pair{name = header.name, value = header.value}
+	}
+	return pairs
+}
+
+// response_headers_neutral_transport converts the committed response's private
+// header pairs into neutral transport headers for `copy_response`, which then
+// makes its own owned copies. This intermediate slice is transient.
+@(private)
+response_headers_neutral_transport :: proc(
+	pairs: []Header_Pair,
+	allocator: mem.Allocator,
+) -> []transport.Header {
+	if len(pairs) == 0 {
+		return nil
+	}
+	out := make([]transport.Header, len(pairs), allocator)
+	for pair, i in pairs {
+		out[i] = transport.Header{name = pair.name, value = pair.value}
+	}
+	return out
 }
 
 // driver_finalize guarantees a response driver never emits a zero status
@@ -26,8 +132,11 @@ serve :: proc(a: ^App, port: int) {
 // turns that into a logged `internal_error`/500. This is a validity guarantee
 // of the driver, not middleware and not an automatic route response: the core
 // still installs no 404/405 under `bare()`.
-//
-// WP8 RED STUB: does nothing, so an uncommitted response stays uncommitted.
 @(private)
 driver_finalize :: proc(ctx: ^Context) {
+	if ctx.private.response.committed {
+		return
+	}
+	framework_report(App, .No_Response_Committed)
+	error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
 }

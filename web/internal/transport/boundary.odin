@@ -76,18 +76,5 @@ Serve_Error :: enum {
 	Listen_Failed,
 }
 
-// serve runs the backend event loop and blocks until the server is stopped.
-//
-// WP8 RED STUB: binds nothing and returns immediately, so a client cannot
-// connect. The real adapter lands in the BOOTSTRAP commit.
-serve :: proc(cfg: Config) -> Serve_Error {
-	return .Listen_Failed
-}
-
-// request_stop asks a running server to stop. It is idempotent and safe to call
-// from another thread; it never signals the process (tests must not SIGINT the
-// runner).
-//
-// WP8 RED STUB: does nothing.
-request_stop :: proc() {
-}
+// `serve`, `request_stop` and `copy_response` are implemented in
+// `odin_http_adapter.odin`, the one file that names the backend.
