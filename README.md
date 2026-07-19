@@ -97,7 +97,10 @@ examples/                Compiling Phase-1 programs (built by the gate)
 
 ## Status
 
-Phase 1 is implemented and gated, and is finishing its final review.
+WP0–WP11 are complete: the Phase-1 implementation is finished, and its public
+contracts are frozen behind a gate. What "frozen" means, symbol by symbol and
+with the evidence behind each one, is recorded in
+[`planning/phase-1-freeze.md`](planning/phase-1-freeze.md).
 
 **What works today**
 
@@ -116,8 +119,16 @@ Phase 1 is implemented and gated, and is finishing its final review.
   connection closed, proven by a raw-wire corpus (see
   `docs/transport-conformance.md`).
 
-**Public surface:** 32 application symbols + 2 test-support symbols = 34. That
-count is enforced by the build gate.
+**Public surface:** 32 application symbols + 2 test-support symbols = 34 —
+frozen. The gate compares the compiler's own exported inventory, down to every
+struct field, enum member and enum backing type, against
+`build/phase1-public-signatures.txt`, and the direct import set against
+`build/phase1-direct-dependencies.txt`. Changing any of it now requires a spec
+amendment, not a snapshot refresh.
+
+Internals stay replaceable: the linear route table, the request arena and the
+vendored backend are implementation, and may be rewritten as long as the
+observable contracts hold.
 
 **Not yet, and named honestly**
 
@@ -127,9 +138,10 @@ count is enforced by the build gate.
 - Graceful shutdown with a deadline — Phase 4.
 - Request header lookup — Phase 2.
 
-Phase 1 is usable for building and testing a JSON API. It is not yet hardened
-for unattended production exposure, and Phase 1 is not formally frozen: that is
-the WP11 gate.
+Phase 1 is usable for building and testing a JSON API, and `web.serve` is a
+working bootstrap server. It is not hardened for unattended production
+exposure. A frozen contract is not a released one: the semantic version, the
+tag and any release remain the owner's decision.
 
 ## Where to start
 
