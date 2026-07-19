@@ -98,6 +98,25 @@ researched later only after real misuse evidence; grep heuristics must not be
 marketed as semantic analysis. This guardrail does not authorize a CLI or code
 generator.
 
+### G-11 — Test-support surface is a separate ledger
+
+The `web.test_request` / `web.Recorded_Response` test-support facade (WP3) is
+public — documented, compiled, behavior-tested, and protected against
+accidental change exactly like the application surface — but it is tracked in a
+**separate ledger**, not folded into the frozen application count. Rationale:
+it is a test utility, exercised only from test binaries, and conflating it with
+the application API would let the two grow against each other under one number.
+
+`build/check_public_api.sh` therefore makes THREE surface assertions once WP3
+lands: the application ledger is exactly 32; the test-support ledger is exactly
+2 (`Recorded_Response`, `test_request`); their exported union is exactly 34,
+with no other symbol. The facade lives in package `web` (`web/test_support.odin`);
+the machinery lives in `web/testing` and imports neither `uruquim:web` (cycle)
+nor `core:testing`. Documentation presents the application inventory and a
+separate "Testing" section, states the `Recorded_Response` lifetime and the
+absence of sockets/ports/transport types, and promises no direct import of
+`web/testing`. Growth of either ledger still carries G-09 evidence.
+
 ## False-positive rules
 
 - Do not flag `ok`/`created` when exact delegation remains proven.
@@ -115,6 +134,7 @@ generator.
 |---|---|
 | WP1 | exact exported-symbol inventory; no aliases, future surfaces, untyped context fields, or transport types |
 | WP2 | view invalidation/copy tests; single commit; Context shape assertion |
+| WP3 | dual-ledger surface (32 application + 2 test-support = 34); `web/testing` imports neither `uruquim:web` nor `core:testing`; `Recorded_Response` lifetime owned by App test-support state (G-11) |
 | WP5 | extractor errors commit once; canonical examples return immediately; plain result forces `ok` capture |
 | WP6 | exact responder delegation; marshal logging; no partial/double response; private typed error path |
 | WP8 | adapter dependency inventory; backend-type export scan; core remains usable through test transport |
