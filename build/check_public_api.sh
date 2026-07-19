@@ -12,7 +12,7 @@
 # SCOPE (planning/15 G-06 and its false-positive rules): the transport-leak and
 # dynamic-storage scans read ONLY the exported public package `web/` and, once
 # it exists, `examples/`. They deliberately never read `knowledge-base/`,
-# `planning/`, `docs/`, `referencias/`, or `experiments/`. Backend names are
+# `planning/`, `docs/`, or `experiments/`. Backend names are
 # expected and legitimate in internal architecture documentation; a textual
 # mention there is not leakage.
 set -euo pipefail

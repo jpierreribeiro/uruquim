@@ -341,7 +341,7 @@ conteúdo em `memory-model.md` seja lacuna declarada, não esquecimento.
    permanece intocado.
 4. PR pré-WP2 é revisado e mergeado; o gate completo deve continuar verde
    (PASS=10 FAIL=0 SKIP=0, contagem 29).
-5. Só então `planning/19-opus-wp2-agent-prompt.md` pode ser usado.
+5. Só então o WP2 podia iniciar.
 6. O PR do WP2, em commits separados: TESTS-FIRST eleva o checker a 32 e
    registra RED; a implementação adiciona os três símbolos e devolve GREEN.
 7. O WP2 cria `planning/20-wp2-gate.md`, que registra que a auditoria completa

@@ -1,9 +1,9 @@
 # 24 — External Research Synthesis
 
-Status: **REVIEWED PLANNING INPUT.** This document integrates the external
-reports under `referencias/` without promoting them to specification. Where a
-recommendation changes a contract, the owning ADR and phase gate still control
-the decision.
+Status: **REVIEWED PLANNING INPUT.** This document integrates external reports
+archived outside this repository without promoting them to specification.
+Where a recommendation changes a contract, the owning ADR and phase gate still
+control the decision.
 
 ## Source discipline
 
