@@ -373,15 +373,88 @@ Vendor update policy is routed to Phase 4.
 
 ## Guardrail audit (G-01 … G-11)
 
-PENDING-EVIDENCE
+Definitions live in `planning/public-api-guardrails.md`. One result line
+each; every result is grounded in a named executable gate or probe.
+
+| Guardrail | Result | Evidence |
+| --- | --- | --- |
+| G-01 — one operation, one name | PASS | exact 32-name inventory, both directions (`build/check_public_api.sh` §2); the only fixed-status delegations are behavior-tested byte-identical (`tests/wp6-internal/wp6_internal_test.odin::wp6_ok_is_byte_identical_to_json_ok`, `tests/wp6-internal/wp6_internal_test.odin::wp6_created_is_byte_identical_to_json_created`); no alias found |
+| G-02 — web types stop at the HTTP boundary | PASS | one-way import boundary + core/uruquim-only dependency policy (`build/check_public_api.sh` §7); examples import exactly `uruquim:web` (freeze gate §5); the domain-side half is a documented application convention, out of checker scope by design |
+| G-03 — Context is not an extension bag | PASS | bans on `user_data`/`locals`/`values`/`any`/dynamic maps and on `rawptr` in exported declarations (`build/check_public_api.sh` §4/§6); Context fields pinned to `request` + private (`build/check_public_api.sh` §8d) |
+| G-04 — response singular and visible | PASS | atomic private commit (`build/check_public_api.sh` §8e); first-commit-wins end to end (`tests/wp6-public-surface/contract_test.odin::wp6_the_first_response_wins`); extractor 400 cannot be replaced (`tests/wp5-public-surface/contract_test.odin::wp5_continued_handler_code_cannot_replace_the_400`) |
+| G-05 — views never escape implicitly | PASS | aliasing/invalidation and explicit-copy tests (`tests/wp2-internal/wp2_internal_test.odin::wp2_buffer_reuse_invalidates_retained_views`); the by-contract (not compiler-barrier) scope is itself pinned (`tests/wp2-public-surface/probes/internal_slot_is_reachable.odin`) |
+| G-06 — backend stays private | PASS | backend-identifier and transport-type scans over package + examples (`build/check_public_api.sh` §6); adapter-only vendor import rule; full-signature snapshot (freeze gate §1) |
+| G-07 — optional features do not enlarge core | PASS | future-surface ban list (`build/check_public_api.sh` §3) + freeze-gate surface vocabulary scan (§4); JSON encoder importers pinned to three files |
+| G-08 — defaults claimed only when delivered | PASS | docs parity gate: phase markers, fragment/compile classification of every code block, stale-claims scan (`build/check_docs.sh`) |
+| G-09 — public growth carries evidence | PASS | this manifest: every exported symbol has an owner and executed evidence, machine-validated per row (freeze gate §6); growth now also requires a snapshot amendment in the same change |
+| G-10 — no linter/analyzer as product | PASS | enforcement is shell assertions plus `odin test` contracts; no analysis binary exists under `build/` |
+| G-11 — separate test-support ledger and cost | PASS | 32/2/34 disjoint ledgers (`build/check_public_api.sh` §2b/§2c); locked 6-name machinery bridge (§2d); zero-teardown `nm` gate with positive and mutation controls (`build/check_g11_teardown.sh`) |
+
+No guardrail needed DEFERRED status: every Phase-1 requirement is enforced
+by an executed gate today.
 
 ## Risk register and open questions — dispositions
 
-PENDING-EVIDENCE
+Sources: `planning/risk-register.md`, `planning/open-questions.md`,
+`planning/adrs.md`, `planning/future-research.md`. Disposition classes:
+resolved in Phase 1 · accepted limitation · routed to a named phase.
+**No open blocker is assigned to Phase 1.**
+
+Risks resolved in Phase 1: R-01 (toolchain, WP0), R-02 (beta backend behind
+the boundary, WP8), R-04 (view lifetimes, WP2), R-05 (commit-before-error,
+WP6), R-06 (allocator-honoring decode, WP7), R-07 (`#optional_ok` ban,
+WP5), R-08 (by-value App invariant, WP1), R-09 (progressive defaults,
+WP4/WP7/WP10), R-10 (shared conformance matrix, WP9), R-13 (value payload
+baseline, WP6), R-15 (single-consumer body, WP7/ADR-012).
+
+Risks **closed by WP11 itself**: R-11 (freeze discipline — this manifest +
+`build/check_phase1_freeze.sh` are its resolution), R-12 (scope creep —
+audited here, none found), R-14 (accretion — the surface now requires a
+spec amendment to grow).
+
+Risks routed forward, unchanged by the freeze: R-03 → Phase 5
+(`core:net/http` posture), R-16 → Phase 3 (arena retention), R-17 → every
+future adapter gate, R-18 → Phase 3/4 (route-identity cardinality), R-19 →
+Phase 4 (trusted proxies).
+
+Open questions: OQ-1…OQ-6, OQ-9, OQ-13, OQ-14, OQ-15 resolved during
+Phase 1 (OQ-15 by ADR-012/WP7). Routed forward: OQ-7 (middleware model,
+ADR-005) → Phase-2 gate; OQ-8 (threading) → official-adapter research;
+OQ-10 (configurable limits/timeouts) → Phase 3; OQ-11 (validation) and
+OQ-12 (OpenAPI) → Phase 5; OQ-16 (trusted proxies, ADR-013) and OQ-17
+(graceful drain), OQ-19 (overload), OQ-20 (multipart) → Phase 4; OQ-18
+(route-pattern accessor) stays FUTURE.
+
+ADRs: eleven accepted (001, 002, 003, 004, 006, 007, 008, 009, 011, 012,
+014) — all reflected in the contracts above; three remain
+PROPOSED/DEFERRED and are **not** marked accepted by this freeze:
+ADR-005 (middleware, Phase-2 gate), ADR-010 (Advanced API, post-Phase-1),
+ADR-013 (trusted proxies, Phase-4 security gate).
 
 ## Limitations routed to future phases
 
-PENDING-EVIDENCE
+Named honestly, none delivered, none frozen as behavior:
+
+- **Phase 2** — middleware (`use`/`next`, onion-vs-preorder undecided,
+  ADR-005), route groups, panic recovery default, request header lookup
+  (`header`, `bearer_token`), request ID, logger/observer.
+- **Phase 3** — radix/tree router with conflict diagnostics and a
+  normalization policy, wildcard patterns, params beyond one, typed
+  application state (ADR-004 shape), configurable body limit and timeouts,
+  arena/buffer retention policy, HEAD/OPTIONS public meaning.
+- **Phase 4** — graceful shutdown with deadlines, connection/queue/header
+  limits, trusted proxies (ADR-013), CORS, secure headers, cookies,
+  multipart/uploads, static files, observability, TLS posture, vendor
+  update/vulnerability policy.
+- **Phase 5 / future** — official `core:net/http` adapter posture (R-03),
+  OpenAPI, WebSocket, streaming, Advanced API (ADR-010).
+- **Accepted Phase-1 limitations** — `test_request` forwards method and
+  path only (query/body/header test coverage runs through the internal
+  suites and the socket transport; a richer test-support surface is a
+  future, separately decided ledger change); `Header_View` has no public
+  lookup; 413 stays private; encapsulation of private slots is by contract,
+  not compiler barrier (ADR-008); registration conflicts are undiagnosed;
+  the two vendored in-file test blocks described in the dependency audit.
 
 ## Human acceptance conditions
 
