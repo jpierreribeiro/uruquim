@@ -58,6 +58,58 @@ URUQUIM_FREEZE_TEST_SUPPORT='^(Recorded_Response|test_request)$'
 # Names, types, arguments, results, genericity, field names, enum members and
 # enum backing types are all preserved verbatim: those are the contract.
 
+# The two section extractors, defined ONCE so the positive control below tests
+# the same code the gate runs. A control that exercises a copy proves nothing.
+URUQUIM_FREEZE_AWK_PROCS='/^\tprocedures$/{on=1;next} /^\t(proc_group|types|fullpath:)$/{on=0} on&&/^\t\t[A-Za-z_]/{print}'
+URUQUIM_FREEZE_AWK_GROUPS='/^\tproc_group$/{on=1;next} /^\t(procedures|types|fullpath:)$/{on=0} on&&/^\t\t[A-Za-z_]/{print}'
+
+# ---------------------------------------------------------------------------
+# 0. Positive control: prove the extractors can actually SEE a procedure group.
+# ---------------------------------------------------------------------------
+#
+# This exists because they could not. An exported procedure group whose members
+# are all `@(private)` is public and cross-package-callable, yet produces no
+# `procedures` section at all, so the original extractor returned nothing for it
+# and the counted ledger stayed unmoved. `odin doc` was reporting the group the
+# whole time; this script was not reading that section.
+#
+# Without this control the fix is unverifiable: a future edit could break the
+# pattern again and every assertion below would still pass, because the real
+# package currently exports no groups. A check that cannot fail is not evidence.
+uruquim_freeze_selftest_group_extraction() {
+  local dir="$URUQUIM_FREEZE_TMP/selftest"
+  mkdir -p "$dir/probe"
+  cat >"$dir/probe/lib.odin" <<'''SELFTEST'''
+package probe
+@(private)
+sample_a :: proc(x: int) -> int { return x }
+@(private)
+sample_b :: proc(x: string) -> int { return len(x) }
+sample :: proc{ sample_a, sample_b }
+SELFTEST
+
+  local doc="$dir/doc.txt"
+  env -u ODIN_ROOT "$URUQUIM_ODIN_BIN" doc "$dir/probe" -short >"$doc" 2>/dev/null ||
+    fail "the group-extraction self-test could not run odin doc"
+
+  local seen
+  seen="$(awk "$URUQUIM_FREEZE_AWK_GROUPS" "$doc" | sed -E '''s@^\t\t@@''' | head -1)"
+  case "$seen" in
+    "sample :: proc{sample_a, sample_b}") : ;;
+    *) fail "the proc_group extractor does not see an exported group whose members are private.
+    Expected: sample :: proc{sample_a, sample_b}
+    Got:      ${seen:-<nothing>}
+  Such a group is public and callable from another package, so if this extractor
+  cannot see it, a new public symbol can be added with the ledger unmoved." ;;
+  esac
+
+  # And the procedures extractor must NOT swallow the group's member line: the
+  # sections are indented identically, so an unbounded range miscounts silently.
+  if awk "$URUQUIM_FREEZE_AWK_PROCS" "$doc" | grep -q 'proc{'; then
+    fail "the procedures extractor is capturing proc_group lines; the section boundary is wrong"
+  fi
+}
+
 uruquim_freeze_generate_signatures() { # -> stdout
   local short full
   short="$URUQUIM_FREEZE_TMP/doc-short.txt"
@@ -71,7 +123,13 @@ uruquim_freeze_generate_signatures() { # -> stdout
     fail "odin doc web failed; see $URUQUIM_FREEZE_TMP/doc-full.err"
 
   # Procedures: from the short view, body placeholder and position marker cut.
-  awk '/^\tprocedures$/{on=1;next} /^\ttypes$/{on=0} on&&/^\t\t[A-Za-z_]/{print}' "$short" \
+  #
+  # The section MUST be bounded by every following section header, not just
+  # `types`. `odin doc` emits `proc_group` between `procedures` and `types`, and
+  # a range that only closes on `types` swallows the group's member lines into
+  # the procedure ledger — they are indented identically. That is a silent
+  # miscount, so the boundary is explicit.
+  awk "$URUQUIM_FREEZE_AWK_PROCS" "$short" \
   | sed -E 's@ /\* [0-9]+![0-9]+ \*/@@; s@ \{\.\.\.\}$@@; s@^\t\t@@' \
   | while IFS= read -r decl; do
       name="${decl%% ::*}"
@@ -79,6 +137,26 @@ uruquim_freeze_generate_signatures() { # -> stdout
         printf 'test-support\tproc\t%s\n' "$decl"
       else
         printf 'application\tproc\t%s\n' "$decl"
+      fi
+    done
+
+  # Procedure groups: their own `odin doc` section, and their own ledger kind.
+  #
+  # WHY THIS EXISTS. An exported procedure group whose members are all
+  # `@(private)` is a PUBLIC, cross-package-callable symbol that produces NO
+  # `procedures` section at all — verified on the pinned compiler. Reading only
+  # `procedures` therefore missed it entirely, so a new public capability could
+  # be added with the counted ledger unmoved. That is precisely the accretion
+  # this gate exists to prevent. `odin doc` reports the group faithfully; the
+  # omission was in this extractor, not in the compiler.
+  awk "$URUQUIM_FREEZE_AWK_GROUPS" "$short" \
+  | sed -E 's@ /\* [0-9]+![0-9]+ \*/@@; s@^\t\t@@' \
+  | while IFS= read -r decl; do
+      name="${decl%% ::*}"
+      if [[ "$name" =~ $URUQUIM_FREEZE_TEST_SUPPORT ]]; then
+        printf 'test-support\tgroup\t%s\n' "$decl"
+      else
+        printf 'application\tgroup\t%s\n' "$decl"
       fi
     done
 
@@ -95,6 +173,8 @@ uruquim_freeze_generate_signatures() { # -> stdout
       fi
     done
 }
+
+uruquim_freeze_selftest_group_extraction
 
 URUQUIM_FREEZE_ACTUAL_SIG="$URUQUIM_FREEZE_TMP/signatures.actual"
 uruquim_freeze_generate_signatures | LC_ALL=C sort >"$URUQUIM_FREEZE_ACTUAL_SIG"
@@ -392,5 +472,6 @@ echo "freeze: fields/enums    -> Method(u8, 6), Status(int, 10, no 413), Handler
 echo "freeze: extractors      -> named results pinned, no #optional_ok on any exported procedure"
 echo "freeze: dependencies    -> $(wc -l <"$URUQUIM_FREEZE_ACTUAL_DEP" | tr -d ' ') direct imports match the snapshot; boundaries one-way"
 echo "freeze: evidence matrix -> $URUQUIM_FREEZE_REF_COUNT citations resolved, all 34 symbols present, none NOT_FROZEN"
+echo "freeze: proc_group extraction self-test passed (private-member group is visible)"
 echo "freeze: no future-phase vocabulary exported; no open Phase-1 blocker"
 echo "PASS: Phase 1 freeze gate"
