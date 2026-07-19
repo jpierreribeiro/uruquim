@@ -67,6 +67,7 @@ errors.odin
 extract.odin
 headers.odin
 request.odin
+request_arena.odin
 respond.odin
 response.odin
 routing.odin

@@ -106,8 +106,15 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 	//    frees only what the Response actually owns.
 	response_destroy(res)
 
-	// 6. The facade returns the public shape. `body` is the recorder's own copy,
-	//    valid until `web.destroy(&app)`, so it is unaffected by the teardown
+	// 6. WP7 — the driver also frees the request-lifetime arena, after the
+	//    capture above (ADR-012/ADR-006). The recorder copies only the RESPONSE,
+	//    whose body is never an arena allocation, so this order is safe; it is a
+	//    no-op unless a handler actually bound a body. The WP8 adapter must do
+	//    the same.
+	request_arena_destroy(&ctx)
+
+	// 7. The facade returns the public shape. `body` is the recorder's own copy,
+	//    valid until `web.destroy(&app)`, so it is unaffected by the teardowns
 	//    above.
 	return Recorded_Response{status = Status(status_int), body = body}
 }

@@ -394,6 +394,35 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp6-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp6-public-surface"
 
+# WP7 — JSON body binding, the 4 MiB cap, and the request-lifetime arena.
+#
+# The arena, the body-consumption state, `Context_Internal` and the typed report
+# are all package-private, so these tests run in a THROWAWAY package exactly like
+# WP2-WP6. Memory tracking (default in `odin test`) is what turns the arena
+# ownership and no-leak claims into assertions, and the internal tests reach the
+# private `Body_State` and `request_arena_*` machinery directly.
+echo "--- WP7 body binding and the request arena, internal behavior (throwaway package) ---"
+URUQUIM_WP7_TMP="$(mktemp -d -t uruquim-wp7-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP7_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP7_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp7-internal/*.odin "$URUQUIM_WP7_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP7_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp7-internal"
+rm -rf "$URUQUIM_WP7_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP7_TMP" || fail "the throwaway WP7 internal-test package was not removed"
+echo "PASS: WP7 internal tests ran against the real sources; throwaway package removed"
+
+# WP7 public surface — an EXTERNAL consumer binding a body through the ratified
+# surface. It proves body binding is expressible with the ratified 34 symbols and
+# adds none, and that a body handler driven by `web.test_request` tears down
+# cleanly.
+echo "--- WP7 public surface contract: body binding, single-consumer, envelopes ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp7-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp7-public-surface"
+
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
 # actually asserted.
