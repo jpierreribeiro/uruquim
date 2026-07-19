@@ -6,14 +6,14 @@ implementation checks or owned by later phases.
 
 ## Critical (block a WP)
 
-### OQ-1 · Will the pinned toolchain run locally and on the VPS? (→ C-1, R-01)
+### OQ-1 · RESOLVED — pinned toolchain runs locally and on the VPS
 - **Owner.** toolchain owner.
 - **Evidence.** Local dev execution on `dev-2026-07-nightly:819fdc7` is complete:
   first run 5/9, corrected second run 9/9, and the extended handler suite
-  10/10. VPS provisioning and odin-http vendoring remain WP0/WP8 concerns,
-  not signature-ratification unknowns.
-- **Deadline.** before WP1.
-- **Note.** local toolchain aspect closed; clean VPS repetition remains.
+  10/10. The SHA/commit-verified distribution is persistent at
+  `/opt/uruquim-odin` on the Ubuntu VPS, and clean commit `4ae2d1c` passed its
+  systemd verifier. odin-http vendoring remains a separate WP8 concern.
+- **Deadline.** closed before WP1.
 
 ### OQ-2 · RESOLVED — drop `#optional_ok` on HTTP extractors
 - **Owner.** API owner.

@@ -11,13 +11,14 @@ log under `/var/lib/uruquim-ci`.
 
 Installation outline for Ubuntu/Debian x86_64:
 
-1. Create system user `uruquim-ci` and writable directories
+1. Install host prerequisites: `git`, `curl`, `tar`, and `clang`.
+2. Create system user `uruquim-ci` and writable directories
    `/opt/uruquim-ci` and `/var/lib/uruquim-ci`.
-2. Copy `run.sh` to `/opt/uruquim-ci/run.sh` and make it executable.
-3. From a trusted checkout, run `install-odin.sh` with permission to create
+3. Copy `run.sh` to `/opt/uruquim-ci/run.sh` and make it executable.
+4. From a trusted checkout, run `install-odin.sh` with permission to create
    `/opt/uruquim-odin`; it verifies the pinned SHA-256 and compiler commit.
-4. Install the service and timer in `/etc/systemd/system/`.
-5. Run `systemctl daemon-reload` and enable `uruquim-ci.timer`.
+5. Install the service and timer in `/etc/systemd/system/`.
+6. Run `systemctl daemon-reload` and enable `uruquim-ci.timer`.
 
 Optional `/etc/uruquim-ci.env` overrides:
 

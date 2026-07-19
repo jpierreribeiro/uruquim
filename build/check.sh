@@ -40,6 +40,8 @@ test -d "$URUQUIM_COMPILER_DIR/core/net" || fail "pinned core:net package missin
 test -d "$URUQUIM_COMPILER_DIR/core/nbio" || fail "pinned core:nbio package missing"
 test -d "$URUQUIM_COMPILER_DIR/core/encoding/json" ||
   fail "pinned core:encoding/json package missing"
+command -v clang >/dev/null 2>&1 ||
+  fail "clang not found; Odin needs it to link runnable checks"
 
 bash -n "$URUQUIM_ROOT/build/check.sh"
 bash -n "$URUQUIM_ROOT/build/check_test.sh"

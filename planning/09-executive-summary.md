@@ -69,11 +69,12 @@ SPEC → TESTS → MINIMAL IMPLEMENTATION → REVIEW → DOCUMENTATION → GATE:
 11. WP10 — Phase-1 docs and examples
 12. WP11 — implementation gate and freeze
 
-WP0 has now started and its local gate passes. The pinned checker accepts
-`819fdc7`, rejects a divergent compiler, and observes 10/10 prototypes. GitHub
-Actions is unavailable; a tracked pre-push hook is now the mandatory gate and
-the project VPS will repeat it from a clean pushed commit. WP1 has not started;
-see `planning/12-wp0-gate.md`.
+WP0 is complete. The pinned checker accepts `819fdc7`, rejects a divergent
+compiler and ambient `ODIN_ROOT`, and observes 10/10 prototypes. GitHub Actions
+is unavailable; a tracked pre-push hook is the mandatory local gate. The real
+Ubuntu VPS verified clean commit `4ae2d1c` green and its five-minute systemd
+timer is enabled and active. WP1 is now technically authorized but has not
+started; see `planning/12-wp0-gate.md`.
 
 ## Parity statement
 

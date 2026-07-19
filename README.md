@@ -94,6 +94,6 @@ started. The knowledge base is the governing specification; implementation
 now follows one approved work package at a time as defined in
 `planning/05-phase-1-implementation-plan.md`.
 
-WP0 local baseline is green. GitHub Actions is not required: a tracked
-pre-push hook runs the mandatory gate, and the project VPS repeats it from a
-clean commit. VPS execution is pending; WP1 has not started.
+WP0 is complete. GitHub Actions is not required: a tracked pre-push hook runs
+the mandatory gate, and the project VPS repeats it from a clean commit on an
+enabled systemd timer. WP1 is authorized by the gate but has not started.

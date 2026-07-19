@@ -15,9 +15,10 @@ Scale: probability/impact ∈ {Low, Med, High}.
 - **Fallback.** perform ratification on a developer machine; commit the runner
   output as evidence; keep the audit/plan (compiler-independent) as the
   deliverable meanwhile.
-- **Resolution.** Local compiler and clean-verifier mechanism are proven;
-  real VPS provisioning remains WP0 and adapter vendoring remains WP8. A
-  truncated archive is rejected before extraction.
+- **Resolution.** WP0 closed: local compiler and real VPS verifier are proven;
+  the VPS stores the SHA/commit-verified distribution under `/opt`, and the
+  timer is enabled. A truncated archive is rejected before extraction.
+  Adapter vendoring remains WP8.
 
 ## R-02 · odin-http is beta / API-unstable
 - **Prob** Med · **Impact** Med (WP8 churn).

@@ -1,6 +1,6 @@
 # WP0 Gate — Toolchain and Repository Baseline
 
-Status: **LOCAL PASS / CLEAN-CLONE PASS / REAL VPS PENDING** — 2026-07-18.
+Status: **COMPLETE — LOCAL PASS / REAL VPS PASS** — 2026-07-18.
 
 ## SPEC
 
@@ -81,14 +81,26 @@ The exp-02 `Unsupported_Type` log is expected negative pointer evidence.
   verified distribution. A deliberately invalid inherited `ODIN_ROOT` is a
   passing regression test, so another standard-library tree cannot silently
   contaminate the gate.
+- The first real service run exposed missing host `clang`; the second exposed
+  an implicit `/` working directory. Both failures were preserved, then fixed
+  by documenting/checking the linker prerequisite and compiling from the
+  extracted writable archive.
 
 ## GATE
 
 - Local gate: **PASS**.
 - Clean-clone verifier mechanism: **PASS**.
-- Real VPS: **PENDING**. The branch is pushed, root access is confirmed, and a
-  public key is installed; the persistent toolchain/service run remains.
+- Real VPS: **PASS** on Ubuntu 26.04 x86_64.
 
-WP0 becomes COMPLETE when the real VPS records the exact pushed commit green.
-ADR-011 is closed and the Phase-1 Spec Gate is READY; WP1 remains forbidden
-only until that real-VPS repetition completes.
+```text
+commit=4ae2d1cbbb4c6f2775bf19f78248185d35116270
+branch=codex/phase-1-bootstrap
+result=pass
+duration_seconds=12
+PASS=10 FAIL=0 SKIP=0
+timer=enabled,active
+```
+
+WP0 is COMPLETE. ADR-011 is closed and the Phase-1 Spec Gate is READY. WP1 may
+start only as a new work package following its mandatory
+SPEC → TESTS → MINIMAL IMPLEMENTATION → REVIEW → DOCUMENTATION → GATE cycle.

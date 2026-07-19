@@ -13,10 +13,11 @@ runs on the pinned toolchain.
 ---
 
 ## WP0 — Toolchain and repository baseline
-- **Execution status.** **LOCAL GATE PASS; VPS CLEAN RUN PENDING.** Test-first run
+- **Execution status.** **COMPLETE.** Test-first run
   failed on the missing pin, then passed against `819fdc7` after the minimal
   baseline was added. GitHub Actions is unavailable by owner decision; the
-  same gate is mandatory pre-push and repeated on the VPS.
+  same gate is mandatory pre-push and repeats on the VPS. The real VPS recorded
+  commit `4ae2d1c` green with 10/10 prototypes; its timer is enabled and active.
 - **Objective.** Reproducible build: pinned Odin, collection wiring, local
   pre-push gate, and clean VPS repetition.
 - **Spec.** freeze discipline; baseline 01.
