@@ -1,8 +1,8 @@
-# 21 — PROPOSED SPEC AMENDMENT (WP3: test transport facade na Fase 1)
+# 21 — ACCEPTED SPEC AMENDMENT (WP3: test transport facade na Fase 1)
 
-Status: **PROPOSTA APLICADA NESTA BRANCH, PENDENTE DE APROVAÇÃO HUMANA.** Só se
-torna normativa após o merge da PR pré-WP3. Toolchain `dev-2026-07-nightly:819fdc7`;
-base `origin/main` em `3e6292f`.
+Status: **HUMAN-ACCEPTED / MERGED.** PR #5 mergeada em 2026-07-19 como
+`2943d3e`. Toolchain `dev-2026-07-nightly:819fdc7`; base histórica da emenda
+`origin/main` em `3e6292f`.
 
 **Este documento não é autoritativo sobre a Knowledge Base.** Os patches P-1 e
 P-2 abaixo já estão aplicados **nas próprias fontes normativas** (`planning/05`,
