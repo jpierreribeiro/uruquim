@@ -374,3 +374,72 @@ recommendation · documentation impact · reversibility.
 No accepted Phase-1 ADR has been reopened. ADR-012 is a new, narrowly owned WP7
 decision; ADR-005, ADR-010, and ADR-013 remain owned by later gates and cannot
 expand earlier scope.
+
+---
+
+## Proposals recorded after the Phase-1 freeze
+
+**Status of every entry below: PROPOSED.** None is accepted. They are recorded
+so the owning work package inherits the reasoning instead of rediscovering it,
+and each requires the owner's approval before it may be marked accepted. See
+`post-phase1-audit.md` and `odin-fit-audit.md` for the evidence.
+
+### ADR-015 (PROPOSED) — test-support grows by procedure group, not by a new name
+
+**Context.** `test_request` takes only `(app, method, path)`, so a handler that
+calls `web.body` can never be exercised in memory: it always sees
+`invalid_json`. The framework's own tests reach the success path only by copying
+`web/*.odin` into a throwaway package, which a user cannot do.
+
+**Proposal.** Add a body-carrying variant through an explicit Odin procedure
+group — `test_request :: proc{...}` — rather than a second name such as
+`test_request_with_body`. In the pinned toolchain's own `core/`, procedure
+groups are exactly how variants are added without creating a dialect
+(`strings.builder_make`, `net.dial_tcp`, `net.recv`).
+
+**Alternatives.** Changing the frozen signature (rejected: breaks the freeze);
+a request-builder type (rejected for now: adds a lifetime and a second mental
+model); enriching `Recorded_Response` (orthogonal — that concerns responses);
+leaving advanced testing internal-only (rejected: leaves users stuck).
+
+**Requires owner approval** — the test-support ledger grows beyond 2 symbols.
+
+### ADR-016 (PROPOSED) — middleware execution order decided by prototype
+
+**Context.** Phase 2 needs `web.use` and `web.next`. Post-`next` (onion)
+semantics requires an unwind machine at runtime, which the Odin-fit audit
+classifies as `FOREIGN_ABSTRACTION_RISK`: hidden control flow is what Odin's own
+FAQ argues against when it rejects exceptions.
+
+**Proposal.** Prototype both onion and pre-order on the bootstrap transport,
+measure per-request allocation and binary cost for each, and only then choose.
+Flatten chains at registration either way, so dispatch stays flat data.
+
+**Requires owner approval** — it sets the execution model for every later phase.
+
+### ADR-017 (PROPOSED) — the response-commit invariant should be structural
+
+**Context.** Three request-local scratch arrays on `Context_Internal` are
+aliased by the committed response. Correctness rests on six independently
+hand-written `if committed { return }` guards placed before each buffer write. A
+seventh responder that writes before checking reintroduces a response that
+reports one status while serving another body, and no gate check would catch it.
+
+**Proposal.** Route scratch writes through a single helper that consults
+`committed` first, or add a gate assertion on guard ordering, before Phase 2
+adds responders.
+
+Internal only; no public surface change; no owner approval required.
+
+### ADR-018 (PROPOSED) — per-server state replaces the transport globals
+
+**Context.** The adapter keeps package-level `g_server`/`g_config`. A second
+`serve()` overwrites `g_config`, so the first server begins answering with the
+second application's routes; `g_server` also briefly holds the address of a
+stack local and is read non-atomically.
+
+**Proposal.** Document the single-server constraint in Phase 2. In Phase 4,
+which owns lifecycle, replace the globals with per-server state and introduce
+the stop API at the same time.
+
+**Requires owner approval when implemented** — Phase 4 adds public surface.

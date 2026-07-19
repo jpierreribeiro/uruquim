@@ -25,3 +25,14 @@ disposable evidence tasks. They do not authorize production code or public API.
 - A useful mechanism is not automatically a public API.
 - A debug detector is not described as a correctness or security guarantee.
 - A feature cannot move earlier merely because an external framework ships it.
+
+## Added after the Phase-1 freeze
+
+| # | Topic | Gate | Method | Success signal |
+|---|---|---|---|---|
+| 12 | Middleware execution model | Phase-2 prototype WP (ADR-016) | Build onion and pre-order on the bootstrap transport; measure per-request allocations, binary cost and the observable difference when a middleware runs work after `next` | A choice supported by measurement, with the rejected option and its numbers recorded |
+| 13 | Lazily-linked default middleware | Phase-2 | `nm` on an app that uses recovery/logger/request-ID versus one that does not, with a positive control, exactly as G-11 was proven | An application that does not use a default links **zero** of its symbols |
+| 14 | Deferred inbound header materialisation | Phase-2/3 | Measure the cost of building `[]Header_Pair` per request — which no Phase-1 path can read — against materialising lazily once a header accessor exists | Measured saving, no observable behaviour change |
+| 15 | Gate restructuring without weakening it | Phase-2 | Derive the permitted file set from the package rather than listing filenames, while keeping the ledger and signature-snapshot assertions exact; re-run the WP11 mutation probes | Every WP11 mutation still rejected, and a private-parameter rename no longer fails |
+| 16 | Route identity for observability | Phase-3/4 | Follow the OpenTelemetry HTTP semantic conventions: metrics must key on the low-cardinality route pattern, never the raw path | Bounded metric cardinality under a path-fuzzing workload |
+| 17 | Vendor patch verification by behaviour | Phase-4 | Replace the code-shape greps over vendor sources with assertions that the raw-wire corpus covers each patch's case | A correct re-application of a patch, written differently, still passes |

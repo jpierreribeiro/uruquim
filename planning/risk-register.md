@@ -215,9 +215,43 @@ Scale: probability/impact ∈ {Low, Med, High}.
 | R-17 framing divergence | Med | High | WP9/every adapter |
 | R-18 metric cardinality | Med | High | P3/P4 |
 | R-19 trusted-proxy spoofing | Low before feature | High | P4 |
+| R-20 transport globals | Low (needs 2 servers) | High | P2 doc / P4 fix |
+| R-21 responder scratch aliasing | Med as responders grow | High | P2 |
+| R-22 gate obstructs refactors | High | Med | P2 |
+| R-23 vendor patch drift | Med | High | P4 |
+| R-24 no licence | Certain until fixed | High (blocks all use) | correction PR |
+| R-25 registration during dispatch | Low | Med | P2 |
 
 The local R-01 condition and all blockers from the original Phase-1 Spec Gate
 are resolved. Newly identified R-15/OQ-15 is explicitly owned and blocks only
 WP7 implementation until its prototype and human decision. Remaining risks are
 owned by their implementation work packages or later phase gates. External
 research created no permission to implement future-phase features early.
+
+## Added after the Phase-1 freeze (post-Phase-1 audit)
+
+R-20 to R-25 come from the post-Phase-1 audit and the Odin-fit audit; see
+`post-phase1-audit.md` for the file:line evidence behind each. None is a Phase-1
+blocker — Phase 1 froze with no open blocker assigned to it — and none is a P0.
+
+- **R-20** `web/internal/transport` keeps package-level `g_server`/`g_config`;
+  a second `serve()` cross-wires dispatch to the wrong App, and `g_server`
+  briefly holds a stack address read non-atomically. Reaching it requires
+  deliberately starting two servers. Document the single-server constraint in
+  Phase 2; replace with per-server state in Phase 4.
+- **R-21** Three request-local scratch arrays are aliased by the committed
+  response, and safety rests on six hand-written `committed` guards rather than
+  on `response_commit`. Phase 2 adds responders, which is exactly the scenario
+  that breaks it; make the invariant structural.
+- **R-22** About a third of the gate pins implementation text (exact parameter
+  names, exact declaration lines, exact file sets), so honest refactors fail
+  with a message accusing the maintainer of needing a spec amendment. Phase 2
+  adds files and will meet this immediately.
+- **R-23** Five hand-applied vendor security patches with no upstreaming path,
+  verified by code-shape greps rather than by behaviour. The raw-wire corpus is
+  the real evidence.
+- **R-24** No `LICENSE` file: the repository is legally unusable by anyone.
+  Owner decision, corrective PR, before any external adoption.
+- **R-25** Route registration is unguarded during dispatch; the "table is
+  stable" invariant is comment-only while `web.get` is public and callable from
+  a handler.
