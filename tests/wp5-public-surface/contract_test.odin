@@ -376,35 +376,35 @@ wp5_stub_probe_handler :: proc(ctx: ^web.Context) {
 		wp5_stub_probe_hits += 1000
 	}
 
+	// The FIRST responder wins; every later one is a no-op.
 	web.ok(ctx, 1)
-	web.created(ctx, 1)
-	web.json(ctx, .OK, 1)
-	web.text(ctx, .OK, "x")
-	web.no_content(ctx)
-	web.bad_request(ctx, "x")
-	web.unauthorized(ctx, "x")
-	web.forbidden(ctx, "x")
-	web.not_found(ctx, "x")
-	web.internal_error(ctx)
+	web.created(ctx, 2)
+	web.text(ctx, .Internal_Server_Error, "late")
+	web.bad_request(ctx, "late")
 }
 
 @(test)
-wp5_body_and_the_wp6_responders_are_still_stubs :: proc(t: ^testing.T) {
-	a := web.bare()
+wp5_body_is_still_a_wp7_stub_and_the_first_response_wins :: proc(t: ^testing.T) {
+	// SUPERSEDES `wp5_body_and_the_wp6_responders_are_still_stubs`. WP6 has
+	// shipped, so asserting that the responders commit nothing would assert the
+	// absence of a delivered feature.
+	//
+	// The two properties WP5 still owns are checked instead: `web.body` remains
+	// the WP7 stub, and a handler that responds more than once keeps its FIRST
+	// response (G-04 / ADR-008).
+	a := web.app()
 	defer web.destroy(&a)
 
-	// `bare()` installs no automatic 404/405, so anything committed here came
-	// from a responder — and none of them commits yet.
 	web.get(&a, "/stub", wp5_stub_probe_handler)
 
 	before := wp5_stub_probe_hits
 	res := web.test_request(&a, .GET, "/stub")
 
+	// +1, never +1001: `web.body` must still return false.
 	testing.expect_value(t, wp5_stub_probe_hits - before, 1)
 
-	zero: web.Status
-	testing.expect_value(t, res.status, zero)
-	testing.expect_value(t, res.body, "")
+	testing.expect_value(t, res.status, web.Status.OK)
+	testing.expect_value(t, res.body, "1")
 }
 
 // ---------------------------------------------------------------------------

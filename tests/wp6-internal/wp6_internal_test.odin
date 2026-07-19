@@ -197,19 +197,26 @@ wp6_logger_proc :: proc(
 ) {
 	record := (^Wp6_Log_Record)(data)
 
-	if record.inner.procedure != nil {
-		record.inner.procedure(record.inner.data, level, text, options, location)
-	}
-
-	// Only the framework's own marshal diagnostic is counted. Without this
-	// filter the runner's assertion failures would be indistinguishable from
-	// the event under test.
+	// The framework's own marshal diagnostic is the EVENT UNDER TEST: it is
+	// recorded and deliberately NOT forwarded. The runner treats any Error-level
+	// record as a failed assertion, so forwarding an expected diagnostic would
+	// fail every test that successfully provokes one.
 	if level == .Error && strings.contains(text, WP6_LOG_MARKER) {
 		record.framework_calls += 1
 		record.last_level = level
 		if record.response != nil {
 			record.committed_at_log = record.response.committed
 		}
+		return
+	}
+
+	// Everything else is forwarded, and that is load-bearing: `testing.expect*`
+	// reports a failed assertion by logging it at Error level through
+	// `context.logger`, and the runner counts failures by observing those
+	// records. Swallowing them would make every test in this file incapable of
+	// failing — it would report PASS no matter what the code did.
+	if record.inner.procedure != nil {
+		record.inner.procedure(record.inner.data, level, text, options, location)
 	}
 }
 

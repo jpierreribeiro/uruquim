@@ -32,6 +32,14 @@ package wp4_public_surface
 import "core:testing"
 import web "uruquim:web"
 
+// The standardized envelopes WP6 attached to the automatic responses. WP4
+// committed empty bodies and said so; WP6 supplies the contract WP4 deferred.
+// The routing DECISIONS these tests exist to pin — which status a request gets
+// — are unchanged.
+WP6_NOT_FOUND_ENVELOPE :: `{"error":{"code":"not_found","message":"Route not found"}}`
+WP6_METHOD_NOT_ALLOWED_ENVELOPE ::
+	`{"error":{"code":"method_not_allowed","message":"Method not allowed"}}`
+
 // --- handlers: they record that they ran, and respond with nothing ---
 //
 // The public responders do not work yet (WP6), so a handler cannot commit a
@@ -192,9 +200,9 @@ wp4_app_returns_404_for_an_unknown_path :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, res.status, web.Status.Not_Found)
 
-	// The standardized JSON envelope is WP6. WP4 ships an empty body and says
-	// so, rather than implementing WP6 early.
-	testing.expect_value(t, res.body, "")
+	// AMENDED IN WP6, which supplies the standardized envelope WP4 deliberately
+	// left empty.
+	testing.expect_value(t, res.body, WP6_NOT_FOUND_ENVELOPE)
 }
 
 @(test)
@@ -220,7 +228,7 @@ wp4_app_returns_405_for_a_known_path_under_another_method :: proc(t: ^testing.T)
 	res := web.test_request(&app, .DELETE, "/users")
 
 	testing.expect_value(t, res.status, web.Status.Method_Not_Allowed)
-	testing.expect_value(t, res.body, "")
+	testing.expect_value(t, res.body, WP6_METHOD_NOT_ALLOWED_ENVELOPE)
 
 	// The `Allow` header is real, but `Recorded_Response` deliberately exposes
 	// no headers (D4). Its exact value is pinned by tests/wp4-internal/.
@@ -295,8 +303,8 @@ wp4_consecutive_recorded_responses_survive_until_destroy :: proc(t: ^testing.T) 
 	zero: web.Status
 	testing.expect_value(t, third.status, zero)
 
-	testing.expect_value(t, first.body, "")
-	testing.expect_value(t, second.body, "")
+	testing.expect_value(t, first.body, WP6_NOT_FOUND_ENVELOPE)
+	testing.expect_value(t, second.body, WP6_METHOD_NOT_ALLOWED_ENVELOPE)
 }
 
 // ---------------------------------------------------------------------------

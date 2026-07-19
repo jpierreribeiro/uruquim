@@ -292,9 +292,11 @@ allow_value :: proc(a: ^App, path: string, buffer: []u8) -> (value: string, allo
 // to the ordinary 405/404 rules. It never becomes a 501: that would be a
 // response policy WP4 has no mandate to freeze.
 //
-// The 404 and 405 bodies are EMPTY. The standardized JSON error envelope is
-// WP6, and rendering one here would implement WP6 early against a contract
-// that WP6 owns.
+// The 404 and 405 bodies are the STATIC envelope constants defined in
+// `web/errors.odin` (WP6 D5). They are compile-time byte constants rather than
+// marshalled values, which is what keeps this procedure allocation-free — an
+// unauthenticated client can drive a 404 at will — and keeps the JSON encoder
+// out of applications that never render a payload of their own.
 @(private)
 dispatch :: proc(a: ^App, ctx: ^Context) {
 	entry, param, found := route_lookup(a, ctx.request.method, ctx.request.path)
@@ -318,18 +320,19 @@ dispatch :: proc(a: ^App, ctx: ^Context) {
 	// ownership rules exist to prevent.
 	allow, other_methods_exist := allow_value(a, ctx.request.path, ctx.private.allow_buffer[:])
 	if other_methods_exist {
-		ctx.private.allow_header[0] = Header_Pair {
-			name  = ALLOW_HEADER_NAME,
-			value = allow,
-		}
 		response_commit(
 			&ctx.private.response,
 			.Method_Not_Allowed,
-			ctx.private.allow_header[:],
-			nil,
+			response_allow_headers(ctx, allow),
+			transmute([]u8)string(ERROR_BODY_METHOD_NOT_ALLOWED),
 		)
 		return
 	}
 
-	response_commit(&ctx.private.response, .Not_Found, nil, nil)
+	response_commit(
+		&ctx.private.response,
+		.Not_Found,
+		response_json_headers(ctx),
+		transmute([]u8)string(ERROR_BODY_NOT_FOUND_ROUTE),
+	)
 }

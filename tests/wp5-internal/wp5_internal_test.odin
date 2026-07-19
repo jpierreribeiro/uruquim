@@ -299,9 +299,12 @@ wp5_path_int_failure_commits_the_exact_envelope :: proc(t: ^testing.T) {
 		"id",
 	)
 
-	// WP5 adds no header policy. Content negotiation and the response
-	// `Content-Type` belong to WP6.
-	testing.expect_value(t, len(ctx.private.response.headers), 0)
+	// AMENDED IN WP6: the envelope now carries a `Content-Type`. The body still
+	// lives on the fixed request-local buffer, so it is BORROWED, not owned —
+	// WP5's allocation-free error path is unchanged.
+	testing.expect_value(t, len(ctx.private.response.headers), 1)
+	testing.expect_value(t, ctx.private.response.headers[0].name, "Content-Type")
+	testing.expect_value(t, ctx.private.response.headers[0].value, "application/json")
 }
 
 // ---------------------------------------------------------------------------
@@ -927,26 +930,25 @@ wp5_a_failing_extraction_allocates_nothing_either :: proc(t: ^testing.T) {
 // ---------------------------------------------------------------------------
 
 @(test)
-wp5_did_not_start_wp6_responders :: proc(t: ^testing.T) {
-	// The public responders stay inert stubs. WP5 commits ONLY the two 400
-	// envelopes it owns, through its own package-private path.
+wp5_extractor_errors_are_unchanged_by_wp6 :: proc(t: ^testing.T) {
+	// SUPERSEDES `wp5_did_not_start_wp6_responders`, which asserted that the
+	// WP6 responders committed nothing. WP6 has now shipped, so that guard is
+	// obsolete — keeping it would assert the absence of a delivered feature.
+	//
+	// What WP5 still owns, and what this checks instead, is that its own two
+	// envelopes did not change when WP6 landed: same status, same code, same
+	// message, same `field`, and still on the fixed request-local buffer rather
+	// than an owned allocation.
 	ctx: Context
+	wp5_with_param(&ctx, "id", "banana")
 
-	bad_request(&ctx, "nope")
-	unauthorized(&ctx, "nope")
-	forbidden(&ctx, "nope")
-	not_found(&ctx, "user")
-	internal_error(&ctx)
-	text(&ctx, .OK, "hello")
-	no_content(&ctx)
-	json(&ctx, .OK, 42)
-	ok(&ctx, 42)
-	created(&ctx, 42)
-
+	_, ok := path_int(&ctx, "id")
+	testing.expect(t, !ok)
+	testing.expect_value(t, ctx.private.response.status, Status.Bad_Request)
 	testing.expect(
 		t,
-		!ctx.private.response.committed,
-		"WP6 responders must still commit nothing after WP5",
+		!ctx.private.response.owned_body,
+		"the WP5 envelope must stay on the fixed buffer, not become an allocation",
 	)
 }
 

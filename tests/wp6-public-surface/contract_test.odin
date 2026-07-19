@@ -16,6 +16,7 @@
 package wp6_public_surface
 
 import "core:encoding/json"
+import "core:log"
 import "core:strings"
 import "core:testing"
 import web "uruquim:web"
@@ -282,13 +283,57 @@ wp6_the_first_response_wins :: proc(t: ^testing.T) {
 // 5. Marshal failure is one complete 500
 // ---------------------------------------------------------------------------
 
+// EXPECTED_LOG_MARKER is a substring of the framework's marshal diagnostic.
+//
+// The framework logs the rejected payload at Error level, on purpose — that is
+// the ADR-003 contract. But `odin test` counts every Error-level record as a
+// failed assertion, so a test that successfully provokes the diagnostic would
+// be reported as failing. The logger below swallows exactly that record and
+// forwards everything else, which keeps real assertion failures visible.
+EXPECTED_LOG_MARKER :: "could not be serialized"
+
+Expected_Log :: struct {
+	seen:  int,
+	inner: log.Logger,
+}
+
+expected_log_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	record := (^Expected_Log)(data)
+	if level == .Error && strings.contains(text, EXPECTED_LOG_MARKER) {
+		record.seen += 1
+		return
+	}
+	if record.inner.procedure != nil {
+		record.inner.procedure(record.inner.data, level, text, options, location)
+	}
+}
+
 @(test)
 wp6_unmarshalable_payload_yields_a_complete_500 :: proc(t: ^testing.T) {
 	a := web.app()
 	defer web.destroy(&a)
 	web.get(&a, "/broken", pointer_payload_handler)
 
+	expected := Expected_Log {
+		inner = context.logger,
+	}
+	context.logger = log.Logger {
+		procedure    = expected_log_proc,
+		data         = rawptr(&expected),
+		lowest_level = .Debug,
+		options      = context.logger.options,
+	}
+
 	res := web.test_request(&a, .GET, "/broken")
+
+	// The failure really was reported on the server, exactly once.
+	testing.expect_value(t, expected.seen, 1)
 
 	testing.expect_value(t, res.status, web.Status.Internal_Server_Error)
 	expect_envelope(t, res.body, "internal_error", "Internal server error")

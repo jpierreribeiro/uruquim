@@ -240,9 +240,15 @@ if URUQUIM_WP3_CYCLE_OUT="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
   echo "$URUQUIM_WP3_CYCLE_OUT" >&2
   fail "the back-edge compiled; web/testing -> web must be a compile cycle (C5)"
 fi
-if ! grep -qF "Cyclic importation of 'web_testing'" <<<"$URUQUIM_WP3_CYCLE_OUT"; then
+# EITHER side of the cycle is acceptable evidence. The compiler names whichever
+# package it reaches first, and that depends on import-resolution order — WP6
+# added `core:` imports to `web/` and flipped the reported side from
+# 'web_testing' to 'web' without changing the fact being proven. Matching one
+# exact spelling made this probe fail for a reason that had nothing to do with
+# the dependency direction it exists to enforce.
+if ! grep -qE "Cyclic importation of '(web|web_testing)'" <<<"$URUQUIM_WP3_CYCLE_OUT"; then
   echo "$URUQUIM_WP3_CYCLE_OUT" >&2
-  fail "the back-edge failed for the wrong reason; expected: Cyclic importation of 'web_testing'"
+  fail "the back-edge failed for the wrong reason; expected a cyclic-import diagnostic naming 'web' or 'web_testing'"
 fi
 rm -rf "$URUQUIM_WP3_CYCLE"
 trap - EXIT

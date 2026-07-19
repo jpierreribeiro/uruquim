@@ -639,8 +639,11 @@ fi
 # storage yet: headers and body are views until WP6 defines the concrete
 # allocation and lifetime of a rendered response.
 URUQUIM_RESPONSE_FIELDS="$(awk '/^Response :: struct \{/{f=1;next} /^\}/{f=0} f' \
-  <<<"$URUQUIM_WEB_PUBLIC_CODE" | sed -E 's/^[[:space:]]*([a-z_]+):.*/\1/' | grep -v '^$')"
-URUQUIM_RESPONSE_EXPECTED="$(printf 'status\nheaders\nbody\ncommitted\n')"
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" | sed -E 's/^[[:space:]]*([a-z_]+):.*/\1/' | grep -vE '^[[:space:]]*$')"
+# AMENDED IN WP6 (ADR-014): `owned_body` and `body_allocator` record whether the
+# committed body is an allocation this Response must release. Both are
+# package-private, so the application ledger is unaffected.
+URUQUIM_RESPONSE_EXPECTED="$(printf 'status\nheaders\nbody\ncommitted\nowned_body\nbody_allocator\n')"
 if test "$URUQUIM_RESPONSE_FIELDS" != "$URUQUIM_RESPONSE_EXPECTED"; then
   echo "--- expected internal Response fields ---" >&2
   echo "$URUQUIM_RESPONSE_EXPECTED" >&2
@@ -809,40 +812,82 @@ uruquim_expect_signature \
 uruquim_expect_signature \
   'body :: proc(ctx: ^Context, dst: ^$T) -> bool' 'web.body'
 
-# 10c. WP5 did not start WP6. The public responders stay INERT: WP5 owns exactly
-#      two 400 envelopes, committed through its own package-private path, and
-#      nothing else. A `response_commit` inside `respond.odin`, or a non-empty
-#      responder body, means the renderer landed early.
-uruquim_expect_empty_stub() { # file decl-prefix label
-  local file="$1" decl="$2" label="$3"
-  local body
-  body="$(sed -E 's://.*$::' "$file" |
-    awk -v d="^${decl} :: proc" '$0 ~ d {f=1; next} f && /^\}/ {f=0} f' |
-    grep -v '^[[:space:]]*$' || true)"
-  if test -n "$body"; then
-    echo "--- unexpected body in $label ---" >&2
-    echo "$body" >&2
-    fail "'$label' is no longer an empty stub; the WP6 responders must not be implemented by WP5"
-  fi
-}
-
-for URUQUIM_STUB in json text no_content; do
-  uruquim_expect_empty_stub "$URUQUIM_WEB/respond.odin" "$URUQUIM_STUB" "web.$URUQUIM_STUB"
-done
-for URUQUIM_STUB in bad_request unauthorized forbidden not_found internal_error; do
-  uruquim_expect_empty_stub "$URUQUIM_WEB/errors.odin" "$URUQUIM_STUB" "web.$URUQUIM_STUB"
-done
-
-if grep -nE 'response_commit' "$URUQUIM_WEB/respond.odin"; then
-  fail "web/respond.odin commits a response; the public responders are WP6 and must stay inert after WP5"
+# 10c. WP6 shipped the responders WP5 deliberately left inert.
+#
+#      The "these must be empty stubs" assertions this section carried during
+#      WP5 are GONE: keeping them would assert the absence of a delivered
+#      feature. What replaces them pins the WP6 contract instead.
+#
+#      The JSON encoder may now be imported, but only by the two files that
+#      render. Every other envelope in the package is a static constant or the
+#      fixed WP5 buffer, precisely so that `dispatch` and the extractors do not
+#      drag the marshaller into applications that never render a payload.
+URUQUIM_ENCODER_USERS="$(grep -lE '"core:encoding/json"' "$URUQUIM_WEB"/*.odin | xargs -r -n1 basename | LC_ALL=C sort)"
+URUQUIM_ENCODER_EXPECTED="$(printf 'errors.odin\nrespond.odin\n')"
+if test "$URUQUIM_ENCODER_USERS" != "$URUQUIM_ENCODER_EXPECTED"; then
+  echo "--- expected core:encoding/json importers ---" >&2
+  echo "$URUQUIM_ENCODER_EXPECTED" >&2
+  echo "--- actual ---" >&2
+  echo "$URUQUIM_ENCODER_USERS" >&2
+  fail "the JSON encoder is imported outside web/respond.odin and web/errors.odin; the dispatcher and the extractors must stay encoder-free (WP6 D5)"
 fi
 
-# The generic JSON renderer is WP6. WP5's envelope is emitted by a hand-written
-# escaper into fixed request-local storage precisely so that the encoder is NOT
-# linked into applications that merely reach an extractor error, so the public
-# package must not import it.
-if grep -nE '"core:encoding/json"' "$URUQUIM_WEB"/*.odin; then
-  fail "web/ imports core:encoding/json; the marshaller is WP6, and WP5's envelope must not link an encoder"
+# The interim dispatcher must not marshal. Its 404/405 bodies are compile-time
+# constants, which is what keeps it allocation-free and keeps the encoder out of
+# every application that calls `web.app()` (WP6 D5).
+if grep -nE 'encoding_json|marshal' <<<"$URUQUIM_WP4_CODE"; then
+  fail "the WP4 dispatcher marshals a response; the automatic 404/405 bodies must stay static constants (WP6 D5)"
+fi
+
+# 10c-i. The response ownership machinery stayed INTERNAL. Each must exist and
+#        each must be package-private: the ledger in section 2 proves they are
+#        not exported, and this proves they were not quietly removed either.
+for URUQUIM_WP6_INTERNAL in Response response_commit response_commit_owned \
+  response_destroy Error_Envelope Framework_Report framework_report; do
+  grep -qE "^${URUQUIM_WP6_INTERNAL} ::" <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+    fail "internal WP6 declaration '$URUQUIM_WP6_INTERNAL' is missing from web/"
+  grep -qx "$URUQUIM_WP6_INTERNAL" <<<"$URUQUIM_ACTUAL_EXPORTS" &&
+    fail "internal WP6 declaration '$URUQUIM_WP6_INTERNAL' became exported; response ownership is not public API (ADR-014)"
+done
+
+# 10c-ii. No public cleanup symbol. An application must never be asked to free a
+#         response: the driver does it (ADR-014 D1).
+for URUQUIM_CLEANUP in response_destroy response_free response_release \
+  free_response destroy_response; do
+  if grep -qx "$URUQUIM_CLEANUP" <<<"$URUQUIM_ACTUAL_EXPORTS"; then
+    fail "'$URUQUIM_CLEANUP' is exported; response teardown is framework business and must stay private"
+  fi
+done
+
+# 10c-iii. The exact ratified Content-Type values (WP6 D3).
+grep -qE '^CONTENT_TYPE_JSON :: "application/json"$' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "the JSON Content-Type is not exactly \"application/json\" (WP6 D3)"
+grep -qE '^CONTENT_TYPE_TEXT :: "text/plain; charset=utf-8"$' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "the text Content-Type is not exactly \"text/plain; charset=utf-8\" (WP6 D3)"
+
+# 10c-iv. `field` is OMITTED for a general error, never emitted empty or null
+#         (AMEND-2). The envelope struct WP6 marshals must therefore have NO
+#         `field` member at all — the omission is a property of the type, not of
+#         a runtime emptiness check.
+URUQUIM_ENVELOPE_FIELDS="$(awk '/^Error_Envelope_Body :: struct \{/{f=1;next} /^\}/{f=0} f' \
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" | sed -E 's/^[[:space:]]*([a-z_]+):.*/\1/' | grep -vE '^[[:space:]]*$')"
+URUQUIM_ENVELOPE_EXPECTED="$(printf 'code\nmessage\n')"
+if test "$URUQUIM_ENVELOPE_FIELDS" != "$URUQUIM_ENVELOPE_EXPECTED"; then
+  echo "--- expected Error_Envelope_Body members ---" >&2
+  echo "$URUQUIM_ENVELOPE_EXPECTED" >&2
+  echo "--- actual ---" >&2
+  echo "$URUQUIM_ENVELOPE_FIELDS" >&2
+  fail "the general error envelope must carry exactly code and message; 'field' is omitted by TYPE, not by omitempty (AMEND-2)"
+fi
+if grep -nE 'omitempty' <<<"$URUQUIM_WEB_CODE"; then
+  fail "omitempty is used in web/; it decides on EMPTINESS and would also drop a field legitimately named \"\" (AMEND-2)"
+fi
+
+# 10c-v. Pointer payload support was NOT adopted. ADR-003's value-only baseline
+#        stands until a human ratifies an amendment; the WP6 prototype is
+#        recorded in the PR, not shipped.
+if grep -nE 'Type_Info_Pointer|dereference|deref' <<<"$URUQUIM_WEB_CODE"; then
+  fail "web/ appears to implement pointer-payload dereference; ADR-003 is value-only until a spec amendment is ratified (R-13)"
 fi
 
 # 10d. WP5 did not start WP7. Body binding, the request arena (ADR-006) and the
@@ -891,6 +936,8 @@ echo "public API contract: WP4 dispatch files export nothing; dispatch takes the
 echo "public API contract: Allow is exactly 'Allow' in canonical GET, POST, PUT, PATCH, DELETE order"
 echo "public API contract: no radix/wildcard/middleware construct entered the interim dispatcher"
 echo "public API contract: the five extractor signatures are exact and carry no #optional_ok"
-echo "public API contract: the WP6 responders stay inert and no JSON encoder is linked into web/"
+echo "public API contract: the JSON encoder is imported only by respond.odin and errors.odin"
+echo "public API contract: response ownership and the envelope machinery stayed internal"
+echo "public API contract: Content-Type values are exact and 'field' is omitted by type"
 echo "public API contract: no WP7 body-binding, arena or 4 MiB construct entered the package"
-echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4 + WP5)"
+echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4 + WP5 + WP6)"

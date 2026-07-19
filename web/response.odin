@@ -152,3 +152,78 @@ response_destroy :: proc(res: ^Response) {
 	}
 	res^ = Response{}
 }
+
+// ---------------------------------------------------------------------------
+// WP6 — response headers (plan D3).
+//
+// Phase 1 sets exactly one header kind of its own, `Content-Type`, plus the
+// `Allow` that WP4 already produced for a 405. There is NO public header API and
+// no content negotiation: the values below are fixed, and an application that
+// needs something else is asking for a Phase-2 feature.
+//
+// Every name and value is a STATIC string, and the pair array they are written
+// into is request-local storage on the Context. Nothing here is allocated, so
+// nothing here is torn down.
+// ---------------------------------------------------------------------------
+
+// RESPONSE_HEADER_MAX is the Phase-1 worst case: a 405 carries `Allow` and
+// `Content-Type`, and nothing carries more.
+@(private)
+RESPONSE_HEADER_MAX :: 2
+
+@(private)
+CONTENT_TYPE_HEADER_NAME :: "Content-Type"
+
+// The exact ratified media types. `charset=utf-8` is spelled on the text type
+// and NOT on the JSON one, because RFC 8259 defines JSON as UTF-8 and registers
+// no charset parameter for `application/json`, while `text/plain` needs one to
+// avoid a latin-1 default.
+@(private)
+CONTENT_TYPE_JSON :: "application/json"
+
+@(private)
+CONTENT_TYPE_TEXT :: "text/plain; charset=utf-8"
+
+// response_json_headers returns the single `Content-Type: application/json`
+// pair, written into the caller's request-local storage.
+//
+// The returned slice VIEWS `ctx.private.response_headers`, so it is valid
+// exactly as long as the Context is — which is as long as the committed
+// response is readable.
+@(private)
+response_json_headers :: proc(ctx: ^Context) -> []Header_Pair {
+	ctx.private.response_headers[0] = Header_Pair {
+		name  = CONTENT_TYPE_HEADER_NAME,
+		value = CONTENT_TYPE_JSON,
+	}
+	return ctx.private.response_headers[:1]
+}
+
+// response_text_headers is the `text/plain` counterpart.
+@(private)
+response_text_headers :: proc(ctx: ^Context) -> []Header_Pair {
+	ctx.private.response_headers[0] = Header_Pair {
+		name  = CONTENT_TYPE_HEADER_NAME,
+		value = CONTENT_TYPE_TEXT,
+	}
+	return ctx.private.response_headers[:1]
+}
+
+// response_allow_headers returns `Allow` FIRST and `Content-Type` second, in
+// that fixed order (plan D3).
+//
+// The order is a property of the framework, never of anything a request can
+// influence, so two deployments emit byte-identical 405 headers. `allow` is a
+// view over `ctx.private.allow_buffer`, which lives on the same Context.
+@(private)
+response_allow_headers :: proc(ctx: ^Context, allow: string) -> []Header_Pair {
+	ctx.private.response_headers[0] = Header_Pair {
+		name  = ALLOW_HEADER_NAME,
+		value = allow,
+	}
+	ctx.private.response_headers[1] = Header_Pair {
+		name  = CONTENT_TYPE_HEADER_NAME,
+		value = CONTENT_TYPE_JSON,
+	}
+	return ctx.private.response_headers[:2]
+}
