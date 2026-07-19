@@ -1,4 +1,4 @@
-# 06 — Risk Register
+# Risk Register
 
 Status: **COMPLETE.** Each risk: probability · impact · early signals ·
 mitigation · fallback · resolution phase.
@@ -131,7 +131,8 @@ Scale: probability/impact ∈ {Low, Med, High}.
 - **Signals.** synonyms; helpers without behavior tests; `web.Context` in
   domain packages; dynamic state bags; backend nouns in exports; later-phase
   features appearing in quick starts; optional dependencies entering core.
-- **Mitigation.** planning/15 guardrails; exact export inventory in WP1/WP11;
+- **Mitigation.** `planning/public-api-guardrails.md`; exact export inventory
+  in WP1/WP11;
   same-change compiling example, behavior test, docs, ownership, dependency,
   and rollback evidence for every public change.
 - **Fallback.** keep the proposal private/advanced, move it to its owning

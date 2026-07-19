@@ -1,4 +1,4 @@
-# 03 — Proposed Architecture Decision Records
+# Architecture Decision Records
 
 Status: **MIXED.** Human decisions recorded on 2026-07-18 accept ADR-001,
 ADR-002, ADR-003's value-only baseline, ADR-004, ADR-006, ADR-007, ADR-008,

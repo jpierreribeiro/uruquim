@@ -3,7 +3,7 @@
 // Nothing in this file is public. There is no public `Response` type, no
 // public commit state, and no `ctx.response` field: applications respond
 // exclusively through `web.json`, `web.ok`, `web.created`, `web.text`,
-// `web.no_content` and the error helpers (ADR-008, planning/18 P-1).
+// `web.no_content` and the error helpers (ADR-008).
 //
 // WP2 delivers the STORAGE and the GUARD only. It renders nothing: no JSON
 // marshalling, no error envelope, no response headers, and no automatic status
@@ -19,7 +19,7 @@ package web
 //
 // `headers` is WP2 state rather than deferred work because WP4 depends on it.
 // WP4's ratified contract includes "405-when-other-method with exact `Allow`
-// header" (planning/05 §WP4), and WP4 depends on WP2/WP3 — it lands BEFORE
+// header" (planning/phase-1-plan.md §WP4), and WP4 depends on WP2/WP3 — it lands BEFORE
 // WP6. Without internal header storage, WP4 could not express or test its own
 // contract.
 //
@@ -48,7 +48,7 @@ Response :: struct {
 // letting replacement headers through would still be a double-write, so a
 // rejected attempt leaves all three exactly as the first commit left them.
 //
-// SCOPE OF THE GUARANTEE (ADR-008, as amended by planning/18 P-3). This
+// SCOPE OF THE GUARANTEE (ADR-008). This
 // prevents the SUPPORTED `web.*` response paths from overwriting a response
 // that was already produced. It is NOT a security boundary: the application
 // and the framework share one program, `@(private)` hides a declaration's name

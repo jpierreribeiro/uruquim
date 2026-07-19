@@ -216,7 +216,7 @@ echo "PASS: Recorded_Response exposes no public headers field"
 # Probe C5 — the back-edge `web/testing -> web` is a COMPILE CYCLE. Copy the two
 # packages into a throwaway tree, inject the committed back-edge fixture into the
 # copied machinery, and check the copied facade: it must fail with the exact
-# cyclic-import diagnostic. This is the versioned form of planning/21 C5.
+# cyclic-import diagnostic. This is the versioned WP3 C5 contract.
 echo "--- WP3 probe C5: web/testing -> web back-edge is a compile cycle (expected failure) ---"
 URUQUIM_WP3_CYCLE="$(mktemp -d -t uruquim-wp3-cycle-XXXXXXXX)"
 trap 'rm -rf "$URUQUIM_WP3_CYCLE"' EXIT

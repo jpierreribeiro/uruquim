@@ -22,7 +22,7 @@ package web
 // keep private — and would export `Header_Pair` with it.
 //
 // LIFETIME: every name and value is a view over transport-owned storage, valid
-// only during the request. Copy explicitly to persist (planning/15 G-05).
+// only during the request. Copy explicitly to persist (planning/public-api-guardrails.md G-05).
 Header_View :: struct {
 	private: Header_View_Internal,
 }

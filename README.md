@@ -91,7 +91,7 @@ docs/                    User- and agent-facing documentation
 
 Phase-1 Spec Gate: **READY** (2026-07-18). The knowledge base is the governing
 specification; implementation follows one approved work package at a time as
-defined in `planning/05-phase-1-implementation-plan.md`.
+defined in `planning/phase-1-plan.md`.
 
 WP0 is complete. GitHub Actions is not required: a tracked pre-push hook runs
 the mandatory gate, and the project VPS repeats it from a clean commit on an
@@ -102,4 +102,4 @@ WP1 and WP2 are complete. The public package compiles with the exact
 single-commit response model. It is still not a functional HTTP server:
 routing, extractors, JSON rendering, body binding and the real transport arrive
 in WP3–WP9. Current work-package status lives in
-`planning/05-phase-1-implementation-plan.md`.
+`planning/phase-1-plan.md`.

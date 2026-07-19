@@ -1,4 +1,4 @@
-# 05 — Phase 1 Implementation Plan
+# Phase 1 Implementation Plan
 
 Status: **HUMAN-APPROVED SEQUENCE; PHASE-1 SPEC GATE READY.** Execute one work
 package at a time. Every work package (WP) follows:
@@ -38,7 +38,7 @@ runs on the pinned toolchain.
 - **Objective.** All ratified Phase-1' signatures exist as stubs; no HTTP
   behavior.
 - **Spec.** §Public API Surface; §Canonical vocabulary; freeze discipline;
-  planning/15 G-01/G-02/G-03/G-06/G-09.
+  planning/public-api-guardrails.md G-01/G-02/G-03/G-06/G-09.
 - **Files.** `web/app.odin`, `web/routing.odin`, `web/context.odin`,
   `web/extract.odin`, `web/respond.odin`, `web/serve.odin`, `web/errors.odin`.
 - **API.** `app/bare/destroy`, `get/post/put/patch/delete`, `Context`,
@@ -56,14 +56,14 @@ runs on the pinned toolchain.
 
 ## WP2 — Framework request/response model
 - **Objective.** `Request`/`Response` with views + ownership + commit state.
-- **Spec.** §Request/Response ownership; ADR-007/008; planning/15
+- **Spec.** §Request/Response ownership; ADR-007/008; planning/public-api-guardrails.md
   G-03/G-04/G-05.
 - **Files.** `web/request.odin`, `web/response.odin`, `web/headers.odin`.
 - **API.** Public: `Request{method,path,query,headers,body}`, `Method`
   (`UNKNOWN/GET/POST/PUT/PATCH/DELETE`), `Header_View`. Internal, NOT exported:
   `Response{status,headers,body,committed}` and `Header_Pair`. Surface
-  checkpoint after WP2: exactly 32 symbols (29 + 3), behavior recorded in
-  planning/20.
+  checkpoint after WP2: exactly 32 symbols (29 + 3), behavior recorded by the
+  permanent WP2 tests and API checker.
 - **Tests first.** view-aliasing + invalidation test (port of exp-06);
   explicit persistent-copy test; single-commit test on the INTERNAL commit
   primitive (port of exp-08 — integration through `web.json`/`web.ok` belongs
@@ -74,29 +74,34 @@ runs on the pinned toolchain.
 - **Deps.** WP1; exp-06/08. **Rollback.** internal types only.
 
 ## WP3 — In-memory test transport
+- **Execution status.** **COMPLETE.** The in-memory facade, neutral machinery,
+  dual API ledger and lazy teardown are merged. An application that never
+  calls `test_request` links zero teardown symbols from `web/testing`, enforced
+  by the permanent `nm` gate.
 - **Objective.** drive dispatch and capture responses without sockets.
 - **Spec.** §Test transport; §Three test suites.
 - **Files.** Public facade in `web/` (package `web`):
   `web/test_support.odin` — `test_request` + `Recorded_Response`. Machinery in
   `web/testing/` (package `testing`): `test_transport.odin`, `recorder.odin`,
-  `request_builder.odin`. See planning/21 for why the public symbols live in
-  package `web`, not `web/testing`.
+  `request_builder.odin`. The public symbols live in package `web` to preserve
+  the canonical `web.test_request` call; machinery lives in `web/testing`.
 - **API.** Public, package `web`: `web.test_request(&app, method, path) ->
   Recorded_Response`. `test_request` and `Recorded_Response` are the only two
   public symbols; both belong to the **test-support ledger**, tracked apart
-  from the frozen 32-symbol application surface (planning/15 G-11; planning/21
-  Decision 2). Total exported after WP3: 34 = 32 application + 2 test-support.
-- **Dependency direction (ratified, planning/21).** One-way only:
+  from the frozen 32-symbol application surface
+  (planning/public-api-guardrails.md G-11). Total exported after WP3: 34 = 32
+  application + 2 test-support.
+- **Dependency direction (ratified in WP3).** One-way only:
   `web` (facade) → `web/testing` (machinery) → neutral internal/boundary
   types. `web/testing` MUST NOT import `uruquim:web` — the back-edge is a
   compile-time import cycle (`Cyclic importation of 'testing'`, ratified by the
-  planning/21 packages prototype). The facade converts `App`, `Method` and the
+  pinned-toolchain C1/C2/C5 probes). The facade converts `App`, `Method` and the
   captured response across the boundary; the machinery names no `web` type.
   Neither the facade nor the machinery may import `core:testing`.
   If this cannot be represented without a cycle or duplicated types, the WP3
   agent STOPS and produces a throwaway packages prototype — it does not move
   types or introduce `rawptr` silently.
-- **`Recorded_Response` lifetime (ratified, planning/21).** `status` is copied
+- **`Recorded_Response` lifetime (ratified in WP3).** `status` is copied
   by value; `body` and `headers` are copied by the recorder into storage owned
   by the App's lazy test-support state, created on the first `test_request` and
   valid until `web.destroy(&app)`. No additional public cleanup is introduced,
@@ -107,7 +112,7 @@ runs on the pinned toolchain.
   `web/test_support.odin` as the 2-symbol test-support ledger; keep the other
   `web/*.odin` at exactly 32; assert the 34-symbol union; drop `test_request`
   from the forbidden later-phase list) and records the RED evidence before the
-  machinery exists. It ports the planning/21 package prototype into committed
+  machinery exists. It ports the disposable package prototype into committed
   compile probes (one-way import succeeds; back-edge cycle fails with the
   expected diagnostic; neither side imports `core:testing`). It also records a
   minimal application binary before/after the facade exists, verifies that an
@@ -119,8 +124,8 @@ runs on the pinned toolchain.
   status/headers/body/commit into owned storage.
 - **Done.** `test_request` usable by all later WP tests; two recorded responses
   remain readable across consecutive calls until `destroy(&app)`; tracked
-  recorder allocations are released by destroy; the unused-facade binary/init
-  evidence is recorded and accepted.
+  recorder allocations are released by destroy; unused applications link no
+  test-support teardown symbols.
 - **Risks.** test transport diverging from real behavior → mitigated by WP9.
 - **Deps.** WP2. **Rollback.** test-only package.
 
@@ -142,7 +147,7 @@ runs on the pinned toolchain.
 ## WP5 — Canonical extractors
 - **Objective.** `path/path_int/query/query_int/query_int_or` with the
   respond-on-failure contract.
-- **Spec.** §Extractor Control Flow; ADR-002; planning/15 G-01/G-04.
+- **Spec.** §Extractor Control Flow; ADR-002; planning/public-api-guardrails.md G-01/G-04.
 - **Files.** `web/extract.odin` (impl), `web/errors.odin` (envelope for
   invalid_path/query).
 - **API.** the five extractors + failure-stop.
@@ -159,7 +164,7 @@ runs on the pinned toolchain.
 ## WP6 — JSON responses and error envelope
 - **Objective.** `json/text/ok/created/no_content` + envelope; failures before
   commit.
-- **Spec.** §Response; §Std Errors; AMEND-2 (`field` optional); planning/15
+- **Spec.** §Response; §Std Errors; AMEND-2 (`field` optional); planning/public-api-guardrails.md
   G-01/G-04/G-09.
 - **Files.** `web/respond.odin`, `web/errors.odin`.
 - **API.** all response helpers; envelope encoder.
@@ -200,7 +205,7 @@ runs on the pinned toolchain.
 
 ## WP8 — Bootstrap real transport adapter
 - **Objective.** minimal `odin-http` adapter behind the boundary; buffered.
-- **Spec.** §Canonical Transport Direction; ADR-009; planning/15 G-06/G-07.
+- **Spec.** §Canonical Transport Direction; ADR-009; planning/public-api-guardrails.md G-06/G-07.
 - **Files.** `web/internal/transport/odin_http_adapter.odin`,
   `web/internal/transport/boundary.odin`.
 - **API.** none public; implements `Transport`.
@@ -242,7 +247,7 @@ runs on the pinned toolchain.
 - **Objective.** examples 01-03 compile in the verification gate; ai-context
   parity; AMEND-3/-4
   applied to docs.
-- **Spec.** §AI-Friendly API Rules; audit AMEND-3/-4; planning/15 G-08/G-09.
+- **Spec.** §AI-Friendly API Rules; audit AMEND-3/-4; planning/public-api-guardrails.md G-08/G-09.
 - **Files.** `examples/01-hello-world`, `02-json-api`, `03-route-params`;
   doc edits (proposed, not part of code freeze).
 - **API.** none.
@@ -259,7 +264,7 @@ runs on the pinned toolchain.
 
 ## WP11 — Phase 1 Spec Gate and freeze
 - **Objective.** freeze only proven signatures/contracts.
-- **Spec.** freeze discipline; planning/15 full guardrail audit.
+- **Spec.** freeze discipline; planning/public-api-guardrails.md full guardrail audit.
 - **Files.** normative docs plus a temporary final gate record, archived after
   the release decision is incorporated.
 - **API.** freeze the Phase-1' vocabulary.

@@ -7,7 +7,7 @@
 // compiler reject the build with `Cyclic importation of 'web_testing'` (the
 // machinery's declared package name; the facade's import alias is `testing`).
 //
-// It is the committed, executable form of planning/21 evidence item C5: the
+// It is the committed, executable form of WP3 evidence item C5: the
 // unidirectional rule `web -> web/testing` is enforced by the language, not
 // merely preferred. Keeping the fixture versioned means the guarantee is
 // re-proved on every gate run, not cited from an external scratch prototype.

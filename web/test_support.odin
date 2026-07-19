@@ -1,7 +1,7 @@
 // WP3 — PUBLIC TEST-SUPPORT FACADE (package `web`).
 //
 // This file adds the ONLY two public test-support symbols: `Recorded_Response`
-// and `test_request`. They are a SEPARATE ledger (planning/15 G-11): public,
+// and `test_request`. They are a SEPARATE ledger (planning/public-api-guardrails.md G-11): public,
 // documented, and behavior-tested exactly like the application surface, but
 // tracked apart from the frozen 32-symbol application count. Total exported
 // after WP3: 34 = 32 application + 2 test-support.

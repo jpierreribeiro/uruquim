@@ -27,7 +27,7 @@ WP1 extended this entry point, as planned. After the disposable suite,
    consumer package that references every Phase-1 symbol by exact public name,
    proving both existence and export;
 3. runs `build/check_public_api.sh`, the anti-accretion contract of
-   `planning/15-public-api-anti-accretion-guardrails.md`: exact `web/` file
+   `planning/public-api-guardrails.md`: exact `web/` file
    set, exact exported-symbol inventory, later-phase symbol rejection,
    dynamic/untyped storage rejection, canonical handler shape, transport-leak
    scan, and dependency policy.

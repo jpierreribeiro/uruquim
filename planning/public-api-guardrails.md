@@ -1,4 +1,4 @@
-# 15 — Public API Anti-Accretion Guardrails
+# Public API Anti-Accretion Guardrails
 
 Status: **HUMAN-ACCEPTED PLANNING POLICY.** These guardrails make existing
 Knowledge Base constraints testable across work packages. They do not add a
@@ -125,7 +125,7 @@ a human-review item before WP3 can be marked complete. The package probes from
 the pre-WP3 amendment must become committed, executable checks; an external
 scratch prototype is supporting evidence, not the permanent ratification.
 
-**Teardown cost is eliminated, not merely explained (amended, planning/26).**
+**Teardown cost is eliminated, not merely explained (ratified in WP3).**
 Because `web.destroy` runs in every application, a static edge from `destroy`
 to the machinery teardown links the recorder teardown (`recorder_destroy` plus
 its `delete_dynamic_array`/`delete_slice`/`delete_string`/`mem_free`
@@ -136,7 +136,7 @@ dead-code-eliminated the teardown goes with it. The gate asserts this with
 `nm`: a minimal application that never calls `test_request` links ZERO
 `web/testing` teardown symbols. The only permitted residual is the proc-pointer
 field on `App` (a few hundred bytes of struct/init delta), never the teardown
-routine. Ratified by the planning/26 prototype (variant A 47576 B with the
+routine. Ratified by the teardown prototype (variant A 47576 B with the
 static teardown edge vs variant B 42952 B with lazy registration; `nm`: 4
 teardown symbols → 0; both leak-free and behaviorally identical). This turns
 the earlier "measure and human-review the cost" into "eliminate the cost and

@@ -6,8 +6,8 @@
 // and per-field privacy is a syntax error. So `r.headers.private.pairs`
 // compiles from outside the package even though `Header_Pair` cannot be named.
 //
-// This is deliberate and ratified (planning/18, evidence item 11; ADR-008
-// "Scope of the guarantee"). It is not a supported path, nothing promises the
+// This is deliberate and ratified (ADR-008, "Scope of the guarantee"). It is
+// not a supported path, nothing promises the
 // representation will stay as it is, and no framework guarantee rests on it.
 // The probe exists so the claim in the documentation stays honest: if this
 // ever stopped compiling, the docs would be describing a barrier that Odin
