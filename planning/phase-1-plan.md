@@ -625,6 +625,23 @@ runs on the pinned toolchain.
 - **Deps.** WP3/WP8. **Rollback.** suite is additive.
 
 ## WP10 — Phase 1 documentation and examples
+- **Execution status.** **COMPLETE** — verified by a full green
+  `build/check.sh` on dev-2026-07-nightly:819fdc7 (exit 0, PASS=10 FAIL=0
+  SKIP=0, ledgers 32 + 2 = 34). The three examples compile in the gate, the
+  38 Odin blocks in the active documents are classified, and documentation
+  parity is enforced against the canonical inventory. `git diff origin/main --
+  web vendor` is empty: no production code was touched.
+- **What was repaired.** The README still described WP1/WP2 as the current
+  state and said the project "is still not a functional HTTP server";
+  `docs/quick-start.md` was a placeholder; `docs/ai-context.md` contradicted
+  itself about a silent handler (zero status vs 500), called shipped responders
+  stubs, and recommended `serve_with`, which does not exist;
+  `docs/canonical-patterns.md` carried the same `serve_with` recommendation and
+  a pre-WP2 status header.
+- **Cost.** Documentation and examples only: no byte is added to any
+  application binary. The gate grew from ~89 s to ~118 s (+29 s) for the three
+  example builds, the doc-fixture test and the parity scan. Example binaries
+  total ~2.85 MB and are built in a `mktemp` directory removed even on failure.
 - **Objective.** examples 01-03 compile in the verification gate; ai-context
   parity; AMEND-3/-4
   applied to docs.

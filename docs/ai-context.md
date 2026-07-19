@@ -129,8 +129,8 @@ logs it and sends `500`. HTTP has no zero status.
 
 ## Request
 
-`ctx.request` is the only public request surface. There is no `ctx.response`,
-no `ctx.params` and no `ctx.route`.
+`ctx.request` is the only public request surface — a `web.Request` value. There
+is no `ctx.response`, no `ctx.params` and no `ctx.route`.
 
 <!-- pseudocode: the Request field list -->
 ```odin

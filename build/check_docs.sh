@@ -120,9 +120,17 @@ URUQUIM_AI="$URUQUIM_DOCS/ai-context.md"
 URUQUIM_AI_ACTIVE="$(awk '/^## Appendix — future phases/{exit} {print}' "$URUQUIM_AI")"
 test -n "$URUQUIM_AI_ACTIVE" || fail "docs/ai-context.md has no active section"
 
+# The search is restricted to CODE CONTEXT — fenced blocks and inline `code`
+# spans. A bare-word search would be satisfied by ordinary prose: `text`, `get`,
+# `body`, `path` and `query` are all common English words, so "the symbol is
+# documented" would be true for a file that never actually names the API. This
+# is what makes the parity check mean something.
+URUQUIM_AI_CODE="$(awk '/^```/{inb=!inb; next} inb' <<<"$URUQUIM_AI_ACTIVE"
+  grep -oE '`[^`]+`' <<<"$URUQUIM_AI_ACTIVE")"
+
 while IFS= read -r URUQUIM_SYMBOL; do
   test -n "$URUQUIM_SYMBOL" || continue
-  grep -qE "\bweb\.${URUQUIM_SYMBOL}\b|\b${URUQUIM_SYMBOL}\b" <<<"$URUQUIM_AI_ACTIVE" ||
+  grep -qE "\b${URUQUIM_SYMBOL}\b" <<<"$URUQUIM_AI_CODE" ||
     fail "public symbol '$URUQUIM_SYMBOL' is missing from the active reference in docs/ai-context.md"
 done <<<"$URUQUIM_APP_SYMBOLS"
 echo "docs: all $URUQUIM_APP_COUNT application symbols appear in the active reference"
@@ -133,7 +141,7 @@ grep -qE '^## Testing' <<<"$URUQUIM_AI_ACTIVE" ||
   fail "docs/ai-context.md has no separate Testing section for the test-support ledger"
 while IFS= read -r URUQUIM_SYMBOL; do
   test -n "$URUQUIM_SYMBOL" || continue
-  grep -qE "\b${URUQUIM_SYMBOL}\b" <<<"$URUQUIM_AI_ACTIVE" ||
+  grep -qE "\b${URUQUIM_SYMBOL}\b" <<<"$URUQUIM_AI_CODE" ||
     fail "test-support symbol '$URUQUIM_SYMBOL' is missing from docs/ai-context.md"
 done <<<"$URUQUIM_TS_SYMBOLS"
 
