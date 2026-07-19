@@ -271,11 +271,37 @@ for marker in TODO FIXME MISSING UNPROVEN TBD XXX; do
   fi
 done
 
-# Every symbol must appear in the evidence matrix, and none may be NOT_FROZEN.
+# Every symbol must have its OWN ROW in the evidence matrix, carrying the same
+# ledger the compiler's inventory assigns it.
+#
+# Merely appearing somewhere in the manifest is not enough: a symbol is named in
+# the ledger lists of §2/§3 and in the prose of §6, so a name check alone would
+# still pass after its matrix row was deleted. The row is therefore parsed
+# structurally — `| `symbol` | A |` — and its ledger letter is compared against
+# the snapshot, so deleting a row or relabelling a ledger both fail.
 while IFS=$'\t' read -r ledger kind decl; do
   name="${decl%% ::*}"
-  grep -qE "(^|[^A-Za-z0-9_])\`?${name}\`?([^A-Za-z0-9_]|$)" "$URUQUIM_FREEZE_MANIFEST" ||
-    fail "the frozen symbol '$name' ($ledger) never appears in $URUQUIM_FREEZE_MANIFEST; every symbol needs its own evidence row, not blanket coverage"
+  case "$ledger" in
+    application)  want='A' ;;
+    test-support) want='T' ;;
+    *)            fail "unclassifiable ledger '$ledger' for '$name'" ;;
+  esac
+
+  rows="$(grep -cE "^\|[[:space:]]*\`${name}\`[[:space:]]*\|" "$URUQUIM_FREEZE_MANIFEST" || true)"
+  [ "$rows" -ge 1 ] ||
+    fail "the frozen symbol '$name' ($ledger) has no row in the evidence matrix of $URUQUIM_FREEZE_MANIFEST. Every symbol carries its own evidence; blanket coverage is not evidence."
+  [ "$rows" -eq 1 ] ||
+    fail "the frozen symbol '$name' has $rows rows in the evidence matrix; exactly one is expected"
+
+  grep -qE "^\|[[:space:]]*\`${name}\`[[:space:]]*\|[[:space:]]*${want}[[:space:]]*\|" "$URUQUIM_FREEZE_MANIFEST" ||
+    fail "the evidence row for '$name' does not record ledger '$want' ($ledger). The application and test-support ledgers are counted separately (G-11) and a symbol may not drift between them."
+
+  # A row exists; it must also cite real evidence rather than being a placeholder.
+  row="$(grep -m1 -E "^\|[[:space:]]*\`${name}\`[[:space:]]*\|" "$URUQUIM_FREEZE_MANIFEST")"
+  case "$row" in
+    *"::"*) : ;;
+    *) fail "the evidence row for '$name' cites no resolvable evidence (no 'path::identifier' reference). A signature without proven behavior is not frozen." ;;
+  esac
 done <"$URUQUIM_FREEZE_ACTUAL_SIG"
 
 if grep -q 'NOT_FROZEN' "$URUQUIM_FREEZE_MANIFEST"; then
@@ -313,6 +339,16 @@ done <"$URUQUIM_FREEZE_REFS"
 
 [ "$URUQUIM_FREEZE_BAD_REFS" -eq 0 ] ||
   fail "$URUQUIM_FREEZE_BAD_REFS evidence citation(s) in $URUQUIM_FREEZE_MANIFEST do not resolve. Evidence that points at a test which does not exist is worse than no evidence."
+
+# The record of what Phase 1 does NOT do must survive too. Deleting a row from
+# the forwarded-items table is how a limitation quietly becomes a claim: the
+# feature is still absent, but nothing says so any more, and the next reader
+# assumes it shipped. Each forwarded item is therefore required by name.
+for forwarded in middleware group radix wildcard 'typed state' 'header accessor' \
+                 timeout streaming WebSocket upload 'static file' OpenAPI 'trusted prox'; do
+  grep -qiF "$forwarded" "$URUQUIM_FREEZE_MANIFEST" ||
+    fail "$URUQUIM_FREEZE_MANIFEST no longer records '$forwarded' as forwarded to a later phase. Phase 1 does not implement it, so the manifest must keep saying so — dropping the row turns an absent feature into an implied one."
+done
 
 # ---------------------------------------------------------------------------
 # 10. No future-phase vocabulary on the public surface.
