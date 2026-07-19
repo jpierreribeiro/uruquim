@@ -25,11 +25,12 @@ Cross-phase invariants, enforced from Phase 1 onward:
 **Note on `web.app()` defaults:** the architecture spec defines the full
 default-policy contract (recovery, limits, timeouts, 404/405, graceful
 shutdown). It is delivered progressively: Phase 1 enforces a fixed 4 MiB
-request-body cap plus standardized 404 and minimal 405 with `Allow`; recovery
-arrives in Phase 2; configurable limits, read/write timeouts, and optimized
-405/header handling arrive in Phase 3; shutdown robustness arrives in Phase
-4. The *end-state contract* is fixed now, but documentation must say which
-part is available in each phase.
+request-body cap plus standardized 404 and minimal 405 with `Allow`; Phase 2
+adds the documented fault behaviour rather than a recovery middleware, because
+Odin has no recoverable panic (ADR-020); configurable limits, read/write
+timeouts, and optimized 405/header handling arrive in Phase 3; shutdown
+robustness arrives in Phase 4. The *end-state contract* is fixed now, but
+documentation must say which part is available in each phase.
 
 ## Phase 1 — Minimal Productive API
 
@@ -182,7 +183,15 @@ dispatcher.
 - `web.use` at app, group, and route level
 - route groups: `web.router`, `web.group`, `web.mount`
 - `web.next`; short-circuit by returning without `next`
-- recovery middleware — becomes default-on in `web.app()`
+- **fault behaviour (amended 2026-07-19, ADR-020).** Phase 2 ships **no
+  recovery middleware and no public symbol for it.** Odin has no recoverable
+  panic: `Assertion_Failure_Proc` is typed `-> !`, `context` is by-value so
+  `app()` cannot install a hook for its caller, and bounds-check, nil-deref and
+  divide-by-zero faults never reach a hook at all. What Phase 2 guarantees is
+  the WP8 driver behaviour — a handler that commits no response is finalized
+  to a standardized 500 — and documentation stating plainly that a panic aborts
+  the process. A "last-gasp responder" is deferred to Phase 4 and must never be
+  called recovery. Evidence: `planning/phase-2-prototype-recovery.md`
 - logger middleware
 - request ID middleware
 - typed framework-error observer/policy for centralized logging and optional
@@ -200,7 +209,11 @@ dispatcher.
       (prototype on the bootstrap transport); otherwise simplify to
       pre-handler + short-circuit
 - [ ] chain flattening at registration time specified
-- [ ] recovery semantics; request ID source/generation
+- [ ] fault-behaviour documentation (ADR-020: driver 500 + panic aborts);
+      request ID source/generation
+- [ ] `use()`-before-routes enforcement: exact failure mechanism and message,
+      whether it applies to `Router` and `mount`, and whether `bare()` enforces
+      it too (ADR-019)
 - [ ] error-event fields, redaction policy, observer isolation, and behavior
       after response commit
 
@@ -209,7 +222,12 @@ dispatcher.
 - [ ] middleware order exactness, including nested groups
 - [ ] short-circuit stops downstream
 - [ ] post-`next` unwind order correct (if onion adopted)
-- [ ] recovery converts panic to standardized 500
+- [ ] a handler that commits no response is finalized to a standardized 500
+      (this is what Phase 2 means by recovery — ADR-020)
+- [ ] a panic in a handler aborts the process, and the documentation says so
+- [ ] `use()` after a registered route fails at boot, fail-closed (ADR-019),
+      with a test proving the mis-ordered auth program does NOT serve the
+      route
 - [ ] request ID present in context and response header
 - [ ] every framework error is observed exactly once; an observer cannot
       trigger a second response write or expose internal details
@@ -218,7 +236,7 @@ dispatcher.
 ### Implementation Gate checklist
 
 - [ ] flattened chains built at registration; no dispatch-time assembly
-- [ ] recovery, logger, request ID implemented
+- [ ] logger and request ID implemented; fault behaviour documented (ADR-020)
 - [ ] examples `04-middleware`, `05-route-groups`, `06-authentication`
 - [ ] all Phase 1 public-behavior tests still pass unchanged
 

@@ -13,7 +13,12 @@ Work packages continue Phase 1's numbering: **WP12 – WP25**.
 Both were checked against the pinned toolchain (`dev-2026-07-nightly:819fdc7`),
 not recalled.
 
-### FINDING-A — Odin has no recoverable panic, so "recovery middleware" may be undeliverable as written
+### FINDING-A — Odin has no recoverable panic (CONFIRMED by WP13; resolved by ADR-020)
+
+> **Status: settled.** WP13 confirmed this and went further — `app()` cannot
+> install a hook at all, and most faults never reach one. The owner accepted
+> R-b: zero public symbols, driver-500 guarantee, honest documentation. The
+> original analysis is kept below because it is what drove the prototype.
 
 `base/runtime/core.odin:392`:
 
@@ -103,8 +108,8 @@ Phase-2 agent will read.
 
 | WP | Name | Type | Owner approval |
 |---|---|---|---|
-| 12 | Middleware mechanism prototype and post-`next` decision | PROTOTYPE | **yes** (closes ADR-005) |
-| 13 | Fault/recovery feasibility prototype | PROTOTYPE | **yes** (scope amendment likely) |
+| 12 | ~~Middleware mechanism prototype~~ **DONE** — ADR-005 accepted with ADR-019 enforcement | PROTOTYPE | ✅ granted |
+| 13 | ~~Fault/recovery feasibility prototype~~ **DONE** — ADR-020 accepted (R-b, zero symbols) | PROTOTYPE | ✅ granted |
 | 14 | Test-support evolution: `test_request` procedure group | SPEC (prototype-backed) | **yes** (test-support ledger grows) |
 | 15 | Phase-2 specification, ADR closure, ledger proposal | SPEC | **yes** (ledger) |
 | 16 | Gate restructuring for Phase-2 growth | TESTS | no |
@@ -112,7 +117,7 @@ Phase-2 agent will read.
 | 18 | `Router` + `mount` + route-level middleware | IMPLEMENTATION | **yes** if the five verbs gain a variadic |
 | 19 | Request header lookup: `header`, `bearer_token` | IMPLEMENTATION | no |
 | 20 | Typed framework-error observer | IMPLEMENTATION | no |
-| 21 | Recovery default in `app()`, absent in `bare()` | IMPLEMENTATION | no (decided in WP13) |
+| 21 | Fault behaviour: driver-500 guarantee, documented | DOCUMENTATION + TESTS | no (decided: ADR-020) |
 | 22 | `logger` middleware | IMPLEMENTATION | no |
 | 23 | `request_id` middleware and its trust policy | IMPLEMENTATION | **yes** (security boundary) |
 | 24 | Examples, documentation, canonical auth pattern | DOCUMENTATION | no |
@@ -293,8 +298,9 @@ the observer, any documentation change, any change to `web/` or `build/`.
 * **Value.** Prevents Phase 2 promising a Go/Rust behaviour the language cannot
   provide, and prevents `web.app()` shipping a default that does nothing.
 * **Prerequisites.** None; may run in parallel with WP12.
-* **Public surface (PROPOSED).** Possibly `recovery :: Handler`, possibly
-  nothing at all. WP13 must not assume the symbol exists.
+* **Public surface: settled at ZERO.** WP13 ran; the owner accepted R-b
+  (ADR-020). No `recovery` symbol exists, in this or any later Phase-2 work
+  package.
 * **Decisions before tests.** Does a custom `context.assertion_failure_proc`
   observe enough state to write a response on the in-flight connection? Does the
   adapter's connection object survive a failing frame? Does release mode or
@@ -496,10 +502,17 @@ becomes something people bypass.
 * **Ownership.** Pool owned by the `App`, freed once. The cursor is three `int`s
   on `Context_Internal`, request-scoped, never escaping. Middleware are plain
   procedure values — no closures, nothing to free.
-* **Security.** **Ordering is the security boundary**: an auth middleware
-  registered after a route does not protect it (D-12.5). This must be
-  prominently documented and covered by a test that demonstrates the
-  unprotected case, so nobody discovers it in production.
+* **Security — ENFORCED, not documented (ADR-019, accepted 2026-07-19).**
+  Ordering is the security boundary: WP12 measured a mis-ordered program
+  serving `/admin/users` with `200 OK` to an unauthenticated caller, with no
+  error and no runtime symptom. Documentation alone was rejected: for security,
+  prose is not enforcement. **`use()` after any route has been registered is a
+  boot failure, fail-closed** — a one-line guard at registration. RED tests must
+  include the mis-ordered auth program *failing to start*, not merely a comment
+  warning about it. Sub-decisions (does it apply inside a `Router`; is `mount()`
+  a registration; the exact failure mechanism and message; does `bare()` enforce
+  it too) are listed in ADR-019 and settled by WP15 before this work package
+  writes tests.
 * **Binary cost.** Zero-middleware apps pay at most the WP12 P11 measurement;
   dispatch allocations through a 5-chain are **zero**, asserted by a test shown
   able to fail.
@@ -617,10 +630,15 @@ variadic.**
 
 ## WP21 — Recovery: default in `app()`, absent in `bare()`
 
-**Type: IMPLEMENTATION. Shape decided by WP13.**
+**Type: DOCUMENTATION + TESTS. Shape decided: ADR-020 (R-b), zero public
+symbols.**
 
-* **Public surface (PROPOSED).** Either `recovery :: Handler` (**+1**) or
-  **nothing** (0). WP13 decides; if it is 0, the phases-doc amendment lands here.
+* **Public surface: ZERO symbols (ADR-020, accepted 2026-07-19).** WP13 ran;
+  the owner accepted **R-b**. There is no `recovery` symbol and no recovery
+  middleware. Phase 2's guarantee is the WP8 driver behaviour — a handler that
+  commits no response is finalized to a standardized 500 — plus documentation
+  stating plainly that a panic aborts the process. The phases-doc amendment has
+  already landed; this work package delivers the documentation and the tests.
 * **RED tests.** `app()` installs it and `bare()` does not, asserted through
   observable behaviour rather than by reading internals; whatever fault class
   WP13 proved recoverable produces the standardized 500 envelope; a second fault
@@ -787,7 +805,7 @@ evidence):
 
 | Symbol | Condition |
 |---|---|
-| `recovery` | only if WP13 finds a mechanism worth naming. If WP13 lands on R-b or R-d, this symbol does **not** exist and the phases doc is amended. |
+| ~~`recovery`~~ | **RESOLVED — does not exist.** WP13 ran and the owner accepted R-b (ADR-020). Recovery is the WP8 driver guarantee plus documentation; zero symbols. |
 | `request_id` | +1 as a middleware value; +2 if the owner rejects the `header` overlay and a `request_id_value` accessor is required. |
 
 ### Explicitly rejected
@@ -819,14 +837,18 @@ headers in Phase 2 (D-14.3).
 
 | Ledger | Phase 1 | Phase 2 Δ | Total |
 |---|---|---|---|
-| Application | 32 | +11 recommended, +13 if both conditionals land | **43 – 45** |
+| Application | 32 | +11 recommended, +12 if `request_id` needs an accessor | **43 – 44** |
 | Test-support | 2 | +1 (possibly +2) | **3 – 4** |
-| **Union** | **34** | **+12 – +15** | **46 – 49** |
+| **Union** | **34** | **+12 – +14** | **46 – 48** |
 
-The number the gate asserts is decided in WP15 and frozen in WP25. It is stated
-as a **range on purpose**: three increments are contingent on prototype outcomes
-(WP13, WP14, WP23), and pre-committing to a single number would be exactly the
-"claim a default before it is delivered" failure G-08 forbids.
+**Narrowed by ADR-020.** The upper bound dropped from 49 to 48 because recovery
+is now known to add nothing. One of the three contingencies is closed.
+
+The number the gate asserts is decided in WP15 and frozen in WP25. It is still stated
+as a range on purpose: two increments remain contingent on outcomes (WP14,
+WP23), and pre-committing to a single number would be exactly the "claim a
+default before it is delivered" failure G-08 forbids. WP13's contingency is now
+closed at zero.
 
 For scale: roughly 35% growth of the application surface buys middleware, route
 organisation, request headers and the typed observer — four of the six things
@@ -837,12 +859,20 @@ the audit's usage laboratory found impossible in Phase 1. The remaining two
 
 ## 4. Risks this plan does not resolve
 
-1. **Recovery may be undeliverable as specified** (FINDING-A). WP13 exists to
-   find that out early rather than during WP21.
-2. **Registration-order middleware semantics** (D-12.5) is a footgun with
-   security consequences. Documentation plus a demonstration test are the only
-   mitigations proposed; a "seal the app" step is the alternative and is *not*
-   proposed, because it adds a lifecycle concept for one problem.
+1. ~~**Recovery may be undeliverable as specified**~~ — **RESOLVED.** WP13 ran
+   and confirmed it: `app()` can never install a hook (`context` is by-value),
+   and bounds-check, nil-deref and divide-by-zero faults never reach a hook at
+   all. The owner accepted R-b (ADR-020): recovery is the WP8 driver guarantee
+   plus honest documentation, at zero public symbols. The accepted cost is that
+   a panicking handler closes the connection and the process falls over for a
+   supervisor to restart.
+2. ~~**Registration-order middleware semantics** is a footgun~~ — **RESOLVED,
+   and more strongly than this plan originally proposed.** WP12 measured the
+   footgun as a live `200 OK` to an unauthenticated caller. The owner rejected
+   the documentation-only mitigation outright and accepted enforcement
+   (ADR-019): `use()` after any registered route is a boot failure. What remains
+   is scope, not principle — whether the rule extends to `Router`, `mount` and
+   `bare()`, and what the failure message says. WP15 settles those.
 3. **Route-level middleware may require mutating five frozen signatures**
    (D-12.7). If the owner refuses, it is delivered as a one-route `Router` and
    the phases doc is amended.

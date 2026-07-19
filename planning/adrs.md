@@ -2,8 +2,9 @@
 
 Status: **MIXED.** Human decisions recorded on 2026-07-18 accept ADR-001,
 ADR-002, ADR-003's value-only baseline, ADR-004, ADR-006, ADR-007, ADR-008,
-ADR-009, and ADR-011. ADR-005, ADR-010, ADR-012, and ADR-013 remain
-PROPOSED/deferred to their owning gates. Reproducible compiler evidence lives
+ADR-009, and ADR-011. Decisions recorded on 2026-07-19 accept ADR-005 (with
+ADR-019) and ADR-020. ADR-010 and ADR-013 remain PROPOSED/deferred to their
+owning gates. Reproducible compiler evidence lives
 in `experiments/` and the permanent work-package tests.
 
 Each ADR: context · options · benefits · costs · risks · evidence ·
@@ -97,7 +98,19 @@ recommendation · documentation impact · reversibility.
 - **Reversibility.** MEDIUM (public accessor).
 
 ## ADR-005 — Middleware model
-- **Status.** **PROPOSED / DEFERRED** — Phase-2 Spec Gate.
+- **Status.** **ACCEPTED** (owner, 2026-07-19) — option **B (onion)**, with
+  registration-order enforcement per ADR-019 below.
+  Evidence: `planning/phase-2-prototype-middleware.md` (WP12).
+- **Outcome.** The prototype showed the mechanism is not a choice to be made but
+  a consequence: middleware is the frozen `Handler` shape (a `bool`-returning
+  form would be a second handler shape, which ADR-011 forbids), so `next` is an
+  ordinary call that returns, and code written after it inevitably runs. There
+  is no unwind machine to adopt or reject. Measured: `A>B>C>H<C<B<A`, exact
+  reverse unwind, **0 allocations** through a 5-middleware chain, and a
+  post-`next` response attempt rejected by the existing single-commit guard.
+  Option A was therefore not available without deliberately crippling the
+  mechanism, and option C's condition is satisfied.
+- **Superseded status line.** **PROPOSED / DEFERRED** — Phase-2 Spec Gate.
 - **Context.** cursor `next`, global/group/route/handler, short-circuit, unwind.
 - **Options.** (A) pre-order only (no code after `next`). (B) onion
   (before+after `next`). (C) onion only if the transport guarantees safe
@@ -372,8 +385,8 @@ recommendation · documentation impact · reversibility.
 | 014 | WP6 ownership decision | **ACCEPTED** — Response owns rendered bodies; no WP7 arena |
 
 No accepted Phase-1 ADR has been reopened. ADR-012 is a new, narrowly owned WP7
-decision; ADR-005, ADR-010, and ADR-013 remain owned by later gates and cannot
-expand earlier scope.
+decision. ADR-005 was accepted at the Phase-2 gate on WP12 evidence; ADR-010 and
+ADR-013 remain owned by later gates and cannot expand earlier scope.
 
 ---
 
@@ -404,7 +417,13 @@ leaving advanced testing internal-only (rejected: leaves users stuck).
 
 **Requires owner approval** — the test-support ledger grows beyond 2 symbols.
 
-### ADR-016 (PROPOSED) — middleware execution order decided by prototype
+### ADR-016 (RESOLVED by WP12) — middleware execution order
+
+**Outcome.** Resolved. The prototype ran; ADR-005 is accepted as onion with
+enforcement. See ADR-019 and `planning/phase-2-prototype-middleware.md`. The
+proposal text is retained below for the record.
+
+### ADR-016 (original proposal text)
 
 **Context.** Phase 2 needs `web.use` and `web.next`. Post-`next` (onion)
 semantics requires an unwind machine at runtime, which the Odin-fit audit
@@ -443,3 +462,89 @@ which owns lifecycle, replace the globals with per-server state and introduce
 the stop API at the same time.
 
 **Requires owner approval when implemented** — Phase 4 adds public surface.
+
+
+---
+
+## ADR-019 — Middleware registration order is enforced, not documented
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19).
+- **Owner.** Phase 2, implemented in WP17, specified in WP15.
+- **Context.** With chains flattened at registration, `use()` cannot affect a
+  route registered before it. WP12 measured what that costs when a programmer
+  gets the order wrong: the mis-ordered program serves `/admin/users` with
+  **`200 OK` to an unauthenticated caller**, purely because `get()` precedes
+  `use(auth)`. There is no error, no warning and no runtime symptom. Moving one
+  line fixes it.
+- **Options.**
+  (A) **Forbid `use()` after any route has been registered — fail at boot.**
+  (B) No retroaction, documented in prose only.
+  (C) Retroactive `use()`: a second pass re-flattens earlier routes.
+- **Decision: (A).**
+- **Rationale (owner).** An authentication boundary must not depend on the
+  programmer remembering the order in which they wrote two lines. Option B
+  leaves the 200-OK hole open, and **for security, prose is not enforcement**.
+  Option C makes order "not matter" in a way that misleads anyone reading the
+  file top to bottom, which is the opposite of Odin's explicitness. Option A is
+  fail-closed and costs one guard at registration.
+- **Costs.** A program that was legal becomes a boot failure. This is intended:
+  it converts a silent security defect into a loud startup error, before any
+  request is served.
+- **Precedent.** Go's `ServeMux` panics at registration on conflicting patterns
+  rather than resolving them silently (`planning/later-phases-plan.md` C-5).
+  Rejecting a malformed application at boot is established practice, not a
+  novelty.
+- **Reversibility.** HIGH while Phase 2 is unfrozen; the guard is one check.
+- **Sub-decisions deferred to WP15**, and deliberately NOT settled here:
+  1. Does the same rule apply within a `Router` — must `use()` on a router
+     precede that router's own routes? (Recommended: yes, same rule, same
+     reason.)
+  2. Is `mount()` itself a "route registration" that closes the app to further
+     `use()`? (Recommended: yes — it registers routes.)
+  3. What is the exact failure mechanism? Odin has no exceptions, and WP13
+     established that `panic` aborts. At *boot*, aborting is the correct
+     fail-closed behaviour and matches the Go precedent — but the message must
+     name the offending pattern and say what to do. WP15 must specify the text.
+  4. Does `bare()` enforce it too? (Recommended: yes — the hazard is identical,
+     and `bare()` differing here would be a second mental model.)
+
+## ADR-020 — Recovery is the driver guarantee, not a middleware
+
+- **Status.** **ACCEPTED** (owner, 2026-07-19).
+- **Owner.** Phase 2, WP21. Public surface: **zero symbols.**
+- **Context.** The Phase-2 scope promised "recovery middleware — becomes
+  default-on in `web.app()`" and a gate item "recovery converts panic to
+  standardized 500". WP13 established two language facts that make this
+  impossible rather than merely difficult, both reproduced independently:
+  1. **`app()` can never install a hook.** Odin's `context` is an implicit
+     by-value parameter, so a callee's assignment dies with its frame — the
+     caller still sees the old value.
+  2. **A working hook would not be enough.** Only `panic`, `assert` and failed
+     type assertions reach `assertion_failure_proc`. Bounds-check failures, nil
+     dereferences and divide-by-zero do not; `bounds_check_error` is
+     `proc "contextless"` and cannot consult the hook even in principle.
+- **Options.**
+  (A) "Last gasp": write a 500 from a fault hook, then abort.
+  (B) **Redefine recovery as the existing WP8 driver guarantee** — an
+      uncommitted response is finalized to a standardized 500 — plus honest
+      documentation that Odin aborts on panic.
+  (C) `setjmp`/`longjmp` to continue after a fault.
+  (D) Remove the item entirely.
+- **Decision: (B).** Option (A) is deferred to Phase 4 as a **"last-gasp
+  responder"**, a name that must never be shortened to "recovery".
+- **Rationale (owner).** The promise as written is not hard, it is impossible,
+  and freezing it would freeze a lie. The alternatives are worse and measured:
+  (C) leaks **8,250 bytes per recovered fault**, linear — a 4 GiB container dies
+  in about 8 minutes while answering 500s and never signalling its supervisor;
+  (A) exports a raw file descriptor through the ADR-009 boundary and becomes
+  cross-connection response injection as soon as more than one thread serves.
+  (B) is the only option that neither widens the public surface nor opens a hole.
+- **Accepted cost, stated plainly.** A panicking handler closes the connection —
+  the client sees `curl: (52) Empty reply from server` — and the process falls
+  over for a supervisor to restart. That is standard behaviour for a serious
+  runtime, and it is accepted deliberately rather than discovered later.
+- **Evidence.** `planning/phase-2-prototype-recovery.md`.
+- **Doc impact.** `knowledge-base/03-development-phases.md` §Phase 2 scope and
+  Test Gate are amended; `planning/phase-2-plan.md` WP21 drops to zero symbols.
+- **Reversibility.** HIGH — nothing is exported, so Phase 4 may add a last-gasp
+  responder without a breaking change.
