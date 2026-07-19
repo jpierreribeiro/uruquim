@@ -13,17 +13,24 @@ package web
 
 // Response is the package-internal response state for one request.
 //
-// It holds exactly what the commit guard needs to be provable: the status and
-// body that were committed, and the flag that says a commit already happened.
-// It carries no header storage, because WP2 produces no response headers —
-// adding a field now would be untested, unreachable state (WP6 owns rendering).
+// It holds exactly what the commit guard needs to be provable: the status,
+// headers and body that were committed, and the flag that says a commit
+// already happened.
 //
-// `body` is NOT owned by Response: it is a view over storage owned by whoever
-// called the commit primitive. WP6 defines the response body's allocator when
-// it introduces rendering.
+// `headers` is WP2 state rather than deferred work because WP4 depends on it.
+// WP4's ratified contract includes "405-when-other-method with exact `Allow`
+// header" (planning/05 §WP4), and WP4 depends on WP2/WP3 — it lands BEFORE
+// WP6. Without internal header storage, WP4 could not express or test its own
+// contract.
+//
+// Neither `headers` nor `body` is OWNED by Response at this stage: both are
+// views over storage owned by whoever called the commit primitive. WP6 defines
+// the concrete allocation and lifetime of a rendered response, and may reshape
+// this struct freely — nothing here is public API.
 @(private)
 Response :: struct {
 	status:    Status,
+	headers:   []Header_Pair,
 	body:      []u8,
 	committed: bool,
 }
@@ -32,10 +39,14 @@ Response :: struct {
 //
 // It returns `true` when this call produced the response, and `false` when a
 // response had already been produced — in which case NOTHING is modified: the
-// first status and the first body survive verbatim. This is the whole of
-// ADR-008 option A, and it is what makes "an extractor's error response cannot
-// be replaced by continued handler code" a testable property rather than a
-// convention.
+// first status, the first headers and the first body all survive verbatim.
+// This is the whole of ADR-008 option A, and it is what makes "an extractor's
+// error response cannot be replaced by continued handler code" a testable
+// property rather than a convention.
+//
+// The three are recorded ATOMICALLY. A guard that blocked the status while
+// letting replacement headers through would still be a double-write, so a
+// rejected attempt leaves all three exactly as the first commit left them.
 //
 // SCOPE OF THE GUARANTEE (ADR-008, as amended by planning/18 P-3). This
 // prevents the SUPPORTED `web.*` response paths from overwriting a response
@@ -47,14 +58,16 @@ Response :: struct {
 // opaque handles, side tables — to resist deliberate tampering are REJECTED as
 // useless complexity.
 //
-// It allocates nothing, retains `body` as a view, and never panics.
+// It allocates nothing, retains `headers` and `body` as views, and never
+// panics.
 @(private)
-response_commit :: proc(res: ^Response, status: Status, body: []u8) -> bool {
+response_commit :: proc(res: ^Response, status: Status, headers: []Header_Pair, body: []u8) -> bool {
 	if res.committed {
 		return false
 	}
 
 	res.status = status
+	res.headers = headers
 	res.body = body
 	res.committed = true
 	return true
