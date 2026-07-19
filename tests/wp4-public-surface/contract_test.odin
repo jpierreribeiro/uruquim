@@ -29,8 +29,51 @@
 // file must still hold unchanged.
 package wp4_public_surface
 
+import "core:log"
+import "core:strings"
 import "core:testing"
 import web "uruquim:web"
+
+// Wp4_Log_Filter wraps the runner's logger to drop the framework's own
+// Error-level diagnostics (they begin with "uruquim:") and forward everything
+// else. `odin test` counts any Error record as a failure, so a test that
+// deliberately drives a path the framework logs on — a bare() miss finalized to
+// 500 — installs this to keep the runner honest without hiding real failures.
+//
+// The caller declares it on its stack (no allocation) and installs it for the
+// rest of the test:
+//
+//	filter: Wp4_Log_Filter
+//	context.logger = wp4_swallow_framework_log(&filter)
+Wp4_Log_Filter :: struct {
+	inner: log.Logger,
+}
+
+wp4_filter_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	filter := (^Wp4_Log_Filter)(data)
+	if level == .Error && strings.contains(text, "uruquim:") {
+		return
+	}
+	if filter.inner.procedure != nil {
+		filter.inner.procedure(filter.inner.data, level, text, options, location)
+	}
+}
+
+wp4_swallow_framework_log :: proc(filter: ^Wp4_Log_Filter) -> log.Logger {
+	filter.inner = context.logger
+	return log.Logger {
+		procedure = wp4_filter_proc,
+		data = rawptr(filter),
+		lowest_level = .Debug,
+		options = context.logger.options,
+	}
+}
 
 // The standardized envelopes WP6 attached to the automatic responses. WP4
 // committed empty bodies and said so; WP6 supplies the contract WP4 deferred.
@@ -55,6 +98,7 @@ wp4_once_hits: int
 
 wp4_once_handler :: proc(ctx: ^web.Context) {
 	wp4_once_hits += 1
+	web.no_content(ctx)
 }
 
 wp4_iso_get_hits: int
@@ -62,37 +106,50 @@ wp4_iso_post_hits: int
 
 wp4_iso_get_handler :: proc(ctx: ^web.Context) {
 	wp4_iso_get_hits += 1
+	web.no_content(ctx)
 }
 
 wp4_iso_post_handler :: proc(ctx: ^web.Context) {
 	wp4_iso_post_hits += 1
+	web.no_content(ctx)
 }
 
 wp4_param_hits: int
 
 wp4_param_handler :: proc(ctx: ^web.Context) {
 	wp4_param_hits += 1
+	web.no_content(ctx)
 }
 
 wp4_bare_hits: int
 
 wp4_bare_handler :: proc(ctx: ^web.Context) {
 	wp4_bare_hits += 1
+	web.no_content(ctx)
 }
 
 wp4_owned_hits: int
 
 wp4_owned_handler :: proc(ctx: ^web.Context) {
 	wp4_owned_hits += 1
+	web.no_content(ctx)
 }
 
 wp4_unsupported_hits: int
 
 wp4_unsupported_handler :: proc(ctx: ^web.Context) {
 	wp4_unsupported_hits += 1
+	web.no_content(ctx)
 }
 
+// A handler that responds with a 204 — the minimal "I handled this route"
+// response. Before WP6 there was no responder, so this fixture was silent and
+// the tests asserted the zero status; since WP8 a silent handler is finalized
+// to a logged 500 by the driver (D5), so a routing fixture that wants to prove
+// "the route was reached" responds explicitly. Route MISSES (no handler) are
+// still exercised as such and are covered by the dedicated bare()/500 tests.
 wp4_silent_handler :: proc(ctx: ^web.Context) {
+	web.no_content(ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -112,11 +169,10 @@ wp4_registered_route_is_reached_exactly_once :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, wp4_once_hits - before, 1)
 
-	// The handler responded with nothing, so the response stays UNCOMMITTED:
-	// zero status, empty body. The framework does not invent a 200 for a
-	// handler that did not respond.
-	zero: web.Status
-	testing.expect_value(t, res.status, zero)
+	// The routed handler responded (204), which is how this test observes the
+	// route was reached. The framework still never fabricates a 200 — that
+	// property is now pinned by the WP8 driver-finalization tests.
+	testing.expect_value(t, res.status, web.Status.No_Content)
 	testing.expect_value(t, res.body, "")
 }
 
@@ -157,10 +213,11 @@ wp4_every_verb_registers :: proc(t: ^testing.T) {
 	web.patch(&app, "/r", wp4_silent_handler)
 	web.delete(&app, "/r", wp4_silent_handler)
 
-	zero: web.Status
 	for m in ([]web.Method{.GET, .POST, .PUT, .PATCH, .DELETE}) {
 		res := web.test_request(&app, m, "/r")
-		testing.expect_value(t, res.status, zero)
+		// Every verb reaches its handler, which responds 204. A verb whose
+		// registration was discarded would be a 405 here instead.
+		testing.expect_value(t, res.status, web.Status.No_Content)
 	}
 }
 
@@ -269,15 +326,20 @@ wp4_bare_dispatches_but_installs_no_defaults :: proc(t: ^testing.T) {
 	web.test_request(&app, .GET, "/health")
 	testing.expect_value(t, wp4_bare_hits - before, 1)
 
-	zero: web.Status
+	// A bare() miss commits nothing at the CORE — no automatic 404 or 405. HTTP
+	// still cannot send a zero status, so the DRIVER finalizes the miss to a 500
+	// (WP8 D5); that finalization logs a diagnostic, which this test's logger
+	// swallows so the runner does not count it as a failure. The property under
+	// test — bare() installs no route policy — is what makes the miss reach the
+	// driver at all.
+	filter: Wp4_Log_Filter
+	context.logger = wp4_swallow_framework_log(&filter)
 
-	// A miss stays UNCOMMITTED: no automatic 404 ...
 	miss := web.test_request(&app, .GET, "/nope")
-	testing.expect_value(t, miss.status, zero)
+	testing.expect_value(t, miss.status, web.Status.Internal_Server_Error)
 
-	// ... and no automatic 405.
 	other := web.test_request(&app, .POST, "/health")
-	testing.expect_value(t, other.status, zero)
+	testing.expect_value(t, other.status, web.Status.Internal_Server_Error)
 }
 
 // ---------------------------------------------------------------------------
@@ -300,8 +362,8 @@ wp4_consecutive_recorded_responses_survive_until_destroy :: proc(t: ^testing.T) 
 	testing.expect_value(t, first.status, web.Status.Not_Found)
 	testing.expect_value(t, second.status, web.Status.Method_Not_Allowed)
 
-	zero: web.Status
-	testing.expect_value(t, third.status, zero)
+	// The third is a routed hit whose handler responded 204.
+	testing.expect_value(t, third.status, web.Status.No_Content)
 
 	testing.expect_value(t, first.body, WP6_NOT_FOUND_ENVELOPE)
 	testing.expect_value(t, second.body, WP6_METHOD_NOT_ALLOWED_ENVELOPE)
@@ -378,6 +440,5 @@ wp4_routing_is_expressible_with_the_ratified_surface_only :: proc(t: ^testing.T)
 
 	res: web.Recorded_Response = web.test_request(&app, .GET, "/typed")
 
-	zero: web.Status
-	testing.expect_value(t, res.status, zero)
+	testing.expect_value(t, res.status, web.Status.No_Content)
 }

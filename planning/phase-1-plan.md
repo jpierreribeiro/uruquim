@@ -449,10 +449,76 @@ runs on the pinned toolchain.
 - **Deps.** WP2/WP6; exp-03. **Rollback.** body isolated.
 
 ## WP8 — Bootstrap real transport adapter
+- **Execution status.** **COMPLETE** — verified by a full green `build/check.sh`
+  on dev-2026-07-nightly:819fdc7, including a REAL loopback round trip
+  (`GET /ping` → 200 `pong` with `text/plain; charset=utf-8`, a POST whose JSON
+  body WP7 decoded, an over-limit POST answered 413 without running the handler,
+  and a clean stop with the port refusing new connections). Ledgers unchanged at
+  32 + 2 = 34; 50 mutation cases rejected across WP3-WP8.
+- **Cost (measured, `nm` + size).** An application that never calls `serve`
+  links ZERO odin-http server, listener, accept, connection or teardown symbols;
+  the G-11 recorder teardown is likewise absent unless `test_request` is used.
+  The unavoidable residual is two `@(init)` roots Odin links for any
+  transitively-imported package: odin-http's status-string table (101,360 B, it
+  pulls in `core:fmt`) and `core:nbio`'s thread-local cleaner (the rest of the
+  ~51 KiB over the WP7 baseline, together with the transport glue). A bare app
+  goes 47,728 → 200,744 bytes; a serving app is ~868 KiB. Compile time rises
+  ~0.33 s (0.52 → 0.85 s) because the vendored package is compiled even when
+  the linker drops it.
 - **Objective.** minimal `odin-http` adapter behind the boundary; buffered.
 - **Spec.** §Canonical Transport Direction; ADR-009; planning/public-api-guardrails.md G-06/G-07.
-- **Files.** `web/internal/transport/odin_http_adapter.odin`,
-  `web/internal/transport/boundary.odin`.
+- **Files.** `web/serve.odin` (real `serve`), `web/internal/transport/*.odin`
+  (the neutral boundary + odin-http adapter), `vendor/odin-http/` (pinned
+  snapshot).
+- **Decisions ratified in WP8.**
+  - **D1 — one-way private boundary (ADR-009).** `web` imports
+    `web/internal/transport`; the transport imports `vendor/odin-http`; the
+    transport never imports `web`. The transport package names no `web` type: it
+    moves data as neutral records (`Inbound`, `Outbound`, `Header`) and drives
+    the core through a callback. Only the conceptual contract is frozen —
+    accept → dispatch → commit → stop — not a rich ABI.
+  - **D2 — the core authors every envelope; the transport is mechanical.** The
+    transport converts the backend request to a neutral `Inbound`, enforces the
+    4 MiB cap WHILE READING, and calls the dispatch callback. `web`'s callback
+    builds a `Context`, dispatches, copies the response OUT into
+    transport-owned storage, and tears down. The transport never constructs an
+    HTTP status or envelope of its own; even the 413 is authored by `web` (see
+    D3).
+  - **D3 — the 4 MiB cap is enforced in the adapter, before the handler.** The
+    body is read buffered with a hard `max_body` = `4*1024*1024`. Exactly 4 MiB
+    is accepted; a strictly larger body sets `Inbound.over_limit`, and the
+    core's callback commits the WP7 `body_too_large` 413 envelope WITHOUT
+    running the handler — so the cap holds even when a handler never calls
+    `web.body`. No streaming, no configurable limit (both later phases).
+  - **D4 — cleanup order is fixed and total.** dispatch → response committed →
+    copy status/headers/body into transport storage → `response_destroy` →
+    `request_arena_destroy` → send. The adapter retains no response view past
+    cleanup. Status crosses as its integer value, INCLUDING the private
+    `Status(413)`. This order runs on every path — 200/400/404/405/413/500 —
+    and no request-local resource survives the request.
+  - **D5 — a handler that leaves the response uncommitted becomes a 500.** HTTP
+    cannot send a zero status. If dispatch returns with nothing committed — a
+    programming error, or `bare()`'s deliberate no-policy — the DRIVER logs a
+    private typed diagnostic (ADR-011) and finalizes `internal_error`/500. This
+    is a driver validity guarantee, NOT middleware and NOT an automatic route
+    response: the core still installs no 404/405 under `bare()`. The SAME
+    finalization is added to `test_request`, so the test and real transports
+    stay in parity. It is not a public helper.
+  - **D6 — minimal deterministic execution.** `thread_count = 1` and
+    `redirect_head_to_get = false` at the Phase-1 bootstrap. HEAD/OPTIONS gain
+    no public method member; the backend router is not used — a single catch-all
+    handler feeds the Uruquim dispatcher. `serve` validates the port (1..65535),
+    logs and returns without binding on an invalid port or a bind/listen error,
+    logs startup only after a successful bind, blocks while serving, and stops
+    cleanly via the backend's shutdown. A private idempotent stop exists for
+    tests (no SIGINT to the test runner).
+  - **D7 — vendored pristine, no patch.** `vendor/odin-http/` is the root server
+    package at commit `112c49b`, MIT, unmodified. A no-serve application links
+    ZERO socket/server/teardown symbols (measured); the only residual is
+    `status_strings_init`, an `@(init)` table-builder Odin roots unconditionally
+    for any transitively-imported package — a proven toolchain cost, not a
+    socket/server/teardown symbol, and not worth a source patch the manifest
+    would have to carry.
 - **API.** none public; implements `Transport`.
 - **Tests first.** adapter starts/stops; one real GET /ping over a socket
   (end-to-end suite, small); exported-signature scan rejects backend types;

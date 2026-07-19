@@ -36,10 +36,12 @@ expect_reject() { # tree label expected-substring
 fresh_tree() {
   local t
   t="$(mktemp -d -t uruquim-wp3-mutation-XXXXXXXX)"
-  mkdir -p "$t/build" "$t/web/testing" "$t/tests"
+  mkdir -p "$t/build" "$t/web/testing" "$t/web/internal/transport" "$t/tests" "$t/vendor"
   cp "$URUQUIM_ROOT"/build/check_public_api.sh "$t/build/"
   cp "$URUQUIM_ROOT"/web/*.odin "$t/web/"
   cp "$URUQUIM_ROOT"/web/testing/*.odin "$t/web/testing/"
+  cp "$URUQUIM_ROOT"/web/internal/transport/*.odin "$t/web/internal/transport/"
+  cp -r "$URUQUIM_ROOT"/vendor/odin-http "$t/vendor/odin-http"
   cp -r "$URUQUIM_ROOT"/tests/. "$t/tests/"
   printf '%s' "$t"
 }
@@ -60,10 +62,11 @@ printf '\nextra_ts_symbol :: proc() {}\n' >>"$T/web/test_support.odin"
 expect_reject "$T" "extra test-support-ledger symbol" \
   "outside the 2-symbol test-support ledger"
 
-# 3. A subdirectory other than web/testing.
+# 3. A subdirectory outside the permitted set. `web/testing/` (WP3) and
+#    `web/internal/` (WP8) are allowed; anything else is scope creep.
 T="$(fresh_tree)"; TREES+=("$T")
-mkdir -p "$T/web/internal"
-printf 'package internal\n' >"$T/web/internal/x.odin"
+mkdir -p "$T/web/middleware"
+printf 'package middleware\n' >"$T/web/middleware/x.odin"
 expect_reject "$T" "disallowed web/ subdirectory" \
   "unexpected subdirectory"
 
@@ -438,3 +441,59 @@ expect_reject "$T" "public symbol in the arena machinery" \
   "exports symbols outside the ratified Phase-1 surface"
 
 echo "PASS: WP7 mutation checks (10 forbidden body-binding states all rejected)"
+
+# ---------------------------------------------------------------------------
+# WP8 mutation checks — the transport-boundary guardrails must REJECT the states
+# they claim to forbid. The boundary is what keeps the backend replaceable, so a
+# grep that passes on a bad tree would be worse than no grep.
+# ---------------------------------------------------------------------------
+
+# 42. The adapter importing `web` — the back-edge the one-way boundary forbids
+#     (ADR-009 / WP8 D1).
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nimport _ "uruquim:web"\n' >>"$T/web/internal/transport/boundary.odin"
+expect_reject "$T" "transport importing uruquim:web" \
+  "web/internal/transport imports uruquim:web"
+
+# 43. The backend imported OUTSIDE the adapter — here, straight into `web`.
+#     Only web/internal/transport may name odin-http.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nimport _ "uruquim:vendor/odin-http"\n' >>"$T/web/serve.odin"
+expect_reject "$T" "backend imported into web/" \
+  "the vendored backend is imported outside"
+
+# 44. A backend type in an EXPORTED signature. G-06 already bans
+#     transport-shaped names in exported declarations; this proves it fires.
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nserve_raw :: proc(s: ^http.Server) {}\n' >>"$T/web/serve.odin"
+expect_reject "$T" "backend type in an exported signature" \
+  "exports symbols outside the ratified Phase-1 surface"
+
+# 45. A new public transport symbol (serve_with / serve_transport / stop).
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nserve_with :: proc(a: ^App, port: int) {}\n' >>"$T/web/serve.odin"
+expect_reject "$T" "serve_with added to the public surface" \
+  "exports symbols outside the ratified Phase-1 surface"
+
+# 46. A public member added to Status for 413 — still banned after WP8.
+T="$(fresh_tree)"; TREES+=("$T")
+sed -i 's/^\tMethod_Not_Allowed    = 405,/\tMethod_Not_Allowed    = 405,\n\tPayload_Too_Large     = 413,/' \
+  "$T/web/respond.odin"
+expect_reject "$T" "public 413 Status member after WP8" \
+  "a 413 member was added to the public Status enum"
+
+# 47. An unexpected subdirectory under web/internal/.
+T="$(fresh_tree)"; TREES+=("$T")
+mkdir -p "$T/web/internal/memory"
+printf 'package memory\n' >"$T/web/internal/memory/x.odin"
+expect_reject "$T" "extra web/internal subdirectory" \
+  "web/internal/ has an unexpected subdirectory"
+
+# 48. rawptr surfacing in an EXPORTED declaration (the G-03 narrowing must still
+#     bite on the public side).
+T="$(fresh_tree)"; TREES+=("$T")
+printf '\nHandler_Raw :: proc(user: rawptr)\n' >>"$T/web/context.odin"
+expect_reject "$T" "rawptr in an exported declaration" \
+  "exports symbols outside the ratified Phase-1 surface"
+
+echo "PASS: WP8 mutation checks (7 forbidden transport states all rejected)"

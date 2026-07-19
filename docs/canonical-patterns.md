@@ -26,9 +26,17 @@ these forms. If a pattern here conflicts with any other document except
 > `web.path*`/`web.query*`, every response helper, and `web.body` all work. The
 > full handler examples below execute.
 >
-> It is **still not a functional server**. `web.serve` binds no port (WP8), so
-> responses are observable only through `web.test_request`. The canonical
-> *forms* are what this document fixes, and they are unchanged.
+> WP8 made the server real: `web.serve(&app, port)` binds a port and answers
+> HTTP, using `laytan/odin-http` internally behind a private boundary — no
+> application imports it, and it is replaceable by the future `core:net/http`
+> without touching your code. Request bodies are buffered and capped at 4 MiB by
+> the transport, so an oversized request is a 413 before the handler runs, and a
+> handler that returns without responding is a logged 500 (HTTP has no zero
+> status).
+>
+> Still ahead: full HTTP conformance (WP9), configurable timeouts (Phase 3) and
+> graceful-shutdown deadlines (Phase 4). The canonical *forms* are what this
+> document fixes, and they are unchanged.
 
 ## The one rule
 

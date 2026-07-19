@@ -580,6 +580,13 @@ Framework_Error :: enum {
 	// WP7 — `web.body` was called more than once on one request (ADR-012 A). The
 	// body capability is single-use; a second call is a programming error.
 	Body_Consumed_Twice,
+	// WP8 — a dispatch returned with no response committed (a handler that did
+	// not respond, or bare()'s no-policy). The driver finalizes it as a 500.
+	No_Response_Committed,
+	// WP8 — `web.serve` was given a port outside 1..65535.
+	Invalid_Serve_Port,
+	// WP8 — the transport could not bind/listen on the requested port.
+	Serve_Listen_Failed,
 }
 
 // Framework_Report is the typed event. `payload_type` is a `typeid`, so the
@@ -652,6 +659,19 @@ FRAMEWORK_MESSAGE_BODY_CONSUMED_TWICE ::
 	"single-use capability (ADR-012). The second call decodes nothing."
 
 @(private)
+FRAMEWORK_MESSAGE_NO_RESPONSE ::
+	"uruquim: a handler returned without producing a response; the driver is " +
+	"sending 500. A handler must call a web.* responder, or the route is a bare() miss."
+
+@(private)
+FRAMEWORK_MESSAGE_INVALID_PORT ::
+	"uruquim: web.serve was given a port outside 1..65535; not binding."
+
+@(private)
+FRAMEWORK_MESSAGE_LISTEN_FAILED ::
+	"uruquim: web.serve could not bind/listen on the requested port; returning."
+
+@(private)
 framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_location) {
 	report := Framework_Report {
 		kind         = kind,
@@ -673,6 +693,12 @@ framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_locat
 		message = FRAMEWORK_MESSAGE_BODY_DECODE_FAILED
 	case .Body_Consumed_Twice:
 		message = FRAMEWORK_MESSAGE_BODY_CONSUMED_TWICE
+	case .No_Response_Committed:
+		message = FRAMEWORK_MESSAGE_NO_RESPONSE
+	case .Invalid_Serve_Port:
+		message = FRAMEWORK_MESSAGE_INVALID_PORT
+	case .Serve_Listen_Failed:
+		message = FRAMEWORK_MESSAGE_LISTEN_FAILED
 	}
 
 	logger.procedure(logger.data, .Error, message, logger.options, loc)

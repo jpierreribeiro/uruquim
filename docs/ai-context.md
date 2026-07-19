@@ -9,10 +9,9 @@ alternative forms. If something is not listed, it does not exist.**
 > ratified; sections marked Phase 2/3/4 do not yet exist and must not be
 > emitted by a coding agent.
 >
-> **Implementation status (WP7): routing, extraction, responses and body
-> binding work; there is still no server.** Every name and signature here exists
-> in `web/` and compiles on the pinned toolchain, so code written against this
-> reference compiles.
+> **Implementation status (WP8): the server is real.** `web.serve` binds a
+> port and answers HTTP. Every name and signature here exists in `web/` and
+> compiles on the pinned toolchain.
 >
 > What now really works: `Request`, `Method` and `Header_View`; route
 > registration and dispatch, including `:param` matching and
@@ -24,10 +23,23 @@ alternative forms. If something is not listed, it does not exist.**
 > responders) with the standardized envelope and a `Content-Type`; and — new in
 > WP7 — **`web.body`**, which decodes the JSON request body into a caller-owned
 > struct, enforces a fixed 4 MiB cap, and owns decoded data in a request
-> arena.
+> arena; and — new in WP8 — **`web.serve`**, the real bootstrap HTTP server.
 >
-> What still does NOT work: `web.serve` returns immediately without binding a
-> port (WP8). `web.test_request` carries no request body (its signature is
+> `web.serve(&app, port)` binds IPv4 Any and blocks while serving. The
+> bootstrap uses `laytan/odin-http` INTERNALLY, behind a private boundary: no
+> application imports it, no backend type appears in any public signature, and
+> it is temporary — it will be replaced by the future official `core:net/http`
+> with no change to your code. Request bodies are buffered and capped at 4 MiB
+> by the transport itself, so an oversized request is a 413 before your handler
+> runs.
+>
+> A handler that returns without responding is a 500: HTTP has no zero status,
+> so the driver logs the mistake and sends `internal_error`. This is the same
+> in `web.test_request` and over a real socket.
+>
+> What is still NOT here: full HTTP conformance and the framing/keep-alive
+> corpus (WP9), configurable timeouts (Phase 3), and graceful-shutdown deadlines
+> (Phase 4). `web.test_request` still carries no request body (its signature is
 > method + path), so a body handler driven through it takes the empty-body 400
 > path.
 >

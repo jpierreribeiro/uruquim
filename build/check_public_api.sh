@@ -313,14 +313,48 @@ if test "$URUQUIM_ACTUAL_FILES" != "$URUQUIM_EXPECTED_FILES_SORTED"; then
   fail "web/ file set does not match the Phase-1 contract (WP1 seven + WP2 three + WP3 facade + WP4 two + WP7 request_arena)"
 fi
 
-# WP3 permits exactly ONE subdirectory, `web/testing/` (the machinery). It does
-# NOT relax the general ban: `web/internal/` and any other subdirectory remain
-# out of scope until their own work packages.
+# WP3 added `web/testing/`; WP8 adds `web/internal/` (the private transport
+# boundary and adapter). No other subdirectory is permitted. Both are internal:
+# neither adds a symbol to the application ledger, which the inventory below
+# still pins at exactly 32.
 URUQUIM_WEB_SUBDIRS="$(find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)"
-if test "$URUQUIM_WEB_SUBDIRS" != "testing"; then
-  echo "--- web/ subdirectories (only 'testing' is allowed) ---" >&2
+URUQUIM_WEB_SUBDIRS_EXPECTED="$(printf 'internal\ntesting\n')"
+if test "$URUQUIM_WEB_SUBDIRS" != "$URUQUIM_WEB_SUBDIRS_EXPECTED"; then
+  echo "--- web/ subdirectories (only 'internal' and 'testing' are allowed) ---" >&2
   echo "$URUQUIM_WEB_SUBDIRS" >&2
-  fail "web/ has an unexpected subdirectory; WP3 permits only web/testing/"
+  fail "web/ has an unexpected subdirectory; Phase 1 permits only web/testing/ and web/internal/"
+fi
+
+# WP8 — the transport boundary and adapter live under web/internal/transport/.
+# It is a SEPARATE package that must never import `uruquim:web` (the one-way
+# boundary, ADR-009 / WP8 D1); the adapter is the only place the backend may be
+# imported. These are static guards; the compile probes back them.
+URUQUIM_WEB_INTERNAL="$URUQUIM_WEB/internal"
+if test -d "$URUQUIM_WEB_INTERNAL"; then
+  URUQUIM_INTERNAL_SUBDIRS="$(find "$URUQUIM_WEB_INTERNAL" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)"
+  if test "$URUQUIM_INTERNAL_SUBDIRS" != "transport"; then
+    echo "--- web/internal subdirectories (only 'transport' is allowed) ---" >&2
+    echo "$URUQUIM_INTERNAL_SUBDIRS" >&2
+    fail "web/internal/ has an unexpected subdirectory; WP8 permits only web/internal/transport/"
+  fi
+  URUQUIM_TRANSPORT="$URUQUIM_WEB_INTERNAL/transport"
+  if grep -nE '"uruquim:web"' "$URUQUIM_TRANSPORT"/*.odin; then
+    fail "web/internal/transport imports uruquim:web; the transport boundary is one-way (ADR-009 / WP8 D1)"
+  fi
+
+  # Exactly ONE file may name the vendored backend: the adapter. The backend
+  # lives in the `uruquim:` collection, so the general dependency rule below
+  # cannot catch this — an import anywhere else would put a replaceable
+  # third-party type on the wrong side of the boundary (G-06 / WP8 D1).
+  URUQUIM_BACKEND_USERS="$(grep -rlE '"uruquim:vendor/odin-http"' "$URUQUIM_WEB" |
+    xargs -r -n1 basename | LC_ALL=C sort -u)"
+  if test "$URUQUIM_BACKEND_USERS" != "odin_http_adapter.odin"; then
+    echo "--- expected backend importers ---" >&2
+    echo "odin_http_adapter.odin" >&2
+    echo "--- actual ---" >&2
+    echo "$URUQUIM_BACKEND_USERS" >&2
+    fail "the vendored backend is imported outside web/internal/transport/odin_http_adapter.odin (ADR-009 / WP8 D1)"
+  fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -480,20 +514,25 @@ done
 # ---------------------------------------------------------------------------
 # 4. Context is not an extension bag (planning/public-api-guardrails.md G-03)
 #
-# WP1 introduces no `any`, no dynamic bag, and no rawptr anywhere in web/.
-# Phase 3 may introduce ONE private, typeid-validated rawptr for app_with_state
-# (ADR-004); when it does, this check is narrowed spec-first to exported
-# declarations rather than deleted.
+# `any`, a dynamic bag, and the handler-error result types are forbidden
+# ANYWHERE in web/. `rawptr` is forbidden only in EXPORTED declarations: WP8
+# introduces ONE private `rawptr` — the neutral transport-callback user pointer
+# in `serve_dispatch` — which is the boundary between the core and the untyped
+# backend callback, exactly the narrowing this check anticipated (and the shape
+# Phase 3 will reuse for app_with_state's typeid-validated rawptr, ADR-004). It
+# never appears in a public signature.
 # ---------------------------------------------------------------------------
 if grep -nE '^[[:space:]]*(user_data|locals|values)[[:space:]]*:' <<<"$URUQUIM_WEB_CODE"; then
   fail "web/ declares an untyped request-local storage field (planning/public-api-guardrails.md G-03)"
 fi
-for URUQUIM_BAG in 'map\[string\]any' 'map\[any\]any' '\bany\b' '\brawptr\b' \
+for URUQUIM_BAG in 'map\[string\]any' 'map\[any\]any' '\bany\b' \
   'Handler_Error' 'Handler_Outcome'; do
   if grep -nE "$URUQUIM_BAG" <<<"$URUQUIM_WEB_CODE"; then
     fail "web/ uses a forbidden construct matching /$URUQUIM_BAG/ (planning/public-api-guardrails.md G-03, ADR-011)"
   fi
 done
+# `rawptr` is banned only in EXPORTED declarations (G-03 narrowing); that check
+# runs in section 6 below, once the exported-block extraction is available.
 
 # The machinery is production code too: no `any`, no `rawptr`, no state bag, no
 # duplicated public web type. It moves data as neutral records only.
@@ -551,6 +590,14 @@ uruquim_exported_blocks() {
 }
 
 URUQUIM_EXPORTED_BLOCKS="$(uruquim_exported_blocks)"
+
+# G-03 (narrowed): `rawptr` is forbidden in EXPORTED declarations, never in the
+# whole package — WP8's one private `rawptr` is the neutral transport-callback
+# user pointer in `serve_dispatch`, which appears in no public signature.
+if grep -nE '\brawptr\b' <<<"$URUQUIM_EXPORTED_BLOCKS"; then
+  fail "web/ exposes rawptr in an exported declaration (planning/public-api-guardrails.md G-03)"
+fi
+
 # Word-bounded: `Internal_Server_Error` is an HTTP status name, not a
 # transport type, and must not be reported as leakage.
 for URUQUIM_TYPE in '\bTransport\b' '\bSocket\b' '\bTCP\b' '\bConnection\b' \
@@ -968,7 +1015,7 @@ grep -qE 'request_arena_destroy\(' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" ||
 #           configurability and replay specifically — a per-request `body_limit`
 #           FIELD, a setter, a size knob, a replay/cache — without matching the
 #           fixed `BODY_LIMIT` constant that the cap legitimately uses.
-for URUQUIM_WP7_BAN in 'set_body_limit' 'max_body' 'body_replay' '\breplay\b' \
+for URUQUIM_WP7_BAN in 'set_body_limit' 'max_body_size' 'body_replay' '\breplay\b' \
   'body_cache' 'Body_Cache' 'body_limit[[:space:]]*:' 'configurable'; do
   if grep -nE "$URUQUIM_WP7_BAN" <<<"$URUQUIM_WEB_CODE"; then
     fail "web/ contains a WP7 non-goal matching /$URUQUIM_WP7_BAN/ (no configurable limit, replay or cache)"

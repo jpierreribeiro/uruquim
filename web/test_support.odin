@@ -81,6 +81,11 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 	//    to it.
 	dispatch(a, &ctx)
 
+	// 3b. WP8 — finalize a response the handler left uncommitted to a logged 500,
+	//     so the in-memory driver and the real transport agree (WP8 D5). Before
+	//     WP8 this yielded the zero status; both drivers now produce a 500.
+	driver_finalize(&ctx)
+
 	// 4. The facade hands the internal Response to the recorder as neutral
 	//    values. The header conversion is transient (temp allocator); the
 	//    recorder makes its own owned copies with context.allocator.

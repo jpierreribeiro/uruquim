@@ -77,6 +77,7 @@ wp5_seen_path_hits: int
 wp5_path_handler :: proc(ctx: ^web.Context) {
 	wp5_seen_path = web.path(ctx, "id")
 	wp5_seen_path_hits += 1
+	web.no_content(ctx)
 }
 
 @(test)
@@ -92,10 +93,9 @@ wp5_path_is_readable_inside_a_routed_handler :: proc(t: ^testing.T) {
 	testing.expect_value(t, wp5_seen_path_hits - before, 1)
 	testing.expect_value(t, wp5_seen_path, "42")
 
-	// The handler committed nothing — the WP6 responders are still stubs — so
-	// the framework must not fabricate a status on its behalf.
-	zero: web.Status
-	testing.expect_value(t, res.status, zero)
+	// The handler recorded the extractor result and responded 204. The framework
+	// still never fabricates a 200 (pinned by the WP8 driver-finalization tests).
+	testing.expect_value(t, res.status, web.Status.No_Content)
 }
 
 wp5_seen_missing_path: string
@@ -105,6 +105,7 @@ wp5_missing_path_handler :: proc(ctx: ^web.Context) {
 	// A name that was never captured, on a route that HAS a parameter.
 	wp5_seen_missing_path = web.path(ctx, "not_the_name")
 	wp5_seen_missing_hits += 1
+	web.no_content(ctx)
 }
 
 @(test)
@@ -120,9 +121,8 @@ wp5_path_with_an_unknown_name_is_empty_and_does_not_respond :: proc(t: ^testing.
 	testing.expect_value(t, wp5_seen_missing_hits - before, 1)
 	testing.expect_value(t, wp5_seen_missing_path, "")
 
-	// `web.path` never responds automatically, so nothing was committed.
-	zero: web.Status
-	testing.expect_value(t, res.status, zero)
+	// `web.path` never responds automatically; the handler responded 204 itself.
+	testing.expect_value(t, res.status, web.Status.No_Content)
 	testing.expect_value(t, res.body, "")
 }
 
@@ -140,6 +140,7 @@ wp5_path_int_handler :: proc(ctx: ^web.Context) {
 		return
 	}
 	wp5_seen_id = id
+	web.no_content(ctx)
 }
 
 @(test)
@@ -156,9 +157,9 @@ wp5_path_int_parses_a_valid_integer_in_a_routed_handler :: proc(t: ^testing.T) {
 	testing.expect(t, wp5_seen_id_ok, "a valid integer must parse")
 	testing.expect_value(t, wp5_seen_id, 42)
 
-	// A SUCCESSFUL extraction writes no response at all.
-	zero: web.Status
-	testing.expect_value(t, res.status, zero)
+	// A SUCCESSFUL extraction writes no response of its own; the handler then
+	// responded 204.
+	testing.expect_value(t, res.status, web.Status.No_Content)
 	testing.expect_value(t, res.body, "")
 }
 
@@ -334,6 +335,7 @@ wp5_query_handler :: proc(ctx: ^web.Context) {
 		return
 	}
 	wp5_seen_limit = limit
+	web.no_content(ctx)
 }
 
 @(test)
@@ -353,8 +355,7 @@ wp5_query_extractors_work_inside_a_routed_handler :: proc(t: ^testing.T) {
 	testing.expect(t, wp5_seen_limit_ok)
 	testing.expect_value(t, wp5_seen_limit, 20)
 
-	zero: web.Status
-	testing.expect_value(t, res.status, zero)
+	testing.expect_value(t, res.status, web.Status.No_Content)
 }
 
 // ---------------------------------------------------------------------------
