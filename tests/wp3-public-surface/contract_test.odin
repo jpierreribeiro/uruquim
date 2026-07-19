@@ -9,11 +9,18 @@
 // the call completes with no socket, no port, and no network syscall, and its
 // result is readable as `res.status` / `res.body`.
 //
-// WP3 ships NO router. The facade therefore returns whatever the (uncommitted)
-// internal response holds: the zero status and an empty body. This test asserts
-// exactly that — it must NOT expect a fabricated 200 or an echoed path, because
-// producing one would be the "200/echo falso" the WP3 prompt forbids. Real
-// routed status/body arrive in WP4, tested through this same `web.test_request`.
+// WP3's own contract is the in-memory ROUND TRIP and the response LIFETIME: the
+// facade returns whatever the internal response holds, and it must NOT fabricate
+// a 200 or echo the path. That contract is unchanged by WP4 and is still
+// asserted below.
+//
+// AMENDED IN WP4. WP4 wired dispatch, so `web.app()` now installs the automatic
+// 404/405 and an unmatched path is a real routed 404 — the WP4 tests own that.
+// The two round-trip tests below therefore use `web.bare()`, which routes but
+// installs no automatic response (D4), so an unmatched path still leaves the
+// response UNCOMMITTED. That keeps these tests measuring exactly what WP3
+// ratified — zero status, empty body, both responses readable until `destroy` —
+// instead of silently becoming duplicates of the WP4 404 tests.
 //
 // The matching NEGATIVE contract — that `Recorded_Response` has no public
 // `headers` field — cannot be written here, since it must fail to compile. It
@@ -41,13 +48,14 @@ wp3_recorded_response_exposes_status_and_body :: proc(t: ^testing.T) {
 
 @(test)
 wp3_test_request_runs_in_memory_without_routing :: proc(t: ^testing.T) {
-	app := web.app()
+	app := web.bare()
 	defer web.destroy(&app)
 
 	res := web.test_request(&app, .GET, "/users/42")
 
-	// No router in WP3: the response is uncommitted, so the status is the zero
-	// value (NOT a fabricated 200) and the body is empty (NOT the echoed path).
+	// No route is registered and `bare()` installs no automatic response, so the
+	// response is uncommitted: the status is the zero value (NOT a fabricated
+	// 200) and the body is empty (NOT the echoed path).
 	zero: web.Status
 	testing.expect_value(t, res.status, zero)
 	testing.expect_value(t, res.body, "")
@@ -57,14 +65,14 @@ wp3_test_request_runs_in_memory_without_routing :: proc(t: ^testing.T) {
 
 @(test)
 wp3_two_recorded_responses_survive_until_destroy :: proc(t: ^testing.T) {
-	app := web.app()
+	app := web.bare()
 	defer web.destroy(&app)
 
 	first := web.test_request(&app, .GET, "/a")
 	second := web.test_request(&app, .POST, "/bb")
 
 	// Both remain readable after the second call — neither aliases a buffer the
-	// other reused. (Bodies are empty in WP3; WP4 makes them meaningful.)
+	// other reused. (Both are uncommitted: `bare()` adds no automatic response.)
 	testing.expect_value(t, first.body, "")
 	testing.expect_value(t, second.body, "")
 

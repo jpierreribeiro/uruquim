@@ -239,6 +239,40 @@ rm -rf "$URUQUIM_WP3_CYCLE"
 trap - EXIT
 echo "PASS: the one-way dependency is enforced by the compiler (C5)"
 
+# WP4 — route registration, matching and dispatch.
+#
+# The route table, the matcher, `dispatch` and the private parameter storage in
+# `Context_Internal` are all package-private, so these tests run in a THROWAWAY
+# package exactly like WP2 and WP3: the real `web/` sources plus the
+# out-of-tree test file, copied into a fresh `mktemp -d`.
+#
+# Two WP4 contracts are only observable from inside the package: the exact
+# `Allow` header (Recorded_Response has no public headers field) and a routed
+# 200 with a real body (the public responders are inert until WP6). Both are
+# still driven through the REAL registration + dispatch path.
+echo "--- WP4 route registration and dispatch, internal behavior (throwaway package) ---"
+URUQUIM_WP4_TMP="$(mktemp -d -t uruquim-wp4-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP4_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP4_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp4-internal/*.odin "$URUQUIM_WP4_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP4_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT"
+rm -rf "$URUQUIM_WP4_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP4_TMP" || fail "the throwaway WP4 internal-test package was not removed"
+echo "PASS: WP4 internal tests ran against the real sources; throwaway package removed"
+
+# WP4 public surface — an EXTERNAL consumer of `uruquim:web` that registers
+# routes and drives them through `web.test_request`. It proves that routing is
+# expressible with the ratified 34 symbols and adds none, and that `app()` and
+# `bare()` are now observably different. Memory tracking (default in
+# `odin test`) covers the App-owned route table's cleanup.
+echo "--- WP4 public surface contract: routing, 404, 405, bare (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp4-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT"
+
 echo "--- Phase-1 public API anti-accretion contract ---"
 bash "$URUQUIM_ROOT/build/check_public_api.sh"
 

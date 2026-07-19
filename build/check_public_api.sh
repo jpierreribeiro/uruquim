@@ -46,9 +46,23 @@ fail() {
 # test-support facade), and exactly one subdirectory, `web/testing/` (the
 # machinery). No other top-level file and no other subdirectory is permitted.
 # ---------------------------------------------------------------------------
+#
+# WP4 adds exactly TWO top-level files, `dispatch_table.odin` and
+# `dispatch_match.odin`, and NO subdirectory. Every declaration in them is
+# package-private, so the application ledger stays at exactly 32.
+#
+# The original plan proposed `web/internal/dispatch/*.odin`. That is refuted by
+# the language: in Odin a subdirectory is a separate package, and the dispatcher
+# must name `App`, `Handler`, `Context`, `Method` and the internal `Response` —
+# so a subpackage would have to import `uruquim:web`, the back-edge WP3 already
+# ratified as a compile cycle (probe C5). The checker is therefore extended by
+# exactly two file names; it is NOT relaxed to accept subdirectories or
+# arbitrary files (planning/phase-1-plan.md §WP4 D2).
 URUQUIM_TEST_SUPPORT_FILE="test_support.odin"
 URUQUIM_EXPECTED_APP_FILES="app.odin
 context.odin
+dispatch_match.odin
+dispatch_table.odin
 errors.odin
 extract.odin
 headers.odin
@@ -295,7 +309,7 @@ if test "$URUQUIM_ACTUAL_FILES" != "$URUQUIM_EXPECTED_FILES_SORTED"; then
   echo "$URUQUIM_EXPECTED_FILES_SORTED" >&2
   echo "--- actual web/ files ---" >&2
   echo "$URUQUIM_ACTUAL_FILES" >&2
-  fail "web/ file set does not match the Phase-1 contract (WP1 seven + WP2 three + WP2 internal tests)"
+  fail "web/ file set does not match the Phase-1 contract (WP1 seven + WP2 three + WP3 facade + WP4 two)"
 fi
 
 # WP3 permits exactly ONE subdirectory, `web/testing/` (the machinery). It does
@@ -667,10 +681,85 @@ if grep -nE '^(header|headers|bearer_token|header_get) ::' <<<"$URUQUIM_WEB_PUBL
   fail "a header lookup entered the Phase-1 package; web.header is Phase 2"
 fi
 
+# ---------------------------------------------------------------------------
+# 9. WP4 route registration and dispatch (planning/phase-1-plan.md §WP4 D1-D5)
+#
+# WP4 adds BEHAVIOR, not surface. The inventory above already proves the ledger
+# stayed at 32; what follows pins the properties the inventory cannot see.
+# ---------------------------------------------------------------------------
+URUQUIM_DISPATCH_TABLE="$URUQUIM_WEB/dispatch_table.odin"
+URUQUIM_DISPATCH_MATCH="$URUQUIM_WEB/dispatch_match.odin"
+test -f "$URUQUIM_DISPATCH_TABLE" ||
+  fail "web/dispatch_table.odin is missing; WP4 has not created the route table"
+test -f "$URUQUIM_DISPATCH_MATCH" ||
+  fail "web/dispatch_match.odin is missing; WP4 has not created the matcher"
+
+URUQUIM_WP4_CODE="$(sed -E 's://.*$::' "$URUQUIM_DISPATCH_TABLE" "$URUQUIM_DISPATCH_MATCH")"
+
+# 9a. EVERY declaration the two WP4 files add is package-private. The route
+#     table, the entry type, the matcher and `dispatch` are all internal: Phase
+#     3 replaces them wholesale, and an exported one would freeze the interim
+#     dispatcher into the public API.
+URUQUIM_WP4_EXPORTS="$(URUQUIM_WEB_PUBLIC_CODE="$URUQUIM_WP4_CODE" uruquim_exported_names)"
+if test -n "$URUQUIM_WP4_EXPORTS"; then
+  echo "--- exported symbols in the WP4 dispatch files ---" >&2
+  echo "$URUQUIM_WP4_EXPORTS" >&2
+  fail "the WP4 dispatch files export a symbol; every dispatch declaration must be package-private (planning/phase-1-plan.md §WP4 D1/D2)"
+fi
+
+# 9b. `dispatch` takes the App EXPLICITLY (D3). The WP3 stub `dispatch(ctx)` had
+#     no access to the App-owned table; no pointer to App is stored on Context.
+grep -qE '^dispatch :: proc\(a: \^App, ctx: \^Context\) \{$' <<<"$URUQUIM_WP4_CODE" ||
+  fail "dispatch does not have the ratified internal signature 'dispatch :: proc(a: ^App, ctx: ^Context)' (planning/phase-1-plan.md §WP4 D3)"
+
+# 9c. The App holds no back-pointer inside the Context. A stored `^App` would
+#     make the request context outlive-sensitive and is not how dispatch reaches
+#     the table (D3).
+if grep -nE '^[[:space:]]*[a-z_]+:[[:space:]]*\^App' <<<"$(awk '/^Context_Internal :: struct \{/{f=1;next} /^\}/{f=0} f' <<<"$URUQUIM_WEB_CODE")"; then
+  fail "Context_Internal stores a pointer to App; dispatch receives the App explicitly instead (planning/phase-1-plan.md §WP4 D3)"
+fi
+
+# 9d. The `Allow` header name and its canonical method order are exact and
+#     deterministic (D4). The order is a property of the framework, never of the
+#     application's registration sequence.
+grep -qE '^ALLOW_HEADER_NAME :: "Allow"$' <<<"$URUQUIM_WP4_CODE" ||
+  fail "the 405 header name is not exactly \"Allow\" (planning/phase-1-plan.md §WP4 D4)"
+grep -qE '^ALLOW_METHOD_ORDER :: \[5\]Method\{\.GET, \.POST, \.PUT, \.PATCH, \.DELETE\}$' \
+  <<<"$URUQUIM_WP4_CODE" ||
+  fail "the Allow method order is not the canonical GET, POST, PUT, PATCH, DELETE (planning/phase-1-plan.md §WP4 D4)"
+
+# 9e. WP4 is the INTERIM dispatcher. Radix/trie/wildcard vocabulary and any
+#     middleware machinery belong to Phase 3 and Phase 2 respectively; finding
+#     them here means a later phase started early (R-12).
+for URUQUIM_EARLY in 'radix' '\btrie\b' 'wildcard' 'Route_Node' 'Resolved_Route' \
+  'middleware' 'chain_cursor'; do
+  if grep -niE "$URUQUIM_EARLY" <<<"$URUQUIM_WP4_CODE"; then
+    fail "later-phase routing construct matching /$URUQUIM_EARLY/ appears in the WP4 dispatcher (Phase 2/3 scope, R-12)"
+  fi
+done
+
+# 9f. WP4 decides 404 and 405 — and NOTHING else. A 501 for an unknown method,
+#     or any other automatic status, is a response policy WP4 has no mandate to
+#     freeze (D4).
+if grep -nE '\b(501|Not_Implemented|Internal_Server_Error|Bad_Request|Unauthorized|Forbidden)\b' \
+  <<<"$URUQUIM_WP4_CODE"; then
+  fail "the WP4 dispatcher decides a status outside 404/405; .UNKNOWN never becomes a 501 (planning/phase-1-plan.md §WP4 D4)"
+fi
+
+# 9g. The WP4 internal tests live OUTSIDE the shipped package, like WP2/WP3.
+URUQUIM_WP4_TESTS="$URUQUIM_ROOT/tests/wp4-internal"
+test -d "$URUQUIM_WP4_TESTS" ||
+  fail "tests/wp4-internal/ is missing; the WP4 internal-behavior tests have no home outside the shipped package"
+grep -qx 'package web' "$URUQUIM_WP4_TESTS"/*.odin ||
+  fail "tests/wp4-internal/ does not declare 'package web'; it could not reach the package-private dispatcher it exists to test"
+
 echo "public API contract: web/ file set matches the Phase-1 contract through WP3"
 echo "public API contract: application ledger 32 + test-support ledger 2 = union 34"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"
 echo "public API contract: no later-phase symbol, dynamic storage, or backend leak"
-echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2)"
+echo "public API contract: WP4 dispatch files export nothing; dispatch takes the App explicitly"
+echo "public API contract: Allow is exactly 'Allow' in canonical GET, POST, PUT, PATCH, DELETE order"
+echo "public API contract: no radix/wildcard/middleware construct entered the interim dispatcher"
+echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4)"
