@@ -8,6 +8,12 @@ these forms. If a pattern here conflicts with any other document except
 > Status: Phase-1 canonical forms ratified at the 2026-07-18 Spec Gate.
 > Later-phase sections are design targets and become available only at their
 > marked phase gates.
+>
+> WP1 has compiled the Phase-1 surface: every form below is valid Odin against
+> the real `web` package on the pinned toolchain. WP1 delivered a **compiling
+> public API skeleton, not a functional server** — the procedures are inert
+> stubs until WP2–WP9. The canonical *forms* are what this document fixes, and
+> they are unchanged.
 
 ## The one rule
 

@@ -1,6 +1,6 @@
 # WP1 Gate — Compiling Public API Skeleton
 
-Status: **IN PROGRESS.** Toolchain `dev-2026-07a` / commit `819fdc7`.
+Status: **COMPLETE — LOCAL PASS.** Toolchain `dev-2026-07a` / commit `819fdc7`.
 
 ## SPEC
 
@@ -199,7 +199,150 @@ so the RED state was caused only by the missing WP1 package.
 
 ### GREEN evidence
 
-Recorded in the GATE section below.
+```text
+$ URUQUIM_ODIN_BIN=/tmp/uruquim-odin-toolchain/odin bash build/check.sh
+toolchain version: dev-2026-07-nightly:819fdc7
+toolchain commit: 819fdc7
+...
+PASS=10 FAIL=0 SKIP=0
+--- WP1 public API package (odin check) ---
+--- WP1 public API compile contract (odin test) ---
+Finished 1 test in 217.355µs. The test was successful.
+--- WP1 public API anti-accretion contract ---
+public API contract: web/ file set matches WP1
+public API contract: exported surface is exactly 29 Phase-1 symbols
+public API contract: no later-phase symbol, dynamic storage, or backend leak
+PASS: WP1 public API anti-accretion contract
+gate exit=0
+
+$ URUQUIM_ODIN_BIN=/tmp/uruquim-odin-toolchain/odin bash build/check_test.sh
+PASS: WP0 toolchain and repository baseline
+```
+
+### The assertions were proven to bite
+
+A checker that never fails proves nothing, so each assertion was driven to RED
+by a temporary local edit that was reverted immediately (`git status` clean
+afterwards; no probe file remains):
+
+| Injected violation | Assertion result |
+|---|---|
+| extra export `respond` | `FAIL: web/ exports symbols outside the ratified Phase-1 surface` |
+| Phase-2 export `use` | `FAIL: web/ exports symbols outside the ratified Phase-1 surface` |
+| `user_data: map[string]any` on `Context` | `FAIL: web/ declares an untyped request-local storage field` |
+| `serve(..., t: ^Transport)` | `FAIL: transport-shaped name matching /\bTransport\b/ appears in an exported declaration` |
+| `import http "shared:odin-http"` | `FAIL: backend identifier matching /odin[-_]http/ reached the public package or examples` |
+| extra file `web/middleware.odin` | `FAIL: web/ file set does not match the WP1 contract` |
+| `Handler :: proc(ctx) -> Handler_Error` | `FAIL: web/ uses a forbidden construct matching /Handler_Error/` |
+
+Two false positives were found and fixed while building the checker, both of
+which planning/15's false-positive rules require avoiding:
+
+1. the comment in `web/context.odin` that *prohibits* `map[string]any` was
+   reported as `map[string]any`. The scans now read code, not comments.
+2. the HTTP status `Internal_Server_Error` was reported as a `Server`
+   transport leak. The transport-type patterns are now word-bounded.
+
+## REVIEW
+
+Audit of the diff against `planning/15-public-api-anti-accretion-guardrails.md`.
+
+**Exact exported-symbol inventory (29).** Types: `App`, `Context`, `Handler`,
+`Status`. Procedures: `app`, `bare`, `destroy`; `get`, `post`, `put`, `patch`,
+`delete`; `path`, `path_int`, `query`, `query_int`, `query_int_or`, `body`;
+`json`, `ok`, `created`, `text`, `no_content`; `bad_request`, `unauthorized`,
+`forbidden`, `not_found`, `internal_error`; `serve`. Machine-enforced by
+`build/check_public_api.sh`, which fails on any addition or removal.
+
+**No synonyms.** There is one name per operation. `ok` and `created` are the
+only delegations; each is a single-line exact fixed-status call to `json` with
+no extra behavior, which G-01 permits by name. No `respond`, `bind`,
+`parse_body`, `decode_json`, `send`, or `write` exists. No second handler
+shape exists.
+
+**Context has no dynamic/untyped storage.** `Context` has exactly one field,
+`private`, of the package-private type `Context_Internal`. A compiler probe
+confirms an external package cannot name that type
+(`'Context_Internal' is not exported by 'web'`). `any`, `rawptr`,
+`map[string]any`, `map[any]any`, `user_data`, `locals`, and `values` appear
+nowhere in `web/` — not even privately.
+
+**No transport/backend type is public.** `web/` imports nothing at all. No
+exported declaration mentions `Transport`, `Socket`, `TCP`, `Connection`,
+`Server`, `net.`, or `http.`. `serve` takes `(^App, int)` and no transport
+handle. The single mention of the future official `core:net/http` package is a
+comment in `web/serve.odin` explaining why transport selection is internal —
+which G-06 explicitly protects as non-leakage.
+
+**No framework type was added to domain code.** WP1 ships no domain code.
+`^Context` appears only on handler and extractor signatures. In the compile
+contract, `User` and `Create_User` are plain application structs that do not
+reference any `web` type.
+
+**No request/response lifetime or commit behavior is falsely promised.**
+`Context` deliberately does **not** declare `request`, `response`, `params`,
+or `route`; declaring them would advertise a view-lifetime and single-commit
+contract that WP2 owns. No stub sets a status, writes a body, or touches a
+commit flag. `path_int`, `query_int`, and `query_int_or` return `ok = false`
+without writing a response, which is honest — a WP1 handler that follows the
+canonical `if !ok { return }` form simply returns. `query_int_or` notably does
+**not** return `default_value`: WP1 cannot distinguish "absent" from
+"malformed", and returning the default would claim the absence semantics that
+WP5 owns. Every file states which work package delivers its behavior.
+
+**No Phase-2+ surface exists.** `use`, `next`, `router`, `group`, `mount`,
+`state`, `app_with_state`, `header`, `bearer_token`, `serve_with`,
+`serve_transport`, `app_init`, `test_request`, `redirect`, `conflict`,
+`bytes`, `logger`, `recovery`, `request_id`, and `cors` are all absent and are
+individually rejected by the contract. `web/` has no subdirectories, so no
+`internal/`, `middleware/`, or `testing/` package started early.
+
+**No unrelated file was modified.** Changes are confined to: the new `web/`
+package, the new compile contract, the new static contract, the two build
+files that had to learn about them (`build/check.sh`, `build/README.md` — the
+latter had explicitly reserved this extension for WP1), the three status/
+documentation surfaces required by the cross-phase parity invariant
+(`README.md`, `docs/ai-context.md`, `docs/canonical-patterns.md`), and this
+gate record. `knowledge-base/**` is untouched. `experiments/**`,
+`ops/**`, `build/check_test.sh`, and the pre-push hook are untouched.
+
+## DOCUMENTATION
+
+- `README.md`, `docs/ai-context.md`, and `docs/canonical-patterns.md` now
+  state that WP1 delivered a **compiling public API skeleton, never a
+  functional server**, and that `web.serve` returns immediately.
+- **Nominally compiler-ratified by WP1** — first compiling evidence of the
+  exact public name and signature: `Context`, `Status`, `bare`, `put`,
+  `patch`, `delete`, `path`, `query`, `query_int_or`, `text`, `no_content`,
+  `bad_request`, `unauthorized`, `forbidden`, `not_found`, `internal_error`,
+  `serve`. This closes the "PROVISIONAL UNTIL WP1/OWNER WP" column of
+  `knowledge-base/03-development-phases.md` for its *nominal* half only.
+  **No symbol is behaviourally frozen**: the freeze discipline additionally
+  requires a behavior test from the owning work package, and WP1 has none.
+- One documented clarification was required and added to `docs/ai-context.md`:
+  the status argument of `json`/`text` has type `web.Status` and is always
+  written as an inferred enum member, never a bare integer. This is a
+  clarification of an already-ratified signature, not a new decision — the
+  documented Phase-1 calls `web.json(ctx, .Accepted, payload)` and
+  `web.text(ctx, .OK, "pong")` already required the type to exist.
+- **No PROPOSED SPEC AMENDMENT is needed.** No governing clause was
+  contradicted by the compiler, and no normative form changed. The canonical
+  patterns are unchanged; they are simply now compiled against real code.
+
+## GATE
+
+| Requirement | Result |
+|---|---|
+| pinned-toolchain command (`build/check.sh` via the tracked pre-push hook) | PASS, `toolchain commit: 819fdc7` |
+| `build/check_test.sh` | `PASS: WP0 toolchain and repository baseline` |
+| WP1 compile contract (`odin test tests/wp1-public-api`) | PASS, 1 test |
+| WP1 anti-accretion contract | `PASS: WP1 public API anti-accretion contract` |
+| disposable suite baseline | `PASS=10 FAIL=0 SKIP=0` — unchanged |
+| `git diff --check` | clean |
+| untracked binaries or temporary probes | none; `git status` clean |
+| WP2 started? | **No.** No `web/request.odin`, `web/response.odin`, or `web/headers.odin` exists, and `Context` has no request/response field. |
+
+Status: **COMPLETE.**
 
 ## GATE
 

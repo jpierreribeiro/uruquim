@@ -89,11 +89,17 @@ docs/                    User- and agent-facing documentation
 
 ## Status
 
-Phase-1 Spec Gate: **READY** (2026-07-18). Production implementation has not
-started. The knowledge base is the governing specification; implementation
-now follows one approved work package at a time as defined in
-`planning/05-phase-1-implementation-plan.md`.
+Phase-1 Spec Gate: **READY** (2026-07-18). The knowledge base is the governing
+specification; implementation follows one approved work package at a time as
+defined in `planning/05-phase-1-implementation-plan.md`.
 
 WP0 is complete. GitHub Actions is not required: a tracked pre-push hook runs
 the mandatory gate, and the project VPS repeats it from a clean commit on an
-enabled systemd timer. WP1 is authorized by the gate but has not started.
+enabled systemd timer.
+
+WP1 is complete: `web/` is a **compiling public API skeleton**, not a
+functional server. The 29 Phase-1 symbols exist with their exact names and
+signatures and compile on the pinned toolchain, but every procedure body is an
+inert stub. Nothing routes, parses, marshals, commits a response, or binds a
+socket. `web.serve` returns immediately. Behavior arrives in WP2–WP9; see
+`planning/17-wp1-gate.md`.
