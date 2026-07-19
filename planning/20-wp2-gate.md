@@ -1,7 +1,8 @@
 # WP2 Gate — Framework Request/Response Model
 
-Status: **SPEC.** Toolchain `dev-2026-07a` / commit `819fdc7`. Base
-`origin/main` at `687d045` (pre-WP2 normative amendment merged).
+Status: **COMPLETE — LOCAL PASS.** Toolchain `dev-2026-07a` / commit
+`819fdc7`. Base `origin/main` at `687d045` (pre-WP2 normative amendment
+merged). Surface checkpoint: **exactly 32 symbols**.
 
 ## SPEC
 
@@ -146,3 +147,189 @@ have behavior tests, which is what the freeze discipline requires of the owning
 work package (`knowledge-base/03-development-phases.md`). The internal
 `Response` shape is explicitly unfrozen: WP6 adds rendering and WP7 the request
 arena, and both may reshape it, since nothing internal is public API.
+
+## TESTS FIRST — preserved RED evidence
+
+Commit `6850a1c` raised `build/check_public_api.sh` to 32 and added every WP2
+test and probe **before** the model existed. The checker was held to the same
+discipline as the code, in a separate commit, exactly as planning/18 P-4
+requires.
+
+At `6850a1c` the gate failed, and failed for the intended reason:
+
+```text
+build/check_public_api.sh
+  FAIL: web/ file set does not match the Phase-1 contract
+        (expected headers.odin, request.odin, response.odin — absent)
+  exit=1
+
+odin check web
+  web/wp2_internal_test.odin(42:46) Error: Undeclared name: Header_Pair
+  web/wp2_internal_test.odin(42:62) Error: Undeclared name: Request
+  web/wp2_internal_test.odin(231:26) Error: Undeclared name: method_from_token
+  exit=1
+
+odin test tests/wp2-public-surface
+  contract_test.odin(27:5)  Error: 'web.Method' is not a type
+  contract_test.odin(27:19) Error: Invalid type 'invalid type' for implicit
+                                   selector expression '.GET'
+  exit=1
+
+build/check.sh
+  GATE_EXIT=1
+```
+
+The negative probe is worth recording separately, because it shows why
+`build/check.sh` matches the exact diagnostic instead of merely requiring a
+non-zero exit. In the RED state the probe failed with
+
+```text
+'Header_Pair' is not declared by 'web'
+```
+
+and only in the GREEN state does it fail with the diagnostic the contract
+actually means:
+
+```text
+'Header_Pair' is not exported by 'web'
+```
+
+"Absent" and "present but private" are different facts. A probe that accepted
+any compile failure would have passed in both states and proved nothing.
+
+## MINIMAL IMPLEMENTATION
+
+Three files, as planned: `web/request.odin`, `web/response.odin`,
+`web/headers.odin`. `web/context.odin` was extended only to bind the model to
+the `Context` — `request` in public, response state in the private slot — and
+no further.
+
+Not implemented, deliberately: dispatch, route table, test transport, extractor
+parsing, JSON marshal, error envelope, body binding, the 4 MiB cap, sockets,
+transport adapter, and automatic status decisions. `odin-http` is not imported;
+`web/` still imports only `core:`.
+
+`response_commit` has **no public caller**. It is exercised only by the WP2
+tests; wiring `web.json`/`web.ok` onto it is WP6.
+
+## REVIEW — audited against the diff
+
+| Item | Result |
+|---|---|
+| exported inventory is exactly 32 | PASS — 29 + `Method`, `Request`, `Header_View`; enforced in both directions |
+| Context has no dynamic/untyped storage and no `response` field | PASS — checker §8d pins the exact field list; negative probe pins `ctx.response` |
+| no public transport type; `Header_Pair` not exported | PASS — checker §6 and two negative probes |
+| no view escapes without a documented explicit copy | PASS — WP2 adds no accessor at all; the only views are `Request`'s own fields, and copy-to-persist is documented and test-pinned |
+| the commit guard is tested on the internal primitive | PASS — no responder call appears in `web/wp2_internal_test.odin` |
+| no automatic 404/405/501 | PASS — checker §8f scans the model's code |
+| no Phase-2+ surface | PASS — checker §3, extended with `Response`, `Header_Pair`, `Params`, `Route_Info`, `method_raw` |
+| no unrelated file modified | PASS — every changed file is WP2's model, its tests, its gate, or the two mandated docs |
+| `docs/memory-model.md` untouched | PASS — zero diff |
+| WP3 not started | PASS — no `web/testing/`, no `test_request`, no transport |
+
+## Findings
+
+### 1. In-package tests cost every application 41,592 bytes — accepted, with a proposed follow-up
+
+`Response`, `response_commit`, `method_from_token` and `Header_Pair` are
+package-private, so testing them directly requires an `@(test)` procedure
+compiled as part of `web`. Every route out of that was probed on `819fdc7` and
+closed:
+
+| Attempt | Result |
+|---|---|
+| test file without `#+private` | its declarations ARE exported by `web` (external package names one, exit 0) |
+| `#+private` test file | privacy correct, tests still discovered — **chosen** |
+| `@(test) proc()` without `core:testing` | rejected: "Testing procedures must have a signature type of proc(^testing.T)" |
+| `when ODIN_TEST { import … }` | rejected: "Cannot use 'import' within a 'when' statement" |
+| `#+build test` / `#+build ODIN_TEST` | rejected: build tags are platform-only |
+| `#+build ignore` | excluded from `odin build` AND from `odin test` — "No tests to run" |
+| external test package | cannot name package-private declarations |
+
+The cost is specific to `core:testing`, not to `core:` imports generally, and
+was measured against the real package with a minimal consumer application:
+
+```text
+core:strings   +248 bytes
+core:mem       +552 bytes
+core:testing   +41,592 bytes   (42,624 -> 84,216)
+```
+
+This conflicts with the "low hidden cost" mandate of
+`knowledge-base/02-odin-idioms-guidelines.md`, and Odin's own `core:` ships no
+`_test.odin` inside its packages. WP2 accepts it rather than changing ratified
+architecture on its own authority, and contains it: the checker now requires
+`#+private` on every test file under `web/` and forbids `core:testing` in any
+production file, so the surface cannot leak through this door.
+
+**PROPOSED FOLLOW-UP, for human decision — not applied here.** Move the
+internal-only machinery to `web/internal/…`, exported from that internal
+package and therefore still absent from `uruquim:web`'s public surface, and
+test it from an external package. `core:testing` then leaves the shipped
+package entirely. This is already the direction the plan takes: KB02 states
+that internals live under `web/internal/`, WP3 introduces `web/testing/`, and
+WP4 introduces `web/internal/dispatch/`. Doing it inside WP2 would have meant
+contradicting WP2's ratified file list and relaxing the checker's
+no-subdirectory rule, which is not this work package's call.
+
+### 2. `web.delete` shadows the builtin `delete` inside the package
+
+The ratified route-registration name `delete` shadows Odin's builtin `delete`
+for all code inside package `web`; the compiler reports
+`Cannot assign value 'buf' of type '[]u8' to '^App'`. In-package code must use
+`delete_slice` / `delete_string`. Application code is unaffected — outside the
+package, `delete` is the builtin, as the documented examples show. Recorded so
+WP4 onward does not rediscover it as a mystery.
+
+### 3. Two latent defects in the WP1 gate, fixed here
+
+- `comm` compared C-sorted inventories under the ambient locale. Any added or
+  lost symbol aborted with `comm: input is not in sorted order` instead of
+  naming it. Fail-safe under `set -e`, but the diagnostic is the point of that
+  section.
+- A negative probe's compile output was captured by plain assignment under
+  `set -e`, which aborted the run before the diagnostic could be matched.
+
+### 4. The checker's export scan now understands `#+private`
+
+Files whose first directive is `#+private` export nothing — verified on the
+pinned toolchain — so they are excluded from the export inventory. This
+narrows the scan to match the compiler; it never widens what may be exported.
+The mutation tests below confirm the assertions still bite.
+
+## GATE
+
+Toolchain: `odin version dev-2026-07a:819fdc7`, run through the documented
+command (`build/check.sh`, invoked by the tracked `.githooks/pre-push` hook).
+
+```text
+PASS=10 FAIL=0 SKIP=0                      (throwaway prototype baseline)
+WP1 public API compile contract             1 test  — pass
+WP2 request/response model, internal       11 tests — pass
+WP2 public surface contract                 5 tests — pass
+WP2 probes                                  4 probes — pass
+public API contract: exported surface is exactly 32 Phase-1 symbols
+PASS: Phase-1 public API anti-accretion contract (WP1 + WP2)
+build/check.sh          exit 0
+build/check_test.sh     exit 0
+git diff --check        exit 0, no binaries, no untracked probes
+```
+
+The raised checker was mutation-tested to prove it is not vacuous. Each
+mutation was applied to a scratch copy and reverted:
+
+| Mutation | Caught by |
+|---|---|
+| drop `#+private` from the test file | test file would export its declarations |
+| add a 33rd exported symbol | inventory names `Extra_Public` |
+| export `Response` | inventory names `Response` |
+| rename `.GET` to `.Get` | Method is not the ratified set |
+| announce `pairs` publicly on `Header_View` | Header_View must expose only the private slot |
+| add a public `response` field to `Context` | Context field list |
+| return `.Not_Found` from the model | WP2 model decides an HTTP status |
+| add a `header` lookup | exports outside the ratified surface |
+
+**WP3 has not been started.**
+
+Status: **COMPLETE — LOCAL PASS**, pending human review of the PR and of
+finding 1.
