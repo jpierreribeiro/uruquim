@@ -538,6 +538,45 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp14-query" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp14-query"
 
+# WP17 — middleware: `use`, `next`, the flattened chains, the miss chain and
+# the ADR-019 fail-closed guard.
+#
+# The chain pool, the cursor, the miss machinery and the poison predicate are
+# all package-private, so the internal tests run in a THROWAWAY package exactly
+# like WP2-WP9. The zero-allocation dispatch claim and the poisoning-allocator
+# pool-growth reproduction (WP12 P8/P9 made permanent) live here.
+echo "--- WP17 middleware chains, internal behavior (throwaway package) ---"
+URUQUIM_WP17_TMP="$(mktemp -d -t uruquim-wp17-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP17_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP17_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp17-internal/*.odin "$URUQUIM_WP17_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP17_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp17-internal"
+rm -rf "$URUQUIM_WP17_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP17_TMP" || fail "the throwaway WP17 internal-test package was not removed"
+echo "PASS: WP17 internal tests ran against the real sources; throwaway package removed"
+
+# WP17 public surface — an EXTERNAL consumer registering middleware through the
+# ratified surface. The security test lives here: the WP12 D-12.5 mis-ordered
+# auth program, which measured `/admin/users -> 200 OK` to an unauthenticated
+# caller, must fail closed.
+echo "--- WP17 public surface contract: use, next, ordering, fail-closed (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp17-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp17-public-surface"
+
+# WP17 socket contract — `serve` refuses to start on a poisoned application
+# (ADR-019). If the guard regressed, `serve` would bind and block, so this runs
+# under an EXTERNAL timeout like every socket suite: a hang is a failure, never
+# a stalled gate.
+echo "--- WP17 socket contract: serve refuses a poisoned app (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp17-socket" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp17-socket" ||
+  fail "the WP17 socket refusal contract did not pass within the timeout"
+
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
 # actually asserted.
