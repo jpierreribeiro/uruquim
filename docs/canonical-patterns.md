@@ -23,6 +23,26 @@ There is no `decode_json` / `parse_body` / `extract_json` / `bind` — only
 `web.body`. There is no `respond(ctx, 200, value)` — only the explicit
 helpers below.
 
+## Request data lifetime (copy to persist)
+
+Request-derived strings, slices, headers, query values, params and body are
+**temporary views** over storage owned by the transport for the duration of
+one request. They are valid only during that request.
+
+**To keep any of it, copy it explicitly with an appropriate allocator.**
+Background work must receive owned application data — never a captured `ctx`
+and never a request view.
+
+The reused buffer does not fail loudly; the view silently starts reading
+different bytes. This is observable: a header value read as
+`"application/json"` before the buffer was reused read as `"text/plain"`
+afterwards, while an explicit copy kept its original contents.
+
+Applications do not reach a response object. There is no `ctx.response` — you
+respond through `web.json`, `web.ok`, `web.created`, `web.text`,
+`web.no_content` and the error helpers, and the framework guarantees those
+supported paths do not overwrite a response that was already produced.
+
 ## Application skeleton
 
 ```odin

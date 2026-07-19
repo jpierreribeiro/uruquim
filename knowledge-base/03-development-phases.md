@@ -120,8 +120,15 @@ gate. No provisional symbol may be advertised as shipped before its gate.
 - [ ] freeze `query_int_or` semantics (default only on absence; malformed
       value is a 400)
 - [ ] freeze the error envelope and initial code list
-- [ ] define `Request`/`Response` minimum fields, commit semantics, and the
-      request-lifetime view rule (no retention without explicit copy)
+- [x] define `Request` public minimum fields (`method`, `path`, `query`,
+      `headers`, `body`), the `Method` minimum set
+      (`UNKNOWN/GET/POST/PUT/PATCH/DELETE`), and `Header_View` as a
+      contract-encapsulated wrapper over private pairs — WP2
+- [x] `Response` and its commit state stay internal; the single-commit guard
+      covers the supported `web.*` paths and is NOT a security boundary — WP2
+- [x] request-lifetime view rule: no retention without explicit copy — WP2
+- [ ] `HEAD`/`OPTIONS` contracts — deferred until specified and tested; with
+      the Phase-1 minimum set they convert to `.UNKNOWN`
 - [ ] define the conceptual transport contract and the conformance suite
       scope (request conversion, body lifetime, header normalization,
       response commit, connection close, shutdown, malformed HTTP) —

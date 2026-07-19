@@ -517,16 +517,29 @@ The default `Context` is a plain struct. It is what nearly every application
 and every documentation example uses:
 
 ```odin
+// Phase 1
 Context :: struct {
-	request:  Request,
-	response: Response,
-
-	params: Params,
-	route:  Route_Info,
+	request: Request,            // WP2
 
 	private: Context_Internal,   // chain cursor, allocators, transport hooks
 }
 ```
+
+`response` is NOT a public field. Applications respond exclusively through
+`web.json`, `web.ok`, `web.created`, `web.text`, `web.no_content` and the error
+helpers. The internal `Response` and its single-commit guard belong to WP2/WP6.
+
+Omitting `ctx.response` keeps the API responder-only: it avoids advertising
+mutable response state as public API, so applications reach for the helpers
+instead of hand-editing a status or a `committed` flag, and accidental
+double-writes stop being an easy mistake to make.
+
+It does NOT make the internal state inaccessible and is NOT a security
+boundary. Odin's `@(private)` hides a declaration's *name*, not the
+reachability of fields through a public field, and per-field privacy is a
+syntax error (ADR-008, "Scope of the guarantee").
+
+`params: Params` and `route: Route_Info` are introduced by WP4 (routing).
 
 The parametric `Context(App_State, Request_State)` form SHALL NOT be the
 default public surface: highly parametric signatures are noisy at call sites

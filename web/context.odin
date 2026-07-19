@@ -25,9 +25,12 @@ Context :: struct {
 	private: Context_Internal,
 }
 
-// Context_Internal is package-private and unreachable from application code.
-// WP2 and WP4 give it real contents; in WP1 it exists only so that Context has
-// a stable shape with no public field.
+// Context_Internal is package-private: application code cannot NAME this type.
+// It is encapsulated BY CONTRACT, not by the compiler — Odin has no per-field
+// privacy, and fields stay reachable through a public field. Do not rely on
+// this for safety guarantees (ADR-008, "Scope of the guarantee").
+// WP2 and WP4 give it real contents; WP1 contains only the contract-internal
+// slot. Request data is introduced by WP2.
 @(private)
 Context_Internal :: struct {
 	// WP1 skeleton marker. No allocator, chain cursor, or transport hook is

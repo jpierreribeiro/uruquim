@@ -15,7 +15,10 @@ App :: struct {
 	private: App_Internal,
 }
 
-// App_Internal is package-private and unreachable from application code.
+// App_Internal is package-private: application code cannot NAME this type.
+// It is encapsulated BY CONTRACT, not by the compiler — Odin has no per-field
+// privacy, and fields stay reachable through a public field. Do not rely on
+// this for safety guarantees (ADR-008, "Scope of the guarantee").
 @(private)
 App_Internal :: struct {
 	// WP1 skeleton marker. No route table, allocator, default policy, or
