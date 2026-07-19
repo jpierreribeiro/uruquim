@@ -3,8 +3,8 @@
 Status: **MIXED.** Human decisions recorded on 2026-07-18 accept ADR-001,
 ADR-002, ADR-003's value-only baseline, ADR-004, ADR-006, ADR-007, ADR-008,
 ADR-009, and ADR-011. ADR-005, ADR-010, ADR-012, and ADR-013 remain
-PROPOSED/deferred to their owning gates. First- and second-run evidence is in
-`planning/10-c1-execution-evidence.md`.
+PROPOSED/deferred to their owning gates. Reproducible compiler evidence lives
+in `experiments/` and the permanent work-package tests.
 
 Each ADR: context · options · benefits · costs · risks · evidence ·
 recommendation · documentation impact · reversibility.
@@ -154,7 +154,7 @@ recommendation · documentation impact · reversibility.
 - **Decision.** **A** for buffered responses; revisit for streaming
   (out of MVP). Onion-after must not mutate a committed response — ties to
   ADR-005/C.
-- **Scope of the guarantee (amended, WP2 — planning/18).** The guard ensures
+- **Scope of the guarantee (amended in WP2).** The guard ensures
   that the supported `web.*` response paths do not overwrite an
   already-produced response. It is NOT a security boundary against deliberate
   manipulation of framework internals: application and framework share one

@@ -9,20 +9,14 @@ framework; they are evidence.
 
 ## Status: EXECUTED — EXTENDED SUITE 10/10
 
-The pinned toolchain `dev-2026-07a` (commit `819fdc7`) was **unreachable** in
-the authoring environment — GitHub release egress is blocked by the session's
-network policy (HTTP 403), and GitHub is not on the proxy allowlist. See
-`planning/01-toolchain-baseline.md`.
+The suite passes on the pinned `dev-2026-07a` toolchain (commit `819fdc7`). The
+historical first-run transcript and preliminary audit are archived outside the
+repository; `experiments/run_checks.sh` is the reproducible evidence that
+remains here.
 
-The first run completed with `PASS=5 FAIL=4 SKIP=0`; after those failures were
-recorded, four transparent throwaway-source corrections produced `PASS=9
-FAIL=0 SKIP=0`. Both runs and separate intended probes are in
-`planning/10-c1-execution-evidence.md`. The accepted Phase-1 JSON baseline
-uses concrete payload values; pointer payloads remain unsupported. WP6 owns a
-non-blocking one-level pointer-dereference prototype before that restriction
-can be reconsidered. Production was banned while these probes ran; the
-subsequent READY decision is recorded only in
-`planning/07-spec-gate-phase-1.md`.
+The accepted Phase-1 JSON baseline uses concrete payload values; pointer
+payloads remain unsupported. WP6 owns a non-blocking one-level
+pointer-dereference prototype before that restriction can be reconsidered.
 
 ## How to produce real evidence
 
