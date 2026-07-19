@@ -85,23 +85,29 @@ document. Every canonical signature SHALL be demonstrated by at least one
 compilable Odin example and one behavior test before it is frozen.
 ```
 
-The gate freezes **only what compilable prototypes have demonstrated**:
+The pre-implementation gate ratifies **only the shapes and behavior directly
+demonstrated by compilable prototypes**. Exact Phase-1 symbols not exercised
+by name yet (including `bare`, `no_content`, `text`, raw `path`/`query`, the
+individual error helpers, and `transport_contract_test`) remain the approved
+target vocabulary but are not frozen signatures until WP1's compile-contract
+test references them and their owning WP adds a behavior test.
 
 ```text
-FROZEN AT THIS GATE          DELIBERATELY NOT FROZEN
-minimal public API           post-next onion semantics
-Context and lifetimes        guaranteed threading model
-extractors                   final request arena design
-responses                    optimized radix tree
-conceptual transport         OpenAPI
-  contract                   streaming
-dispatch                     WebSocket
-test transport               definitive Transport shape
-minimal conformance suite
+RATIFIED SHAPES              PROVISIONAL UNTIL WP1/OWNER WP
+app/get/serve/handler        remaining public vocabulary
+extractor result shapes      exact helper signatures not exercised
+JSON value responders        transport_contract_test signature
+request views/lifetimes      405 implementation evidence
+single response commit
+conceptual transport flow    DELIBERATELY LATER-PHASE
+in-memory dispatch           post-next onion semantics
+                              threading / Transport ABI / radix
+                              OpenAPI / streaming / WebSocket
 ```
 
-Everything in the right column still depends on implementation evidence and
-is decided at its own later gate.
+The first provisional column is closed incrementally by WP1 and the owning
+tests-first work package. The later-phase column is decided only at its own
+gate. No provisional symbol may be advertised as shipped before its gate.
 
 ### Spec Gate checklist
 

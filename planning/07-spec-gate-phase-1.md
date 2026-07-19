@@ -101,7 +101,10 @@ and a fresh complete `internal_error` before commit. WP6 tests that behavior.
 | A-9 | in-memory dispatch contract | exp-09 | **PASS** — six tests |
 | A-10 | void vs returned-error/outcome handler models | exp-10 | **PASS / DECIDED** — keep void handler; private typed error path; four behavior tests plus two compiler probes |
 
-Bucket A result: **10/10 PASS; zero undecided Phase-1 signature blockers.**
+Bucket A result: **10/10 PASS; zero undecided central shape blockers.** Exact
+symbols not named by a prototype remain provisional until WP1's compile
+contract and their owning behavior-test package, as required by the freeze
+discipline. This is tracked work, not permission to advertise them as shipped.
 
 ## Bucket B — intentionally deferred, with owner
 

@@ -23,14 +23,19 @@ else
   fail "odin not found; install the pinned distribution or set URUQUIM_ODIN_BIN"
 fi
 
+URUQUIM_COMPILER="$(readlink -f "$URUQUIM_COMPILER")" ||
+  fail "cannot resolve compiler path: $URUQUIM_COMPILER"
 test -x "$URUQUIM_COMPILER" || fail "compiler is not executable: $URUQUIM_COMPILER"
-URUQUIM_VERSION="$($URUQUIM_COMPILER version 2>&1)"
+URUQUIM_COMPILER_DIR="$(cd "$(dirname "$URUQUIM_COMPILER")" && pwd)"
+if ! URUQUIM_VERSION="$(ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
+  "$URUQUIM_COMPILER" version 2>&1)"; then
+  fail "compiler version check failed: $URUQUIM_VERSION"
+fi
 case "$URUQUIM_VERSION" in
   *"$URUQUIM_EXPECTED_COMMIT"*) ;;
   *) fail "compiler mismatch: expected commit $URUQUIM_EXPECTED_COMMIT, got: $URUQUIM_VERSION" ;;
 esac
 
-URUQUIM_COMPILER_DIR="$(cd "$(dirname "$URUQUIM_COMPILER")" && pwd)"
 test -d "$URUQUIM_COMPILER_DIR/core/net" || fail "pinned core:net package missing"
 test -d "$URUQUIM_COMPILER_DIR/core/nbio" || fail "pinned core:nbio package missing"
 test -d "$URUQUIM_COMPILER_DIR/core/encoding/json" ||
@@ -47,5 +52,5 @@ bash -n "$URUQUIM_ROOT/ops/ci/install-odin.sh"
 
 echo "toolchain version: $URUQUIM_VERSION"
 echo "toolchain commit: $URUQUIM_EXPECTED_COMMIT"
-env PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   bash "$URUQUIM_ROOT/experiments/run_checks.sh"

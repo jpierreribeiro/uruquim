@@ -299,6 +299,9 @@ values to handlers — there is no `ctx.user_data`, no `locals`, no
 
 ## Auth / dependencies
 
+> This example uses `web.bearer_token`, which becomes available in Phase 2.
+> It is architectural guidance only and cannot be copied into a Phase-1 app.
+
 When the handler needs the user, call a typed extraction procedure directly
 (same contract as extractors) — no middleware involved:
 

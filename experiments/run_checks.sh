@@ -47,6 +47,18 @@ check 08-transport-boundary   run  "transport-boundary"
 check 09-test-transport       test "test-transport"
 check 10-handler-errors       test "handler-errors"
 
+echo "--- optional-ok plain-result discard probe (expected compile failure) ---"
+URUQUIM_OPTIONAL_OUTPUT="$(odin check "$HERE/04-optional-ok/probes/plain_discard.odin" -file $COLL 2>&1)"
+URUQUIM_OPTIONAL_EXIT=$?
+if test "$URUQUIM_OPTIONAL_EXIT" -ne 0 && \
+   grep -q "Assignment count mismatch" <<<"$URUQUIM_OPTIONAL_OUTPUT"; then
+  echo "PASS: plain extractor forces capture of ok"
+else
+  echo "$URUQUIM_OPTIONAL_OUTPUT"
+  echo "FAIL: plain extractor discard diagnostic changed"
+  FAIL=$((FAIL+1))
+fi
+
 echo "--- handler-errors ignored-result probe (expected compile success) ---"
 if odin check "$HERE/10-handler-errors/probes/ignored_results.odin" -file $COLL; then
   echo "PASS: returned handler errors can be ignored (risk confirmed)"

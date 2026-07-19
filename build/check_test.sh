@@ -37,6 +37,12 @@ grep -q "toolchain commit: $URUQUIM_EXPECTED_COMMIT" <<<"$URUQUIM_REAL_OUTPUT" |
 grep -q "PASS=10 FAIL=0 SKIP=0" <<<"$URUQUIM_REAL_OUTPUT" ||
   fail "check output did not report all prototype passes"
 
+if ! ODIN_ROOT=/tmp/uruquim-invalid-ambient-odin-root \
+  URUQUIM_ODIN_BIN="${URUQUIM_ODIN_BIN:-/tmp/uruquim-odin-toolchain/odin}" \
+  bash "$URUQUIM_ROOT/build/check.sh" >/dev/null 2>&1; then
+  fail "build/check.sh did not sanitize ambient ODIN_ROOT"
+fi
+
 if URUQUIM_ODIN_BIN="/bin/echo" \
   bash "$URUQUIM_ROOT/build/check.sh" >/dev/null 2>&1; then
   fail "build/check.sh accepted a divergent compiler"

@@ -20,9 +20,9 @@ odin check .
 **Expected result (to verify).**
 - Compiles clean; `checked`, `discarded`, and `missing` lines print.
 - `discarded` line proves the bool can be dropped under `#optional_ok`.
-- Intended-failure probe: uncomment the plain-form discard
-  (`p := query_int_plain(...)`) → compile error ("2 values, expected 1" or
-  similar). Recorded as an **intended failure** with the exact diagnostic.
+- The separate `probes/plain_discard.odin` intentionally discards the plain
+  form and must fail with `Assignment count mismatch`. The runner executes and
+  verifies this negative probe without modifying the green comparison source.
 
 **Limitations.** This measures compiler behavior, not human behavior. The
 "LLM/human risk" is a design judgment informed by the fact that `#optional_ok`
@@ -31,7 +31,8 @@ misuse rate.
 
 **Result.** First run stopped at a disabled dynamic literal; after explicit map
 allocation, `PASS`. `#optional_ok` silently discards the bool. The separate
-plain-form probe fails with `Assignment count mismatch '1' = '2'`.
+plain-form probe is executed by `run_checks.sh` and fails with
+`Assignment count mismatch '1' = '2'` as required.
 
 **Conclusion.** ADR-002 option 2 is accepted. HTTP extractors omit
 `#optional_ok`, so the compiler forces handlers to capture and check `ok`.

@@ -1,8 +1,8 @@
 # Human Decisions — 2026-07-18
 
 This ledger records explicit human acceptance before the Phase-1 Spec Gate
-was recomputed. It substitutes for a commit message because the workspace does
-not currently expose usable Git metadata.
+was recomputed. Git metadata was later connected and the accepted amendments
+were recorded in commit `e9a0987`.
 
 ## Accepted
 
@@ -52,7 +52,7 @@ After applying the amendments:
 
 ```text
 odin version dev-2026-07-nightly:819fdc7
-PASS=9 FAIL=0 SKIP=0
+PASS=10 FAIL=0 SKIP=0
 ```
 
 The full actual run is pasted into `planning/07-spec-gate-phase-1.md`.

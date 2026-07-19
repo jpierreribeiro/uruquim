@@ -29,8 +29,9 @@ exit=1
 ```
 
 The current test verifies the pin/digest, real compiler, divergent-compiler
-rejection, executable hook, absence of an active GitHub Actions workflow, VPS
-script syntax, collection mapping, and the full prototype result.
+rejection, isolation from an inherited `ODIN_ROOT`, executable hook, absence
+of an active GitHub Actions workflow, VPS script syntax, collection mapping,
+and the full prototype result.
 
 ## MINIMAL IMPLEMENTATION
 
@@ -76,13 +77,17 @@ The exp-02 `Unsupported_Type` log is expected negative pointer evidence.
 - The service runs without root and exposes no port.
 - A previously observed truncated compiler download proves the SHA check is
   mandatory; extraction never occurs before digest verification.
+- The checker resolves the compiler path and forces `ODIN_ROOT` to that same
+  verified distribution. A deliberately invalid inherited `ODIN_ROOT` is a
+  passing regression test, so another standard-library tree cannot silently
+  contaminate the gate.
 
 ## GATE
 
 - Local gate: **PASS**.
 - Clean-clone verifier mechanism: **PASS**.
-- Real VPS: **PENDING** until the implementation branch is pushed and the
-  supplied server is accessed with an identified SSH user.
+- Real VPS: **PENDING**. The branch is pushed, root access is confirmed, and a
+  public key is installed; the persistent toolchain/service run remains.
 
 WP0 becomes COMPLETE when the real VPS records the exact pushed commit green.
 ADR-011 is closed and the Phase-1 Spec Gate is READY; WP1 remains forbidden
