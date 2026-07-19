@@ -67,6 +67,7 @@ errors.odin
 extract.odin
 headers.odin
 request.odin
+request_arena.odin
 respond.odin
 response.odin
 routing.odin
@@ -309,7 +310,7 @@ if test "$URUQUIM_ACTUAL_FILES" != "$URUQUIM_EXPECTED_FILES_SORTED"; then
   echo "$URUQUIM_EXPECTED_FILES_SORTED" >&2
   echo "--- actual web/ files ---" >&2
   echo "$URUQUIM_ACTUAL_FILES" >&2
-  fail "web/ file set does not match the Phase-1 contract (WP1 seven + WP2 three + WP3 facade + WP4 two)"
+  fail "web/ file set does not match the Phase-1 contract (WP1 seven + WP2 three + WP3 facade + WP4 two + WP7 request_arena)"
 fi
 
 # WP3 permits exactly ONE subdirectory, `web/testing/` (the machinery). It does
@@ -818,18 +819,19 @@ uruquim_expect_signature \
 #      WP5 are GONE: keeping them would assert the absence of a delivered
 #      feature. What replaces them pins the WP6 contract instead.
 #
-#      The JSON encoder may now be imported, but only by the two files that
-#      render. Every other envelope in the package is a static constant or the
-#      fixed WP5 buffer, precisely so that `dispatch` and the extractors do not
-#      drag the marshaller into applications that never render a payload.
+#      The JSON encoder may be imported, but only by the files that render or
+#      decode: respond.odin and errors.odin marshal responses (WP6), and
+#      extract.odin decodes the request body (WP7). The dispatcher must stay
+#      encoder-free so that an application which never renders or binds a payload
+#      does not drag the marshaller in.
 URUQUIM_ENCODER_USERS="$(grep -lE '"core:encoding/json"' "$URUQUIM_WEB"/*.odin | xargs -r -n1 basename | LC_ALL=C sort)"
-URUQUIM_ENCODER_EXPECTED="$(printf 'errors.odin\nrespond.odin\n')"
+URUQUIM_ENCODER_EXPECTED="$(printf 'errors.odin\nextract.odin\nrespond.odin\n')"
 if test "$URUQUIM_ENCODER_USERS" != "$URUQUIM_ENCODER_EXPECTED"; then
   echo "--- expected core:encoding/json importers ---" >&2
   echo "$URUQUIM_ENCODER_EXPECTED" >&2
   echo "--- actual ---" >&2
   echo "$URUQUIM_ENCODER_USERS" >&2
-  fail "the JSON encoder is imported outside web/respond.odin and web/errors.odin; the dispatcher and the extractors must stay encoder-free (WP6 D5)"
+  fail "the JSON encoder is imported outside web/{respond,errors,extract}.odin; the dispatcher must stay encoder-free (WP6 D5 / WP7)"
 fi
 
 # The interim dispatcher must not marshal. Its 404/405 bodies are compile-time
@@ -890,19 +892,104 @@ if grep -nE 'Type_Info_Pointer|dereference|deref' <<<"$URUQUIM_WEB_CODE"; then
   fail "web/ appears to implement pointer-payload dereference; ADR-003 is value-only until a spec amendment is ratified (R-13)"
 fi
 
-# 10d. WP5 did not start WP7. Body binding, the request arena (ADR-006) and the
-#      fixed 4 MiB cap all belong there.
-for URUQUIM_WP7 in '\barena\b' '\bArena\b' 'body_too_large' 'invalid_json' \
-  '4[[:space:]]*<<[[:space:]]*20' '4194304'; do
-  if grep -niE "$URUQUIM_WP7" <<<"$URUQUIM_WEB_CODE"; then
-    fail "WP7 construct matching /$URUQUIM_WP7/ appears in web/; body binding and the request arena are WP7 (R-12)"
+# 10d. WP7 body binding — the positive contract that REPLACES the WP5/WP6 bans.
+#
+# WP7 shipped body binding, the request-lifetime arena and the 4 MiB cap, so the
+# temporary "these must not exist" grep bans are gone. What replaces them pins
+# the shape WP7 must actually have.
+URUQUIM_ARENA_FILE="$URUQUIM_WEB/request_arena.odin"
+test -f "$URUQUIM_ARENA_FILE" ||
+  fail "web/request_arena.odin is missing; WP7 has not created the request arena machinery"
+URUQUIM_ARENA_CODE="$(sed -E 's://.*$::' "$URUQUIM_ARENA_FILE")"
+
+# 10d-i. The arena file exports NOTHING. Every declaration is package-private:
+#        BODY_LIMIT, Body_State and the request_arena_* procedures are internal,
+#        so the application ledger is unchanged (WP7 D1).
+URUQUIM_ARENA_EXPORTS="$(URUQUIM_WEB_PUBLIC_CODE="$URUQUIM_ARENA_CODE" uruquim_exported_names)"
+if test -n "$URUQUIM_ARENA_EXPORTS"; then
+  echo "--- exported symbols in web/request_arena.odin ---" >&2
+  echo "$URUQUIM_ARENA_EXPORTS" >&2
+  fail "web/request_arena.odin exports a symbol; the arena machinery must be package-private (WP7 D1)"
+fi
+
+# 10d-ii. The cap is EXACTLY 4 MiB, spelled as the arithmetic the reviewer saw,
+#         and the comparison rejects only a STRICTLY larger body (WP7 D3).
+grep -qE '^BODY_LIMIT :: 4 \* 1024 \* 1024$' <<<"$URUQUIM_ARENA_CODE" ||
+  fail "BODY_LIMIT is not exactly '4 * 1024 * 1024' (WP7 D3)"
+# The over-limit test uses `>`, never `>=`: exactly 4 MiB must be accepted.
+if grep -nE 'len\(raw\) >= BODY_LIMIT' <<<"$URUQUIM_EXTRACT_CODE"; then
+  fail "the body cap uses '>=', so exactly 4 MiB would be rejected; it must be '>' (WP7 D3)"
+fi
+grep -qE 'len\(raw\) > BODY_LIMIT' <<<"$URUQUIM_EXTRACT_CODE" ||
+  fail "web.body does not compare the body length against BODY_LIMIT with '>' (WP7 D3)"
+
+# 10d-iii. The cap is checked BEFORE the parser. `unmarshal` must appear AFTER
+#          the `len(raw) > BODY_LIMIT` guard in the source of `body`, so an
+#          over-limit body is never handed to the decoder (WP7 D3).
+URUQUIM_BODY_SRC="$(awk '/^body :: proc/{f=1} f{print} f && /^}/{exit}' <<<"$URUQUIM_EXTRACT_CODE")"
+URUQUIM_LIMIT_LINE="$(grep -nE 'len\(raw\) > BODY_LIMIT' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
+URUQUIM_PARSE_LINE="$(grep -nE 'unmarshal\(' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
+test -n "$URUQUIM_LIMIT_LINE" -a -n "$URUQUIM_PARSE_LINE" ||
+  fail "web.body must contain both the BODY_LIMIT guard and the unmarshal call (WP7 D3)"
+test "$URUQUIM_LIMIT_LINE" -lt "$URUQUIM_PARSE_LINE" ||
+  fail "web.body parses before checking the 4 MiB cap; the cap must gate the parser (WP7 D3)"
+
+# 10d-iv. Decoding is STRICT JSON. The pinned encoder's default spec is JSON5,
+#         which would accept unquoted keys, comments and single-quoted strings,
+#         so the unmarshal call must pass `.JSON` explicitly (WP7 D5).
+grep -qE 'unmarshal\(raw, dst, \.JSON,' <<<"$URUQUIM_EXTRACT_CODE" ||
+  fail "web.body does not unmarshal in strict .JSON mode; JSON5 would be accepted (WP7 D5)"
+
+# 10d-v. Body data is decoded into the ARENA, never context.allocator directly.
+#        The unmarshal allocator must be the request arena, or nested data would
+#        outlive nothing and leak (ADR-006).
+grep -qE 'request_arena_allocator\(ctx\)' <<<"$URUQUIM_EXTRACT_CODE" ||
+  fail "web.body does not decode into the request arena allocator (ADR-006 / WP7 D4)"
+if grep -nE 'unmarshal\([^)]*context\.allocator' <<<"$URUQUIM_EXTRACT_CODE"; then
+  fail "web.body unmarshals with context.allocator; decoded data must live in the request arena (ADR-006)"
+fi
+
+# 10d-vi. The single-consumer state machine exists and consumes BEFORE parsing.
+#         `.Consumed` must be assigned before the unmarshal call (ADR-012 A).
+URUQUIM_CONSUME_LINE="$(grep -nE 'body_state = \.Consumed' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
+test -n "$URUQUIM_CONSUME_LINE" ||
+  fail "web.body never marks the body capability consumed; ADR-012 requires single use"
+test "$URUQUIM_CONSUME_LINE" -lt "$URUQUIM_PARSE_LINE" ||
+  fail "web.body consumes the capability after parsing; it must consume before (ADR-012 A)"
+
+# 10d-vii. The driver frees the arena. `request_arena_destroy` must be called
+#          from the test-support facade (the response driver), or a bound body
+#          leaks (WP7 D4).
+grep -qE 'request_arena_destroy\(' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" ||
+  fail "web/$URUQUIM_TEST_SUPPORT_FILE does not call request_arena_destroy; the driver must free the arena (WP7 D4)"
+
+# 10d-viii. NO configurable body limit, replay, or cache entered the package.
+#           These are the WP7 non-goals the prompt forbids. The patterns target
+#           configurability and replay specifically — a per-request `body_limit`
+#           FIELD, a setter, a size knob, a replay/cache — without matching the
+#           fixed `BODY_LIMIT` constant that the cap legitimately uses.
+for URUQUIM_WP7_BAN in 'set_body_limit' 'max_body' 'body_replay' '\breplay\b' \
+  'body_cache' 'Body_Cache' 'body_limit[[:space:]]*:' 'configurable'; do
+  if grep -nE "$URUQUIM_WP7_BAN" <<<"$URUQUIM_WEB_CODE"; then
+    fail "web/ contains a WP7 non-goal matching /$URUQUIM_WP7_BAN/ (no configurable limit, replay or cache)"
   fi
 done
 
-# `web.body` is still the WP7 stub: it returns false and touches nothing.
-grep -qxF '	return false' <<<"$(sed -E 's://.*$::' "$URUQUIM_EXTRACT" |
-  awk '/^body :: proc/{f=1; next} f && /^\}/{f=0} f' | grep -v '^[[:space:]]*$')" ||
-  fail "web.body is no longer the WP7 stub 'return false'; body binding is WP7"
+# 10d-ix. The two WP7 wire codes are spelled exactly right (docs/errors.md).
+for URUQUIM_CODE in invalid_json body_too_large; do
+  grep -qE "\"$URUQUIM_CODE\"" <<<"$URUQUIM_WEB_CODE" ||
+    fail "the ratified WP7 error code '$URUQUIM_CODE' is missing from web/ (docs/errors.md)"
+done
+
+# 10d-x. 413 is carried WITHOUT a public Status member. The public enum member
+#        list is frozen; a private `Status(413)` value is the sanctioned path
+#        (WP7 D3).
+if awk '/^Status :: enum int \{/{f=1;next} /^\}/{f=0} f' <<<"$URUQUIM_WEB_PUBLIC_CODE" |
+  grep -qiE 'Payload_Too_Large|Too_Large|413'; then
+  fail "a 413 member was added to the public Status enum; use a private Status(413) value instead (WP7 D3)"
+fi
+grep -qE '^STATUS_BODY_TOO_LARGE :: Status\(413\)$' <<<"$URUQUIM_WEB_CODE" ||
+  fail "the private STATUS_BODY_TOO_LARGE :: Status(413) value is missing (WP7 D3)"
 
 # 10e. The two WP5 error codes are spelled exactly as the ratified wire contract
 #      requires (docs/errors.md). A typo here is a silent compatibility break:
@@ -939,5 +1026,5 @@ echo "public API contract: the five extractor signatures are exact and carry no 
 echo "public API contract: the JSON encoder is imported only by respond.odin and errors.odin"
 echo "public API contract: response ownership and the envelope machinery stayed internal"
 echo "public API contract: Content-Type values are exact and 'field' is omitted by type"
-echo "public API contract: no WP7 body-binding, arena or 4 MiB construct entered the package"
-echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4 + WP5 + WP6)"
+echo "public API contract: WP7 arena is private; the 4 MiB cap gates the parser; strict JSON; 413 is a private Status value"
+echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2 + WP3 + WP4 + WP5 + WP6 + WP7)"

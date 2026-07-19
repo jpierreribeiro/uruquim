@@ -4,6 +4,8 @@
 // type. It contains no request parsing, no response state, and no dispatch.
 package web
 
+import "core:mem"
+
 // Handler is the one and only handler shape (ADR-011). It takes the request
 // context and returns nothing: handlers respond through the response helpers.
 // Do not add a second handler signature, and do not return `error`,
@@ -105,4 +107,19 @@ Context_Internal :: struct {
 	// the commit guard before touching the buffer, so a second failure cannot
 	// rewrite the bytes the first response is still pointing at.
 	error_buffer: [ERROR_BODY_MAX]u8,
+
+	// WP7 — the single-consumer body capability (ADR-012 A). `.Fresh` is the
+	// zero value, so a new Context begins with the body available. `web.body`
+	// moves it to `.Consumed` on its first call, before the limit and parse.
+	body_state: Body_State,
+
+	// WP7 — the request-lifetime arena that owns decoded nested body data
+	// (ADR-006). It is LAZY: this zero value holds no allocation, so a request
+	// that never binds a body — or whose body is empty or over-limit — creates
+	// no arena. `arena_active` says whether it has been initialized, and the
+	// driver frees it exactly once via `request_arena_destroy` after the
+	// response is captured. It belongs to the REQUEST, never the App or the
+	// Response, and the WP6 Response-owned buffers are never migrated into it.
+	request_arena: mem.Dynamic_Arena,
+	arena_active:  bool,
 }

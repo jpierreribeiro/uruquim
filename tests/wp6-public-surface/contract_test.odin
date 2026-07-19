@@ -421,24 +421,28 @@ wp6_extraction_still_works_and_its_errors_still_win :: proc(t: ^testing.T) {
 	testing.expect_value(t, string(inner["field"].(json.String) or_else ""), "id")
 }
 
-body_stub_handler :: proc(ctx: ^web.Context) {
+body_binding_handler :: proc(ctx: ^web.Context) {
 	dst: User
-	if web.body(ctx, &dst) {
-		// Unreachable while `web.body` is a WP7 stub.
-		web.ok(ctx, User{id = -1, name = "wp7-started"})
+	if !web.body(ctx, &dst) {
 		return
 	}
-	web.ok(ctx, User{id = 0, name = "still-a-stub"})
+	// Unreachable via test_request, which supplies no body.
+	web.ok(ctx, dst)
 }
 
 @(test)
-wp6_body_binding_is_still_a_wp7_stub :: proc(t: ^testing.T) {
+wp6_body_binding_failure_wins_over_the_responders :: proc(t: ^testing.T) {
+	// SUPERSEDES `wp6_body_binding_is_still_a_wp7_stub`. WP7 shipped body
+	// binding, so asserting the stub would assert the absence of a delivered
+	// feature. What holds is that a failing bind — the empty body test_request
+	// supplies — commits its own 400, and the WP6 responders still honor the
+	// single-commit guard.
 	a := web.app()
 	defer web.destroy(&a)
-	web.post(&a, "/bind", body_stub_handler)
+	web.post(&a, "/bind", body_binding_handler)
 
 	res := web.test_request(&a, .POST, "/bind")
 
-	testing.expect_value(t, res.status, web.Status.OK)
-	testing.expect_value(t, res.body, `{"id":0,"name":"still-a-stub"}`)
+	testing.expect_value(t, res.status, web.Status.Bad_Request)
+	expect_envelope(t, res.body, "invalid_json", "Request body must be valid JSON")
 }

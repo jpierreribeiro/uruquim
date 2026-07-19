@@ -372,11 +372,12 @@ wp5_stub_probe_handler :: proc(ctx: ^web.Context) {
 
 	dst: Wp5_Payload
 	if web.body(ctx, &dst) {
-		// Unreachable while `web.body` is a WP7 stub.
+		// Unreachable: test_request supplies no body, so this empty body fails.
 		wp5_stub_probe_hits += 1000
 	}
 
-	// The FIRST responder wins; every later one is a no-op.
+	// A handler that ignores web.body's failure and keeps responding: the FIRST
+	// response — web.body's own invalid_json 400 — must win over all of these.
 	web.ok(ctx, 1)
 	web.created(ctx, 2)
 	web.text(ctx, .Internal_Server_Error, "late")
@@ -384,14 +385,14 @@ wp5_stub_probe_handler :: proc(ctx: ^web.Context) {
 }
 
 @(test)
-wp5_body_is_still_a_wp7_stub_and_the_first_response_wins :: proc(t: ^testing.T) {
-	// SUPERSEDES `wp5_body_and_the_wp6_responders_are_still_stubs`. WP6 has
-	// shipped, so asserting that the responders commit nothing would assert the
+wp5_a_failed_body_bind_wins_over_later_responders :: proc(t: ^testing.T) {
+	// SUPERSEDES `wp5_body_is_still_a_wp7_stub_and_the_first_response_wins`. WP7
+	// shipped body binding, so asserting `web.body` is a stub would assert the
 	// absence of a delivered feature.
 	//
-	// The two properties WP5 still owns are checked instead: `web.body` remains
-	// the WP7 stub, and a handler that responds more than once keeps its FIRST
-	// response (G-04 / ADR-008).
+	// What still holds, and what this checks, is single-commit (G-04 / ADR-008):
+	// `web.body` on the empty body test_request supplies commits its own 400,
+	// and a handler that keeps responding cannot replace it.
 	a := web.app()
 	defer web.destroy(&a)
 
@@ -400,11 +401,15 @@ wp5_body_is_still_a_wp7_stub_and_the_first_response_wins :: proc(t: ^testing.T) 
 	before := wp5_stub_probe_hits
 	res := web.test_request(&a, .GET, "/stub")
 
-	// +1, never +1001: `web.body` must still return false.
+	// +1, never +1001: web.body must have returned false on the empty body.
 	testing.expect_value(t, wp5_stub_probe_hits - before, 1)
 
-	testing.expect_value(t, res.status, web.Status.OK)
-	testing.expect_value(t, res.body, "1")
+	testing.expect_value(t, res.status, web.Status.Bad_Request)
+	testing.expect_value(
+		t,
+		res.body,
+		`{"error":{"code":"invalid_json","message":"Request body must be valid JSON"}}`,
+	)
 }
 
 // ---------------------------------------------------------------------------

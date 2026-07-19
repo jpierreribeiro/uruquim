@@ -11,8 +11,8 @@
 > test-pinned by parsing the emitted bytes with the official `core:encoding/json`
 > parser in strict JSON mode.
 >
-> Still unimplemented: `invalid_json` and `body_too_large`, which arrive with
-> body binding in WP7.
+> **Implemented as of WP7:** `invalid_json` (HTTP 400) and `body_too_large`
+> (HTTP 413), produced by `web.body`. All Phase-1 error codes now exist.
 
 Documents the standardized error envelope (part of the compatibility
 contract):
@@ -48,6 +48,40 @@ Phase-1 policy:
 - a JSON marshal failure is logged server-side before one complete
   `internal_error` response is written, and only before commit; partial JSON
   is forbidden.
+
+## Implemented in WP7
+
+`web.body(ctx, &dst)` decodes the JSON request body into `dst` and returns a
+bool. On failure it commits the response itself; the handler just returns.
+
+| Condition | HTTP | `code` | `message` |
+|---|---|---|---|
+| empty body, malformed JSON, or rejected JSON5 | 400 | `invalid_json` | `Request body must be valid JSON` |
+| body larger than 4 MiB | 413 | `body_too_large` | `Request body exceeds the 4 MiB limit` |
+
+Neither carries a `field`. Notes:
+
+- **Values, ownership, lifetime.** Decoded nested strings and slices live in a
+  request-lifetime arena and are valid until the request ends. Copy explicitly
+  to keep them (the same rule as every request view). After `web.body` returns
+  **false**, the partial content of `dst` is UNDEFINED and must be discarded.
+- **Single consumer (ADR-012).** A request body has exactly one typed consumer.
+  The capability is spent the moment the first `web.body` call begins — even if
+  that call fails — so a second call decodes nothing: it logs a server-side
+  diagnostic and produces a 500 only if no response is committed yet, otherwise
+  it leaves the first response untouched. Never a double commit, no replay.
+- **The 4 MiB cap is fixed**, checked before the parser and before any arena is
+  created. Exactly 4 MiB (4·1024·1024 bytes) is accepted; only a strictly
+  larger body is a 413. A per-application limit is a later-phase feature.
+- **Strict JSON.** Decoding uses strict JSON: comments, unquoted keys and
+  single-quoted strings are rejected as `invalid_json`. (On the pinned toolchain
+  the parser leniently ignores any content AFTER a complete top-level value —
+  a trailing comma, a trailing comment, or trailing bytes; that is a documented
+  toolchain deviation, not a promise.)
+- **Client vs server faults.** Malformed JSON is the client's error → 400
+  `invalid_json`. Well-formed JSON that does not fit the destination type, or a
+  decoder-internal failure, is NOT shown as invalid JSON: it is logged on the
+  server and answered with `internal_error`/500.
 
 ## Implemented in WP5
 

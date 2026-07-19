@@ -233,7 +233,8 @@ recommendation · documentation impact · reversibility.
 - **Reversibility.** MEDIUM before v1; breaking after handlers ship.
 
 ## ADR-012 — Request body consumption and repeated typed binding
-- **Status.** **PROPOSED** — blocks WP7 implementation, not earlier work.
+- **Status.** **ACCEPTED** — option A, ratified in WP7 by the disposable
+  prototype below (human decisions carried by the WP7 prompt, 2026-07-19).
 - **Context.** `web.body(ctx, &dst)` consumes a request-owned byte view. A
   buffered Phase-1 transport could decode the same bytes more than once, but
   hidden replay/caching would make transport and memory behavior less obvious.
@@ -249,14 +250,35 @@ recommendation · documentation impact · reversibility.
 - **Risks.** A poorly specified second call can emit two responses or hide a
   programming error. B can make the test transport promise replay that a
   future streaming adapter cannot provide.
-- **Evidence.** External research consistently recommends an explicit body
-  state machine, but no pinned-toolchain Uruquim prototype has tested the
-  second-call behavior yet.
-- **Recommendation.** **A**, subject to a WP7 disposable prototype. The
-  prototype must decide when consumption occurs and how a second call is
-  reported without double-commit. No replay cache enters Phase 1 by default.
+- **Evidence.** WP7 ran the disposable prototype required by OQ-15 on
+  dev-2026-07-nightly:819fdc7 (in `/tmp`, not versioned). It established:
+  - `json.unmarshal` HONORS a substituted `mem.Dynamic_Arena` allocator for
+    nested strings and slices (R-06 resolved): decoded values survived a wipe
+    of the raw buffer, and destroying the arena left a `mem.Tracking_Allocator`
+    with zero live allocations and zero bad frees. No explicit post-unmarshal
+    copy pass is needed.
+  - `unmarshal_any` runs `is_valid(data, spec)` before parsing, so EVERY
+    parse-level failure — empty body, truncation, and the rejected JSON5
+    constructs — collapses to `Unmarshal_Data_Error.Invalid_Data`. A destination
+    the decoder cannot fill returns `Unsupported_Type_Error`, and a nil or
+    non-pointer destination returns `Invalid_Parameter`/`Non_Pointer_Parameter`.
+    This gives a clean split: `Invalid_Data` (and any bare `json.Error`) is the
+    client's malformed JSON → 400; everything else is a decoder/destination
+    fault → 500 through the typed report.
+  - Strict `.JSON` mode rejects comments, unquoted keys and single-quoted
+    strings, but on 819fdc7 it LENIENTLY accepts a single trailing comma
+    (`{"a":1,}` parses). WP7 uses strict mode and documents this as a pinned-
+    toolchain deviation rather than hand-rolling a second tokenizer to catch one
+    cosmetic edge; a future toolchain bump or work package may tighten it.
+- **Decision.** **A.** A request body has exactly one typed consumer. The
+  capability is consumed the moment the first `web.body` call begins — before
+  the limit check and before the parser — so a first attempt that fails still
+  consumes it. A second call parses nothing, logs a private typed diagnostic,
+  and: if no response is committed yet, produces `internal_error`/500; if the
+  first call already committed a response, leaves it untouched. There is no
+  replay, no dynamic cache, and never a double commit.
 - **Doc impact.** architecture body section, canonical patterns, AI context,
-  WP7 tests, and error documentation after acceptance.
+  WP7 tests, and error documentation.
 - **Reversibility.** MEDIUM before streaming; difficult after applications rely
   on replay.
 
@@ -345,7 +367,7 @@ recommendation · documentation impact · reversibility.
 | 009 | exp-08 | **ACCEPTED** — conceptual/private boundary |
 | 010 | later Advanced gate | **PROPOSED / DEFERRED** — not a Phase-1 blocker |
 | 011 | exp-10 + comparative audit | **ACCEPTED** — void handler; typed observer later |
-| 012 | WP7 repeated-binding prototype | **PROPOSED** — must close before WP7 implementation |
+| 012 | WP7 repeated-binding prototype | **ACCEPTED** — single body consumer; no replay; arena-owned |
 | 013 | Phase-4 proxy corpus | **PROPOSED / DEFERRED** — must close before trusted-proxy code |
 | 014 | WP6 ownership decision | **ACCEPTED** — Response owns rendered bodies; no WP7 arena |
 

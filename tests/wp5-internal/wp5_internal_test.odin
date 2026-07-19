@@ -953,15 +953,28 @@ wp5_extractor_errors_are_unchanged_by_wp6 :: proc(t: ^testing.T) {
 }
 
 @(test)
-wp5_did_not_start_wp7_body_binding :: proc(t: ^testing.T) {
+wp5_body_binding_does_not_disturb_the_extractors :: proc(t: ^testing.T) {
+	// SUPERSEDES `wp5_did_not_start_wp7_body_binding`, which asserted `web.body`
+	// was still a stub. WP7 shipped it, so that guard is obsolete — keeping it
+	// would assert the absence of a delivered feature.
+	//
+	// What WP5 still owns, and what this checks, is that body binding does not
+	// interfere with the path/query extractors: an empty body commits its own
+	// 400 (WP7), and that must be a DIFFERENT envelope from the extractor errors,
+	// on the same single-commit guard.
 	ctx: Context
 
 	Payload :: struct {
-		name: string,
+		name: string `json:"name"`,
 	}
 	dst: Payload
 
-	testing.expect(t, !body(&ctx, &dst), "web.body must still be a WP7 stub")
-	testing.expect_value(t, dst.name, "")
-	testing.expect(t, !ctx.private.response.committed, "the body stub commits nothing")
+	// An empty body now fails with WP7's invalid_json, not silently.
+	testing.expect(t, !body(&ctx, &dst), "an empty body must fail")
+	testing.expect_value(t, ctx.private.response.status, Status.Bad_Request)
+	testing.expect_value(
+		t,
+		string(ctx.private.response.body),
+		`{"error":{"code":"invalid_json","message":"Request body must be valid JSON"}}`,
+	)
 }

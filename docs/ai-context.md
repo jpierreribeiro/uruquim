@@ -9,24 +9,27 @@ alternative forms. If something is not listed, it does not exist.**
 > ratified; sections marked Phase 2/3/4 do not yet exist and must not be
 > emitted by a coding agent.
 >
-> **Implementation status (WP6): routing, extraction and responses work; there
-> is still no server.** Every name and signature here exists in `web/` and
-> compiles on the pinned toolchain, so code written against this reference
-> compiles.
+> **Implementation status (WP7): routing, extraction, responses and body
+> binding work; there is still no server.** Every name and signature here exists
+> in `web/` and compiles on the pinned toolchain, so code written against this
+> reference compiles.
 >
 > What now really works: `Request`, `Method` and `Header_View`; route
 > registration and dispatch, including `:param` matching and
 > static-over-parametric precedence; the automatic 404 and the 405 with its
 > `Allow` header in `web.app()`; `web.test_request`, which drives one request
 > in-memory (no sockets) and returns the real routed result; the five path and
-> query extractors with their 400 envelopes; and — new in WP6 — **every
-> response helper**: `web.json`, `web.ok`, `web.created`, `web.text`,
-> `web.no_content`, and the five error responders, all with the standardized
-> envelope and a `Content-Type`. The automatic 404/405 now carry that envelope
-> too.
+> query extractors with their 400 envelopes; every response helper (`web.json`,
+> `web.ok`, `web.created`, `web.text`, `web.no_content`, and the five error
+> responders) with the standardized envelope and a `Content-Type`; and — new in
+> WP7 — **`web.body`**, which decodes the JSON request body into a caller-owned
+> struct, enforces a fixed 4 MiB cap, and owns decoded data in a request
+> arena.
 >
-> What still does NOT work: **`web.body` returns false and binds nothing**
-> (WP7), and `web.serve` returns immediately without binding a port (WP8).
+> What still does NOT work: `web.serve` returns immediately without binding a
+> port (WP8). `web.test_request` carries no request body (its signature is
+> method + path), so a body handler driven through it takes the empty-body 400
+> path.
 >
 > Payloads are VALUES. `web.ok(ctx, &user)` and pointer-typed payload variables
 > are rejected by the marshaller, logged on the server, and answered with a
@@ -466,7 +469,11 @@ create_user :: proc(ctx: ^web.Context) {
 - Never use `or_else { ... }` blocks — invalid Odin. Use `(value, ok)` +
   `if !ok { return }`, or `if !web.body(ctx, &input) { return }`.
 - `web.body` takes a POINTER to your struct and returns `bool` — it never
-  returns the value.
+  returns the value. Call it AT MOST ONCE per request: the body is a single-use
+  capability, and a second call decodes nothing. On failure it has already
+  responded (400 `invalid_json`, or 413 `body_too_large` past the fixed 4 MiB
+  cap); just `return`, and treat `dst` as undefined. Decoded strings/slices are
+  request-lifetime — copy to keep them.
 - JSON response helpers take payloads BY VALUE in the Phase-1 baseline. Do
   not pass `&value` or a variable with pointer type such as `^User`.
 - Never configure allocators, transports, or response writers — `web.app()`
