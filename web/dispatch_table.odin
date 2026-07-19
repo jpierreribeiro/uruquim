@@ -24,6 +24,7 @@
 // precedence, per-method isolation, 404, 405 with `Allow` — true and
 // test-pinned, so that replacing this table later changes nothing publicly.
 package web
+// uruquim:file application
 
 import "core:strings"
 

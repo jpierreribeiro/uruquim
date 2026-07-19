@@ -462,6 +462,20 @@ accepted, amended or rejected by the owner.
 
 **Type: TESTS. No approval required.**
 
+> **Status: DELIVERED, pending one full-gate run on the pinned toolchain.**
+> The web/ and web/testing file sets are derived from in-file ledger markers
+> (`// uruquim:file application|test-support|test-machinery`) instead of
+> enumerated; the adapter is derived as the single backend importer; the
+> vendor code-shape greps are replaced by wire-corpus coverage assertions;
+> private declaration pins (`response_commit`, `dispatch`) are
+> parameter-name-agnostic; every sed mutation self-asserts its edit and
+> reports BROKEN PROBE instead of accusing the guardrail; and the six WP16
+> acceptance controls are executable (`build/check_wp16_controls.sh`, plus
+> permanent cases 56–61 in `build/check_wp3_mutations.sh`). Ledger counts,
+> the `odin doc` snapshots, the compile probes and the G-11 `nm` gate are
+> unchanged. The freeze manifest's G-06 evidence row now cites the derived
+> check.
+
 Implements audit A-6 **before** Phase 2 adds files. The gate enumerates
 permitted filenames (`check_public_api.sh:62-77`) and pins exact declaration
 lines and parameter names, so roughly a third of it fails on behaviour-preserving

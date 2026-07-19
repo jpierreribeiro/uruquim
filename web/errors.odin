@@ -16,6 +16,7 @@
 // exported envelope type, no error-code enum, and no way for an application to
 // construct or inspect an envelope: the ledger stays at exactly 32.
 package web
+// uruquim:file application
 
 import encoding_json "core:encoding/json"
 import "core:mem"

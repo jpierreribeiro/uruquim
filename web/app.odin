@@ -3,6 +3,7 @@
 // This file declares application construction and teardown. It installs no
 // default policy, allocates nothing, and builds no router.
 package web
+// uruquim:file application
 
 import testing "uruquim:web/testing"
 

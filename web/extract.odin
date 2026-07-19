@@ -27,6 +27,7 @@
 // so the pinned compiler rejects a call that drops `ok` with
 // "Assignment count mismatch". Do not add the directive.
 package web
+// uruquim:file application
 
 import encoding_json "core:encoding/json"
 

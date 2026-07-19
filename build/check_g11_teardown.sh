@@ -138,17 +138,38 @@ mkdir -p "$URUQUIM_G11_TMP/mutated/app"
 cp "$URUQUIM_G11_TMP/never_tests.odin" "$URUQUIM_G11_TMP/mutated/app/main.odin"
 
 python3 - "$URUQUIM_G11_TMP/mutated/web/app.odin" <<'PY'
+import re
 import sys
 
+# The mutation is applied STRUCTURALLY, not against one exact spelling: the
+# guarded lazy call is matched with whitespace-insensitive patterns and a
+# receiver name captured rather than assumed, so reformatting `destroy` or
+# renaming its private parameter does not break this probe (WP16). What it
+# looks for is the shape the guardrail is about:
+#
+#     if <recv>.private.test_teardown != nil {
+#         <recv>.private.test_teardown(&<recv>.private.test_transport)
+#     }
+#
+# and it replaces that with the direct static edge the guardrail forbids.
 path = sys.argv[1]
 source = open(path).read()
-guarded = """	if a.private.test_teardown != nil {
-		a.private.test_teardown(&a.private.test_transport)
-	}"""
-if guarded not in source:
-    sys.exit("MUTATION-SETUP: the guarded teardown call was not found in web/app.odin")
+pattern = re.compile(
+    r"if\s+([A-Za-z_][A-Za-z0-9_]*)\.private\.test_teardown\s*!=\s*nil\s*\{\s*"
+    r"\1\.private\.test_teardown\(\s*&\1\.private\.test_transport\s*\)\s*,?\s*\}"
+)
+m = pattern.search(source)
+if m is None:
+    sys.exit(
+        "BROKEN PROBE: the guarded lazy-teardown call was not found in "
+        "web/app.odin under any formatting; the G-11 static-edge mutation "
+        "cannot be applied, so this gate would prove nothing"
+    )
+recv = m.group(1)
 open(path, "w").write(
-    source.replace(guarded, "	testing.destroy(&a.private.test_transport)", 1)
+    source[: m.start()]
+    + "testing.destroy(&%s.private.test_transport)" % recv
+    + source[m.end() :]
 )
 PY
 
