@@ -354,6 +354,40 @@ uruquim_wp5_discard_probe discard_query_int_ok.odin \
 uruquim_wp5_discard_probe discard_query_int_or_ok.odin \
   "dropping the ok of query_int_or is rejected"
 
+# WP6 — response rendering, body ownership and the error envelope.
+#
+# The `Response`, both commit primitives, `response_destroy`, the envelope
+# machinery and the typed framework-error report are all package-private, so
+# these tests run in a THROWAWAY package exactly like WP2-WP5.
+#
+# Four WP6 contracts are only observable from inside the package: who OWNS a
+# rendered body and whether the teardown released it exactly once; the exact
+# `Content-Type` (Phase 1 ratifies no header accessor); that a rejected commit
+# FREES the body it could not transfer; and that a marshal failure is LOGGED
+# BEFORE the 500 is committed. Memory tracking (default in `odin test`) is what
+# turns the ownership claims into assertions.
+echo "--- WP6 response rendering and ownership, internal behavior (throwaway package) ---"
+URUQUIM_WP6_TMP="$(mktemp -d -t uruquim-wp6-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP6_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP6_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp6-internal/*.odin "$URUQUIM_WP6_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP6_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp6-internal"
+rm -rf "$URUQUIM_WP6_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP6_TMP" || fail "the throwaway WP6 internal-test package was not removed"
+echo "PASS: WP6 internal tests ran against the real sources; throwaway package removed"
+
+# WP6 public surface — an EXTERNAL consumer driving every responder end-to-end
+# through `web.test_request`. It proves the response contract is expressible with
+# the ratified 34 symbols and adds none, and that bodies handed back earlier stay
+# valid after later requests render and tear down their own buffers.
+echo "--- WP6 public surface contract: responders, envelopes, automatic 404/405 ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp6-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp6-public-surface"
+
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
 # actually asserted.

@@ -11,6 +11,8 @@
 // 404/405/501 belongs to WP4/WP9.
 package web
 
+import "core:mem"
+
 // Response is the package-internal response state for one request.
 //
 // It holds exactly what the commit guard needs to be provable: the status,
@@ -23,16 +25,28 @@ package web
 // WP6. Without internal header storage, WP4 could not express or test its own
 // contract.
 //
-// Neither `headers` nor `body` is OWNED by Response at this stage: both are
-// views over storage owned by whoever called the commit primitive. WP6 defines
-// the concrete allocation and lifetime of a rendered response, and may reshape
-// this struct freely — nothing here is public API.
+// OWNERSHIP (amended in WP6, ADR-014). `headers` is always BORROWED: every
+// header name and value is a static string, and the pair array lives in
+// request-local storage on the Context. `body` is EITHER borrowed — a static
+// constant such as the automatic 404 envelope, or the fixed request-local
+// buffer the WP5 extractor errors use — OR owned, when a responder rendered it
+// dynamically. `owned_body` says which, and `body_allocator` records who made
+// the allocation so the teardown cannot disagree with the renderer about how to
+// release it.
+//
+// WP7 may replace this with the request-lifetime arena (ADR-006) without any
+// public change: neither this struct, nor the flag, nor the teardown is
+// exported.
 @(private)
 Response :: struct {
 	status:    Status,
 	headers:   []Header_Pair,
 	body:      []u8,
 	committed: bool,
+
+	// WP6 — true when `body` is an allocation this Response must release.
+	owned_body:     bool,
+	body_allocator: mem.Allocator,
 }
 
 // response_commit records a response exactly once and reports whether it did.
@@ -71,4 +85,70 @@ response_commit :: proc(res: ^Response, status: Status, headers: []Header_Pair, 
 	res.body = body
 	res.committed = true
 	return true
+}
+
+// response_commit_owned records a response whose body is an ALLOCATION, and
+// takes ownership of it.
+//
+// It is the WP6 counterpart of `response_commit` (ADR-014, plan D2), and the
+// two differ in exactly one respect: what happens to `body`.
+//
+// OWNERSHIP IS ALWAYS RESOLVED. On success the allocation belongs to the
+// Response and is released by `response_destroy`. On rejection — a response was
+// already committed — the allocation is FREED HERE, immediately, because the
+// caller rendered it before discovering the guard would refuse it and nothing
+// else can own it afterwards. Returning false while leaving the buffer to the
+// caller would leak on a path a handler triggers simply by responding twice.
+//
+// A caller must therefore treat `body` as CONSUMED by this call in both
+// outcomes, and must never read or free it afterwards.
+//
+// A rejected attempt leaves status, headers, body and ownership exactly as the
+// first commit left them, exactly like `response_commit`.
+@(private)
+response_commit_owned :: proc(
+	res: ^Response,
+	status: Status,
+	headers: []Header_Pair,
+	body: []u8,
+	allocator: mem.Allocator,
+) -> bool {
+	if res.committed {
+		delete_slice(body, allocator)
+		return false
+	}
+
+	res.status = status
+	res.headers = headers
+	res.body = body
+	res.committed = true
+	res.owned_body = true
+	res.body_allocator = allocator
+	return true
+}
+
+// response_destroy releases an owned body exactly once and returns the response
+// to its zero state.
+//
+// WHO CALLS IT. The response DRIVER, after the response has been captured or
+// written — never the handler and never `dispatch`. Today the only driver is
+// `web.test_request`, which calls this after the recorder has made its own
+// owned copies; the WP8 transport adapter must do the same once it exists.
+// There is deliberately NO public cleanup symbol: response lifetime is
+// framework business, and an application that had to remember to free a
+// response would be a worse API than one that cannot see the response at all.
+//
+// It is IDEMPOTENT. Zeroing clears `owned_body`, so a second call frees
+// nothing. `web.destroy` is specified as call-once, but a teardown that
+// corrupts the heap when called twice is a worse failure than one that does
+// nothing.
+//
+// It never frees a BORROWED body — a static constant or the fixed request-local
+// envelope buffer — because `owned_body` is false for those.
+@(private)
+response_destroy :: proc(res: ^Response) {
+	if res.owned_body {
+		delete_slice(res.body, res.body_allocator)
+	}
+	res^ = Response{}
 }

@@ -95,7 +95,20 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 		neutral_headers,
 	)
 
-	// 5. The facade returns the public shape.
+	// 5. WP6 — this facade is the response DRIVER, so it releases the rendered
+	//    body once the recorder has copied it (ADR-014). The ORDER matters: the
+	//    recorder makes owned copies of status, body and headers above, and only
+	//    after that does the response's own allocation become releasable. Tearing
+	//    down first would hand the recorder a freed buffer to copy.
+	//
+	//    A borrowed body — a static envelope constant, or the fixed request-local
+	//    buffer the WP5 extractor errors use — is left alone; `response_destroy`
+	//    frees only what the Response actually owns.
+	response_destroy(res)
+
+	// 6. The facade returns the public shape. `body` is the recorder's own copy,
+	//    valid until `web.destroy(&app)`, so it is unaffected by the teardown
+	//    above.
 	return Recorded_Response{status = Status(status_int), body = body}
 }
 
