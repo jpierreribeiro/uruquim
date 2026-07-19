@@ -35,7 +35,7 @@ Method :: enum u8 {
 
 // Request is the framework-owned view of one in-flight HTTP request.
 //
-// LIFETIME (normative, planning/15 G-05; `knowledge-base/01-architecture-spec.md`
+// LIFETIME (normative, planning/public-api-guardrails.md G-05; `knowledge-base/01-architecture-spec.md`
 // §Request/Response ownership): `path`, `query`, `body` and every header name
 // and value are VIEWS over storage owned by the transport for the duration of
 // a single request. They are not owned by the application and they are not

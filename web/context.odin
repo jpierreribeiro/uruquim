@@ -14,12 +14,12 @@ Handler :: proc(ctx: ^Context)
 //
 // It is deliberately NOT an extension bag: it will never expose `user_data`,
 // `locals`, `values`, `map[string]any`, `map[any]any`, or a public `rawptr`
-// (planning/15 G-03). Middleware-produced values reach handlers through typed
+// (planning/public-api-guardrails.md G-03). Middleware-produced values reach handlers through typed
 // extraction procedures.
 //
 // WP2 adds `request`. There is NO public `response` field and there never will
 // be one: the response object and its commit state are framework-internal, and
-// applications respond through the helpers (ADR-008, planning/18 P-1). Keeping
+// applications respond through the helpers (ADR-008). Keeping
 // the API responder-only is what stops a hand-written status or `committed`
 // flag from becoming an ordinary thing for an application to do.
 //
@@ -28,7 +28,7 @@ Handler :: proc(ctx: ^Context)
 //
 // LIFETIME: `request` is a bundle of views over transport-owned storage, valid
 // only for the duration of this request. Copy explicitly to persist, and never
-// hand `ctx` or a request view to background work (planning/15 G-05).
+// hand `ctx` or a request view to background work (planning/public-api-guardrails.md G-05).
 Context :: struct {
 	request: Request,
 

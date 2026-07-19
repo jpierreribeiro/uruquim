@@ -1,7 +1,7 @@
 // WP3 — IN-MEMORY TEST TRANSPORT MACHINERY (package `testing`).
 //
 // This package is the machinery behind `web.test_request`. It is UNSUPPORTED
-// INTERNALS by contract (planning/15 G-11): it is not a second public API, it
+// INTERNALS by contract (planning/public-api-guardrails.md G-11): it is not a second public API, it
 // is not documented for direct import, and applications call `web.test_request`,
 // never `testing.*`.
 //

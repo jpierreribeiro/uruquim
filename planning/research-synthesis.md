@@ -1,4 +1,4 @@
-# 24 — External Research Synthesis
+# External Research Synthesis
 
 Status: **REVIEWED PLANNING INPUT.** This document integrates external reports
 archived outside this repository without promoting them to specification.

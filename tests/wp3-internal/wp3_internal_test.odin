@@ -11,7 +11,7 @@
 // the shipped machinery ships no test code. `build/check_public_api.sh`
 // permanently forbids `*_test.odin` and `core:testing` under `web/testing/`.
 //
-// These are the copy / lifetime / ownership tests planning/21 requires at the
+// These are the copy / lifetime / ownership tests the WP3 contract requires at the
 // internal level, using NEUTRAL canned responses (there is no `web` type here,
 // which is exactly what keeps the dependency one-way). The public callsite
 // test in tests/wp3-public-surface/ proves form and the socket-free round trip.

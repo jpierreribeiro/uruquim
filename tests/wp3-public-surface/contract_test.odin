@@ -3,7 +3,7 @@
 // This package is an EXTERNAL consumer of `uruquim:web`. It proves that the two
 // symbols WP3 adds — `test_request` and `Recorded_Response` — exist with the
 // exact ratified names, are actually exported by package `web` (not
-// `web/testing`), and compose as planning/21 Decision 1 writes them.
+// `web/testing`), and compose as the ratified WP3 contract specifies.
 //
 // It also RUNS `web.test_request`, which is the executable half of probe C4:
 // the call completes with no socket, no port, and no network syscall, and its

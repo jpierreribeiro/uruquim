@@ -1,4 +1,4 @@
-# 08 — Open Questions
+# Open Questions
 
 Status: **MIXED.** Human decisions on 2026-07-18 closed the original Phase-1
 Spec Gate questions OQ-2, OQ-3, OQ-4, OQ-5, OQ-6, and OQ-14. Research added
