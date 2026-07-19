@@ -71,5 +71,65 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp1-public-api" \
   "-collection:uruquim=$URUQUIM_ROOT"
 
-echo "--- WP1 public API anti-accretion contract ---"
+# WP2 — the request/response model. The internal tests live inside the package
+# because `Response`, `response_commit`, `method_from_token` and `Header_Pair`
+# are package-private; the public-surface contract is checked from outside.
+echo "--- WP2 request/response model, internal behavior (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/web" \
+  "-collection:uruquim=$URUQUIM_ROOT"
+
+echo "--- WP2 public surface contract (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp2-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT"
+
+# WP2 compile probes. A negative probe must fail to compile AND fail for the
+# stated reason: an unrelated compile error must never be read as proof that a
+# symbol is unreachable.
+URUQUIM_PROBES="$URUQUIM_ROOT/tests/wp2-public-surface/probes"
+
+uruquim_negative_probe() { # file expected-diagnostic label
+  local file="$1" expected="$2" label="$3"
+  local output
+  echo "--- WP2 probe: $label (expected compile failure) ---"
+  # The compile is EXPECTED to fail, so it is run as the condition of an `if`:
+  # under `set -e` a bare assignment from a failing command would abort here.
+  if output="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
+    PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+    "$URUQUIM_COMPILER" check "$URUQUIM_PROBES/$file" -file \
+    "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point 2>&1)"; then
+    echo "$output" >&2
+    fail "probe '$label' compiled; the symbol it must not reach is reachable"
+  fi
+  if ! grep -qF "$expected" <<<"$output"; then
+    echo "$output" >&2
+    fail "probe '$label' failed for the wrong reason; expected: $expected"
+  fi
+  echo "PASS: $label"
+}
+
+uruquim_negative_probe header_pair_not_exported.odin \
+  "'Header_Pair' is not exported by 'web'" \
+  "Header_Pair is not nameable from outside the package"
+
+uruquim_negative_probe header_view_internal_not_exported.odin \
+  "'Header_View_Internal' is not exported by 'web'" \
+  "Header_View_Internal is not nameable from outside the package"
+
+uruquim_negative_probe context_has_no_response.odin \
+  "has no field 'response'" \
+  "Context exposes no public response field"
+
+# The matching POSITIVE probe records an accepted fact rather than a feature:
+# `Header_View` is encapsulated BY CONTRACT, not opaque. If this ever stopped
+# compiling, the documentation would be claiming a barrier Odin does not give.
+echo "--- WP2 probe: internal slot stays reachable (expected compile success) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" check "$URUQUIM_PROBES/internal_slot_is_reachable.odin" -file \
+  "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point ||
+  fail "the encapsulation-by-contract probe stopped compiling; ADR-008's scope statement would be wrong"
+echo "PASS: encapsulation is by contract, not a barrier (ADR-008 scope confirmed)"
+
+echo "--- Phase-1 public API anti-accretion contract ---"
 bash "$URUQUIM_ROOT/build/check_public_api.sh"
