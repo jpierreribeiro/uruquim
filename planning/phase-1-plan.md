@@ -132,13 +132,69 @@ runs on the pinned toolchain.
 ## WP4 — Minimal route registration and dispatch
 - **Objective.** static + `:param` dispatch, no radix; consistent 404;
   minimal 405 (per scope decision).
-- **Spec.** §Routing (observable behavior only); scope-review 405 decision.
-- **Files.** `web/internal/dispatch/table.odin`, `web/internal/dispatch/match.odin`.
-- **API.** internal; public `get/post/...` register into the table.
-- **Tests first.** static match, `:param` capture, precedence (static>param),
-  404, 405-when-other-method with exact `Allow` header (ports of exp-09 + one
-  405 case).
-- **Min impl.** method+exact map, plus single-`:param` segment matcher.
+- **Spec.** §Routing (observable behavior only); scope-review 405 decision;
+  decisions D1–D5 below.
+- **Files (amended in WP4).** `web/dispatch_table.odin`,
+  `web/dispatch_match.odin` — top-level files in the EXISTING package `web`,
+  every declaration package-private.
+  The original plan said `web/internal/dispatch/*.odin`. **Refuted by the
+  language, not by preference:** in Odin a subdirectory is a separate package,
+  and the dispatcher must name `App`, `Handler`, `Context`, `Method` and the
+  internal `Response`. A subpackage would need to import `uruquim:web`, which
+  WP3 already ratified as a compile cycle (probe C5,
+  `Cyclic importation of 'web_testing'`); the alternatives are duplicating the
+  types, a `rawptr` bridge, or a frozen internal ABI — all forbidden. The files
+  therefore live in `web/`, and `build/check_public_api.sh` permits exactly
+  these two additional names. The checker is NOT relaxed to accept
+  subdirectories or arbitrary files.
+- **API.** internal; public `get/post/put/patch/delete` register into the
+  table. **No public symbol is added: the ledgers stay 32 + 2 = 34.**
+- **Decisions ratified in WP4.**
+  - **D1 — parameters and route identity stay private.** WP4 adds only private
+    parameter storage and matching in `Context_Internal`. It exports no
+    `Params`, `Param`, `Route_Info`, `Route`, `Router` or accessor. WP5 makes
+    `web.path`/`web.path_int` consume that private storage; the stable
+    route identity for observability remains internal and future (OQ-18).
+    `knowledge-base/01-architecture-spec.md` §Context Model is amended
+    accordingly.
+  - **D2 — internals stay in package `web`.** See Files above.
+  - **D3 — dispatch takes the App explicitly:**
+    `dispatch :: proc(a: ^App, ctx: ^Context)`. The WP3 stub `dispatch(ctx)`
+    has no access to the App-owned table. No pointer to `App` is stored on
+    `Context`, and no public signature changes. This signature is internal and
+    replaceable.
+  - **D4 — minimal 404/405 policy.** In `web.app()` a path miss is
+    `.Not_Found`; a path known under another method is `.Method_Not_Allowed`
+    with an `Allow` header. In `web.bare()` registered routes dispatch, but the
+    automatic 404/405 defaults are NOT installed and a miss stays uncommitted —
+    this makes the documented `app()`/`bare()` distinction real without
+    inventing middleware. Bodies are EMPTY in WP4; the standardized JSON
+    envelope is WP6 and is not implemented early. The header is exactly
+    `Allow`, its value uses the deterministic canonical order
+    `GET, POST, PUT, PATCH, DELETE`, includes only methods registered for that
+    path, and separates them with comma + space. `.UNKNOWN` never becomes 501:
+    it follows the same 405/404 rules as any other method. `Recorded_Response`
+    gains no headers and no header accessor exists; `Allow` is verified by an
+    internal `package web` test.
+  - **D5 — path semantics limited to what WP4 proves.** Patterns begin with
+    `/`; `/` is valid; a `:param` occupies one whole segment; at most one
+    `:param` per pattern in this interim dispatcher; no wildcard. WP4
+    normalizes NOTHING — not slashes, percent-encoding, dot segments, or
+    trailing slashes — so `/users` and `/users/` are different patterns. A
+    normalization policy and definitive registration-conflict diagnostics
+    belong to Phase 3; WP4 freezes no public registration-error API. Precedence
+    (static over parametric) is decided by pattern shape, never by registration
+    order.
+- **Tests first.** static match, `:param` capture, precedence (static>param) in
+  both registration orders, per-method isolation, 404, 405-when-other-method
+  with exact `Allow` header and no duplicates, `.UNKNOWN` following 404/405,
+  `bare()` injecting neither, handler invoked exactly once, no fabricated 200
+  for a handler that did not respond, App-owned pattern surviving mutation of
+  the caller's buffer, `destroy` freeing the table exactly once.
+- **Min impl.** App-owned linear table; public registration wrappers delegating
+  to one private proc; linear static-then-parametric match by segment
+  iteration; at most one captured param; handler invocation; internal 404/405
+  commits; deterministic `Allow` construction; table teardown.
 - **Done.** dispatch behavior matches the router spec's *observable* contract,
   so Phase 3 radix changes nothing public.
 - **Risks.** observable behavior drifting from the future radix → pin with tests.
