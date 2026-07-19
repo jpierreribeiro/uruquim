@@ -79,10 +79,11 @@ internal_error :: proc(ctx: ^Context) {
 //
 // WP5 must produce `invalid_path_parameter` and `invalid_query_parameter`
 // envelopes, because an extractor that fails without responding would leave the
-// client with no answer at all. It must NOT implement WP6: the public
-// responders above stay inert stubs, there is no generic renderer, no error-code
-// enum, no envelope type, and no `Content-Type` or header policy. Everything
-// below is `@(private)`, so the application ledger stays at exactly 32.
+// client with no answer at all. WP6 then completed the picture: the public
+// responders above are live, `error_commit_message` is the generic renderer,
+// `Error_Envelope` is the envelope type, and the error codes are the constants
+// below. Everything below is `@(private)`, so the application ledger stays at
+// exactly 32.
 //
 // WHY THE JSON IS HAND-WRITTEN. `core:encoding/json` would escape correctly,
 // but `json.marshal` ALLOCATES, and Phase 1 has no request-lifetime arena to

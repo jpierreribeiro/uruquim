@@ -152,6 +152,29 @@ tag and any release remain the owner's decision.
 
 All three examples compile in the mandatory gate.
 
+## Licence, security and contributing
+
+Uruquim is [MIT licensed](LICENSE).
+
+It parses HTTP from untrusted clients, so it has a real attack surface. If you
+find a security problem, please report it privately — [`SECURITY.md`](SECURITY.md)
+explains how, and lists what is a documented limitation rather than a
+vulnerability.
+
+[`CONTRIBUTING.md`](CONTRIBUTING.md) explains the two things that surprise
+people: the public API is frozen and the build enforces it, and growing it
+requires measured evidence rather than agreement.
+
+Notable changes are recorded in [`CHANGELOG.md`](CHANGELOG.md). There has been
+no release: no tag exists, and cutting one is the owner's decision. What happens
+next is planned in [`planning/roadmap.md`](planning/roadmap.md).
+
+**Consuming Uruquim.** Odin has no package manager
+[by design](https://odin-lang.org/docs/faq/), so vendor the `web/` directory or
+add this repository as a submodule, and build with `-collection:uruquim=<path>`.
+The Odin toolchain version is part of the contract — the pinned release, commit
+and asset checksum are in `odin-version.txt`.
+
 GitHub Actions is not required: a tracked pre-push hook runs the mandatory
 gate, and the project VPS repeats it from a clean commit on an enabled systemd
 timer. Current work-package status lives in `planning/phase-1-plan.md`.

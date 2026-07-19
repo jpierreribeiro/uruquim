@@ -103,7 +103,7 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 	//    uses, so both drivers release in one ratified order.
 	driver_cleanup(&ctx)
 
-	// 7. The facade returns the public shape. `body` is the recorder's own copy,
+	// 6. The facade returns the public shape. `body` is the recorder's own copy,
 	//    valid until `web.destroy(&app)`, so it is unaffected by the teardowns
 	//    above.
 	return Recorded_Response{status = Status(status_int), body = body}

@@ -45,8 +45,9 @@ Context :: struct {
 // It is encapsulated BY CONTRACT, not by the compiler — Odin has no per-field
 // privacy, and fields stay reachable through a public field. Do not rely on
 // this for safety guarantees (ADR-008, "Scope of the guarantee").
-// WP2 gave it the response state; WP4 adds the routing state. No allocator,
-// chain cursor or transport hook is wired yet: those belong to WP7 and WP8.
+// WP2 gave it the response state, WP4 the routing state, and WP7 the
+// request-lifetime arena and body-consumption state. A middleware chain cursor
+// belongs to Phase 2.
 //
 // It deliberately holds NO pointer back to the App. `dispatch` receives the App
 // explicitly instead, which keeps the request context free of a reference whose

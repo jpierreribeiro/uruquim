@@ -1,5 +1,5 @@
-// WP5 — CANONICAL EXTRACTORS. Path and query extraction are implemented here;
-// body binding is still the WP7 stub.
+// CANONICAL EXTRACTORS. Path and query extraction (WP5) and JSON body binding
+// (WP7) are all implemented here.
 //
 // This file declares the canonical Phase-1 extractors. WP5 implements the five
 // path/query extractors and the two 400 envelopes they commit on failure; WP7
