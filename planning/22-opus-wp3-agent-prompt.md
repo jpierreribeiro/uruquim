@@ -65,8 +65,9 @@ Leia integralmente:
 14. build/check.sh e build/check_public_api.sh
 15. web/app.odin, context.odin, request.odin, response.odin, headers.odin
 
-A Knowledge Base continua autoritativa. `referencias/` é pesquisa não
-normativa. O protótipo externo registrado em planning/21 é evidência de
+A Knowledge Base continua autoritativa. Pesquisas externas arquivadas fora do
+repositório são material não normativo. O protótipo externo registrado em
+planning/21 é evidência de
 viabilidade; os probes versionados deste WP são a ratificação permanente.
 
 ======================================================================
