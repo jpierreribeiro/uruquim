@@ -223,8 +223,68 @@ runs on the pinned toolchain.
 - **Deps.** WP2/WP3; exp-09. **Rollback.** replace table wholesale in P3.
 
 ## WP5 — Canonical extractors
+- **Execution status.** **COMPLETE** — verified by a full green
+  `build/check.sh` on dev-2026-07-nightly:819fdc7 (PASS=10 FAIL=0 SKIP=0;
+  WP5 internal 41/41 and public 12/12; ledgers 32 + 2 = 34 unchanged; G-11
+  still green; 24 mutation cases rejected). The public surface did not move.
 - **Objective.** `path/path_int/query/query_int/query_int_or` with the
   respond-on-failure contract.
+- **Decisions ratified in WP5.**
+  - **D1 — the envelope is hand-emitted, not marshalled.** WP5 must produce
+    `invalid_path_parameter` and `invalid_query_parameter`, but
+    `json.marshal` ALLOCATES and Phase 1 has no request-lifetime arena to
+    release that allocation from (the arena is WP7/ADR-006). The alternatives
+    were leaking one allocation per failed extraction — on a path an
+    unauthenticated client can trigger at will — or starting WP7 early. The
+    envelope is therefore written by a package-private escaper into
+    `ctx.private.error_buffer`, fixed request-local storage on exactly the
+    same terms as WP4's `allow_buffer`. `build/check_public_api.sh` forbids
+    importing `core:encoding/json` into `web/`, so the encoder does not reach
+    applications that merely hit an extractor error.
+    The escaper is not trusted on that argument: every envelope is parsed back
+    by the OFFICIAL parser in STRICT `.JSON` mode in `tests/wp5-internal/`
+    (quotes, backslashes, control characters, multi-byte UTF-8, and names far
+    past the buffer). Name inclusion is bounded at 64 escaped bytes and
+    truncates only on an escape-unit boundary.
+  - **D2 — the commit guard is consulted BEFORE the buffer is written.** The
+    envelope buffer is shared request-local storage and a committed response
+    holds a VIEW over it, so writing first would silently mutate the body of
+    the first response while it kept reporting its original status. This is
+    what makes "the first response always wins" true for WP5 rather than
+    merely claimed.
+  - **D3 — integers are strict decimal.** `strconv.parse_int` defaults to
+    base 0 on the pinned toolchain: it accepts `0x1f`, `0b101` and `1_000`,
+    and reports success without consuming the whole input unless the caller
+    checks the byte count. Both would silently widen the ratified contract, so
+    WP5 parses an optional `-` plus ASCII digits and nothing else, with the
+    magnitude accumulated in `u64` and bounds-checked before each multiply so
+    that `min(int)` parses exactly and out-of-range input is rejected rather
+    than wrapped.
+  - **D4 — query lookup is a linear in-place scan.** No map and no
+    `strings.split`: both allocate on the hot path of every request that reads
+    a parameter, and a map would be built and torn down per request to serve
+    lookups one or two keys deep. Pairs split on `&`, each pair on its FIRST
+    `=`; a bare key is PRESENT with an empty value; comparison is exact and
+    case-sensitive; the first occurrence wins. WP5 decodes and normalizes
+    NOTHING, and announces no duplicate-key contract beyond that internal rule.
+  - **D5 — path failure modes collapse into one message; query failures do
+    not.** An absent, empty, malformed or out-of-range path parameter all
+    produce `Path parameter '<name>' must be an integer`, because
+    distinguishing "the route never captured that name" would describe the
+    server's routing to the caller — it is an application bug, not something
+    the client can act on. A query parameter distinguishes absent
+    (`is required`) from malformed (`must be an integer`) because both are
+    caller-fixable.
+  - **D6 — `test_request` was NOT extended.** Query extraction is tested by
+    setting `ctx.request.query` on a public `web.Context`, which is the same
+    path a transport adapter (WP8) will use. Adding a query overload to
+    `test_request` would have grown the frozen 2-symbol test-support ledger.
+- **Cost.** An application that never calls an extractor is byte-identical to
+  the WP4 baseline (47,552 bytes, unchanged G-11 measurement). Adding
+  `path`+`query` to a routed application costs ~4.3 KiB; reaching the error
+  envelope costs ~9 KiB more, and links NO JSON encoder (`nm` reports zero
+  `encoding_json` symbols). Binary sizes vary by up to one 4 KiB page between
+  otherwise identical builds.
 - **Spec.** §Extractor Control Flow; ADR-002; planning/public-api-guardrails.md G-01/G-04.
 - **Files.** `web/extract.odin` (impl), `web/errors.odin` (envelope for
   invalid_path/query).
