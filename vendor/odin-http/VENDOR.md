@@ -54,8 +54,33 @@ README.md, odinfmt.json, .editorconfig, .gitignore — repo tooling
 
 ## Local patches
 
-**None.** The vendored `.odin` files are byte-for-byte the upstream root
-package.
+**Five, all added by WP9 (transport conformance), all minimal and security-
+motivated.** Each is marked in the source with a `URUQUIM PATCH` comment naming
+the decision it implements, and each is covered by a raw-wire corpus case that
+FAILED before the patch. There are no opportunistic edits.
+
+Upstream is not at fault for most of these: the package is a general HTTP
+server, while Uruquim commits to a deliberately stricter Phase-1 framing policy
+(planning/phase-1-plan.md §WP9 D2–D7). Two of the five, however, are outright
+crashes and would be bugs anywhere.
+
+| # | File | Conceptual change | Why |
+|---|---|---|---|
+| 1 | `body.odin` (`_body_length`) | A `Content-Length` must be one or more ASCII digits and nothing else; a negative or non-decimal value is rejected. | **REMOTE DENIAL OF SERVICE.** `strconv.parse_int` accepts `-1` and stops at the first non-digit, so `Content-Length: -1` reached `scanner.max_token_size` and tripped `scanner.odin`'s `n >= 0` assertion, **killing the server process**. `2, 2` likewise parsed as `2` and silently accepted an ambiguous framing. |
+| 2 | `body.odin` (`_body_chunked`) | A chunk not terminated by CRLF is rejected instead of asserted. | **REMOTE DENIAL OF SERVICE.** `assert(len(token) == 0)` treated malformed *input* as a programming error, so a chunked body missing its trailing CRLF **killed the server process**. |
+| 3 | `request.odin` (`headers_validate`) | `Content-Length` + `Transfer-Encoding` is **rejected**, not repaired. | Upstream deleted the `Content-Length` and continued. That leaves the two ends of a proxy chain disagreeing about where the body ends — the request-smuggling vector RFC 9112 §6.1 calls an unrecoverable error. |
+| 4 | `http.odin` (`header_parse`) | **Any** repeated `Content-Length` is rejected, even when the values are identical. | Upstream let an exact duplicate through and then merged it via the comma rule into `2, 2`, an ambiguous framing. WP9 D2 chooses refusal over normalization: it is simpler and safer. |
+| 5 | `http.odin` (`Method`, `Requestline`, `requestline_parse`) | A valid but unrecognized method becomes `.Unknown` and its original token is preserved in `Requestline.method_raw`, instead of the server answering `501`. | WP9 D7: method semantics are the framework's decision. `PROPFIND` must reach the dispatcher and follow the ratified 404/405 policy; the transport must not invent a status before the core sees the request. |
+
+Patch 5 also adds a tenth entry to `_method_strings` and makes `method_parse`
+skip the new member, so the existing `for r in Method` lookup (which indexes
+that array under `#no_bounds_check`) stays in bounds.
+
+Every other line is byte-for-byte upstream.
+
+To update to a newer upstream commit, re-apply the five patches above (they are
+small and each is commented at its site) and re-run the WP9 raw-wire corpus,
+which is what proves they are still needed and still sufficient.
 
 A note on cost, for the record: importing this package links its one `@(init)`
 procedure (`status.odin::status_strings_init`, which precomputes the HTTP
