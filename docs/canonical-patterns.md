@@ -22,15 +22,13 @@ these forms. If a pattern here conflicts with any other document except
 > precedence, per-method isolation, and the automatic 404/405 of `web.app()`,
 > driven in memory by `web.test_request`.
 >
-> WP5 added extraction and WP6 added responses: `web.path*`/`web.query*` all
-> work, and every response helper — `web.json`, `web.ok`, `web.created`,
-> `web.text`, `web.no_content`, and the five error responders — now renders a
-> real body with a `Content-Type`. The full handler examples below execute.
+> WP5 added extraction, WP6 added responses, and WP7 added body binding:
+> `web.path*`/`web.query*`, every response helper, and `web.body` all work. The
+> full handler examples below execute.
 >
-> It is **still not a functional server**. `web.body` binds nothing (WP7) and
-> `web.serve` binds no port (WP8), so responses are observable only through
-> `web.test_request`. The canonical *forms* are what this document fixes, and
-> they are unchanged.
+> It is **still not a functional server**. `web.serve` binds no port (WP8), so
+> responses are observable only through `web.test_request`. The canonical
+> *forms* are what this document fixes, and they are unchanged.
 
 ## The one rule
 
@@ -317,8 +315,23 @@ create_user :: proc(ctx: ^web.Context) {
 }
 ```
 
-Invalid JSON automatically produces the `invalid_json` envelope; an oversized
-body produces `body_too_large`.
+Invalid JSON automatically produces the `invalid_json` envelope (400); a body
+over the fixed 4 MiB cap produces `body_too_large` (413). In both cases
+`web.body` has already responded — just `return`.
+
+WP7 rules you must not guess at:
+
+- **The default is one bind per request.** `web.body` is a single-use
+  capability: the first call consumes it, even if it fails. A second call
+  decodes nothing. Bind once, into one destination.
+- **Decoded data is request-lifetime.** Nested strings and slices live in a
+  per-request arena and are freed when the request ends. Copy explicitly (with
+  an appropriate allocator) to keep any of it — the same rule as every request
+  view. After a `false` return, `dst` is undefined; discard it.
+- **Values only.** The destination is a concrete struct; the payload decodes by
+  value, matching the response side (`web.ok(ctx, value)`).
+- **Strict JSON.** Comments, unquoted keys and single-quoted strings are
+  rejected. Do not rely on JSON5.
 
 ## Query parameters
 

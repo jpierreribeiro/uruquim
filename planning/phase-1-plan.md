@@ -380,8 +380,21 @@ runs on the pinned toolchain.
 - **Deps.** WP2; exp-02. **Rollback.** helpers isolated.
 
 ## WP7 — JSON body binding
+- **Execution status.** **COMPLETE** — verified by a full green `build/check.sh`
+  on dev-2026-07-nightly:819fdc7 (PASS=10 FAIL=0 SKIP=0; WP7 internal 20/20 and
+  public 4/4; ledgers 32 + 2 = 34 unchanged; G-11 still green; 43 mutation cases
+  rejected across WP3-WP7). No public symbol was added.
 - **Objective.** `body(ctx,&dst)->bool`, request allocator, fixed 4 MiB body cap.
 - **Spec.** §body; ADR-006; ADR-012 (accepted); scope-review body-limit decision.
+- **Cost.** An application that never calls `web.body` links ZERO
+  `encoding_json` and ZERO `dynamic_arena` symbols (`nm`); the decoder and arena
+  appear only when `web.body` is reached. A bare app is 47,728 bytes (+112 vs
+  the WP6 baseline, within one page of measurement noise); routing adds ~10 KiB;
+  reaching `web.body` pulls in the JSON decoder. G-11 unchanged: a non-testing
+  app links 0 `web/testing` symbols. Allocations per request: a successful bind
+  uses the arena (freed in one shot at request end); empty and over-limit binds
+  allocate NOTHING (no arena); a malformed bind may leave partial arena
+  allocations, all freed together at teardown.
 - **Files.** `web/extract.odin` (`body`), `web/request_arena.odin` (the private
   arena machinery).
 - **Decisions ratified in WP7.**
