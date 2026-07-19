@@ -5,9 +5,17 @@ Paste this file into your agent's context (Cursor rules, CLAUDE.md, etc.).
 **Use only the APIs documented here. Do not invent procedures, aliases, or
 alternative forms. If something is not listed, it does not exist.**
 
-> Status: phase-aware public API contract. Before implementation, only the
-> Phase-1 sections below are ratified; sections marked Phase 2/3/4 do not yet
-> exist and must not be emitted by a coding agent.
+> Status: phase-aware public API contract. Only the Phase-1 sections below are
+> ratified; sections marked Phase 2/3/4 do not yet exist and must not be
+> emitted by a coding agent.
+>
+> **Implementation status (WP1): the Phase-1 surface below is a compiling
+> skeleton, not a working server.** Every name and signature here exists in
+> `web/` and compiles on the pinned toolchain, so code written against this
+> reference compiles. None of it does anything yet: no route is matched, no
+> value is extracted, no JSON is produced, no response is committed, and
+> `web.serve` returns immediately without binding a port. Behavior is added by
+> WP2–WP9. Write against these shapes; do not deploy against them.
 
 ## Application
 
@@ -133,6 +141,12 @@ web.internal_error(ctx)                          // 500
 
 `web.redirect` and `web.conflict` belong to later phases and do not exist in
 the Phase-1 surface.
+
+The status argument of `web.json` and `web.text` has type `web.Status`, so it
+is always written as an inferred enum member (`.OK`, `.Created`, `.Accepted`,
+`.No_Content`, `.Bad_Request`, `.Unauthorized`, `.Forbidden`, `.Not_Found`,
+`.Method_Not_Allowed`, `.Internal_Server_Error`). Never pass a bare integer
+such as `200`.
 
 The Phase-1 JSON baseline accepts concrete values only:
 

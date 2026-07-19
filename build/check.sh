@@ -45,6 +45,7 @@ command -v clang >/dev/null 2>&1 ||
 
 bash -n "$URUQUIM_ROOT/build/check.sh"
 bash -n "$URUQUIM_ROOT/build/check_test.sh"
+bash -n "$URUQUIM_ROOT/build/check_public_api.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -56,3 +57,19 @@ echo "toolchain version: $URUQUIM_VERSION"
 echo "toolchain commit: $URUQUIM_EXPECTED_COMMIT"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   bash "$URUQUIM_ROOT/experiments/run_checks.sh"
+
+# WP1 — the public package must compile and its compile contract must hold.
+# `web` is a library package, so -no-entry-point is required: without it the
+# pinned compiler reports "Undefined entry point procedure 'main'".
+echo "--- WP1 public API package (odin check) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" check "$URUQUIM_ROOT/web" \
+  "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point
+
+echo "--- WP1 public API compile contract (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp1-public-api" \
+  "-collection:uruquim=$URUQUIM_ROOT"
+
+echo "--- WP1 public API anti-accretion contract ---"
+bash "$URUQUIM_ROOT/build/check_public_api.sh"
