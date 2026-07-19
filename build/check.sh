@@ -151,5 +151,92 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   fail "the encapsulation-by-contract probe stopped compiling; ADR-008's scope statement would be wrong"
 echo "PASS: encapsulation is by contract, not a barrier (ADR-008 scope confirmed)"
 
+# WP3 — in-memory test transport (facade in package `web`, machinery in
+# `web/testing`). The dependency is one-way: `web` imports `web/testing`, and
+# `web/testing` imports neither `uruquim:web` (cycle) nor `core:testing`.
+#
+# Probe C1 — the machinery compiles ALONE as neutral, core-only code.
+echo "--- WP3 probe C1: web/testing machinery compiles alone (neutral, core-only) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" check "$URUQUIM_ROOT/web/testing" \
+  "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point
+echo "PASS: web/testing compiles as standalone machinery (C1)"
+
+# Probe C2 — the facade compiles importing the machinery. `odin check web` above
+# (the WP1 step) already exercised this once web/test_support.odin exists; this
+# line names it as the ratified C2 evidence.
+echo "--- WP3 probe C2: web facade compiles importing web/testing ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" check "$URUQUIM_ROOT/web" \
+  "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point
+echo "PASS: web imports web/testing one-way (C2)"
+
+# WP3 machinery internal behavior — copy/lifetime/ownership tests, in a
+# THROWAWAY package exactly like WP2: the machinery sources plus the out-of-tree
+# test file, so the shipped machinery ships no test code.
+echo "--- WP3 machinery internal behavior (throwaway package) ---"
+URUQUIM_WP3_TMP="$(mktemp -d -t uruquim-wp3-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP3_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/testing/*.odin "$URUQUIM_WP3_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp3-internal/*.odin "$URUQUIM_WP3_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP3_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT"
+rm -rf "$URUQUIM_WP3_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP3_TMP" || fail "the throwaway WP3 machinery-test package was not removed"
+echo "PASS: machinery internal tests ran against the real sources; throwaway package removed"
+
+# WP3 public surface — external consumer of `uruquim:web` that RUNS
+# `web.test_request` (probe C4): it completes with no socket, and its result is
+# readable as status/body. Memory tracking (default in `odin test`) enforces the
+# lazy-state and cleanup claims.
+echo "--- WP3 public surface contract, incl. C4 in-memory round trip (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp3-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT"
+
+# WP3 negative probe — `Recorded_Response` has no public `headers` field.
+URUQUIM_WP3_PROBE="$URUQUIM_ROOT/tests/wp3-public-surface/probes/recorded_response_has_no_headers.odin"
+echo "--- WP3 probe: Recorded_Response has no public headers field (expected compile failure) ---"
+if URUQUIM_WP3_OUT="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
+  PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" check "$URUQUIM_WP3_PROBE" -file \
+  "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point 2>&1)"; then
+  echo "$URUQUIM_WP3_OUT" >&2
+  fail "probe compiled; Recorded_Response.headers is reachable and must not be"
+fi
+if ! grep -qF "has no field 'headers'" <<<"$URUQUIM_WP3_OUT"; then
+  echo "$URUQUIM_WP3_OUT" >&2
+  fail "the no-headers probe failed for the wrong reason; expected: has no field 'headers'"
+fi
+echo "PASS: Recorded_Response exposes no public headers field"
+
+# Probe C5 — the back-edge `web/testing -> web` is a COMPILE CYCLE. Copy the two
+# packages into a throwaway tree, inject the committed back-edge fixture into the
+# copied machinery, and check the copied facade: it must fail with the exact
+# cyclic-import diagnostic. This is the versioned form of planning/21 C5.
+echo "--- WP3 probe C5: web/testing -> web back-edge is a compile cycle (expected failure) ---"
+URUQUIM_WP3_CYCLE="$(mktemp -d -t uruquim-wp3-cycle-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP3_CYCLE"' EXIT
+mkdir -p "$URUQUIM_WP3_CYCLE/web/testing"
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP3_CYCLE/web/"
+cp "$URUQUIM_ROOT"/web/testing/*.odin "$URUQUIM_WP3_CYCLE/web/testing/"
+cp "$URUQUIM_ROOT"/tests/wp3-probes/back_edge_import.odin "$URUQUIM_WP3_CYCLE/web/testing/"
+if URUQUIM_WP3_CYCLE_OUT="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
+  PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" check "$URUQUIM_WP3_CYCLE/web" \
+  "-collection:uruquim=$URUQUIM_WP3_CYCLE" -no-entry-point 2>&1)"; then
+  echo "$URUQUIM_WP3_CYCLE_OUT" >&2
+  fail "the back-edge compiled; web/testing -> web must be a compile cycle (C5)"
+fi
+if ! grep -qF "Cyclic importation of 'testing'" <<<"$URUQUIM_WP3_CYCLE_OUT"; then
+  echo "$URUQUIM_WP3_CYCLE_OUT" >&2
+  fail "the back-edge failed for the wrong reason; expected: Cyclic importation of 'testing'"
+fi
+rm -rf "$URUQUIM_WP3_CYCLE"
+trap - EXIT
+echo "PASS: the one-way dependency is enforced by the compiler (C5)"
+
 echo "--- Phase-1 public API anti-accretion contract ---"
 bash "$URUQUIM_ROOT/build/check_public_api.sh"
