@@ -300,8 +300,25 @@ runs on the pinned toolchain.
 - **Deps.** WP2/WP4; exp-04/09. **Rollback.** signatures stable, bodies swap.
 
 ## WP6 — JSON responses and error envelope
+- **Execution status.** **COMPLETE** — verified by a full green `build/check.sh`
+  on dev-2026-07-nightly:819fdc7 (PASS=10 FAIL=0 SKIP=0; WP6 internal 36/36 and
+  public 14/14; ledgers 32 + 2 = 34 unchanged; G-11 still green; 33 mutation
+  cases rejected). The public surface did not move.
 - **Objective.** `json/text/ok/created/no_content` + envelope; failures before
   commit.
+- **Pointer-payload prototype (ADR-003 / OQ-14 follow-up).** Run and recorded,
+  NOT adopted. On 819fdc7 a one-level `reflect`-based dereference marshals a
+  `^User` cleanly, refuses a nil pointer, and still fails a `^^User` and a proc
+  value. Value-only remains the baseline; adopting dereference needs a ratified
+  amendment. Evidence is in the WP6 PR, not versioned in the repo.
+- **Cost note.** The first implementation imported `core:log` for the marshal
+  diagnostic and, because Odin links an imported package whether or not it is
+  referenced, added ~37 KiB (`core:log`/`core:os`/`core:strconv`/terminal) to
+  EVERY application — measured 47,768 -> 84,584 bytes on a consumer that never
+  responds. Making the report parametric did not help (the cost is the import,
+  not the reference). The framework now talks to `context.logger` directly with
+  a static message; residual cost for a non-responding app is +240 bytes, and
+  the JSON encoder stays out of applications that never render JSON.
 - **Decisions ratified in WP6.**
   - **D1 — the internal `Response` OWNS dynamically rendered bodies**
     (ADR-014, human decision 2026-07-19). Bodies produced by `json` and `text`,

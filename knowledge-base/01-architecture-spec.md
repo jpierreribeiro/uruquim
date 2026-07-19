@@ -435,6 +435,14 @@ pointer level before marshal. If that implementation is small, explicit, and
 compiles cleanly on the pinned toolchain, the pointer restriction MAY be
 relaxed through a spec-first amendment. Until then, value-only is normative.
 
+> **WP6 status (implemented).** All response helpers render and commit through
+> the internal single-commit guard. Rendered JSON/text bodies are owned by the
+> internal response and released by a private teardown the response driver calls
+> after capture (ADR-014); no public cleanup exists. `Content-Type` is
+> `application/json` for JSON and every envelope, `text/plain; charset=utf-8`
+> for text, and unset for `no_content`. The pointer-dereference prototype was
+> run and NOT adopted; value-only remains normative.
+
 ### Serving
 
 ```odin

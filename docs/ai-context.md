@@ -9,27 +9,28 @@ alternative forms. If something is not listed, it does not exist.**
 > ratified; sections marked Phase 2/3/4 do not yet exist and must not be
 > emitted by a coding agent.
 >
-> **Implementation status (WP5): routing and extraction work; there is still
-> no server.** Every name and signature here exists in `web/` and compiles on
-> the pinned toolchain, so code written against this reference compiles.
+> **Implementation status (WP6): routing, extraction and responses work; there
+> is still no server.** Every name and signature here exists in `web/` and
+> compiles on the pinned toolchain, so code written against this reference
+> compiles.
 >
 > What now really works: `Request`, `Method` and `Header_View`; route
 > registration and dispatch, including `:param` matching and
 > static-over-parametric precedence; the automatic 404 and the 405 with its
 > `Allow` header in `web.app()`; `web.test_request`, which drives one request
-> in-memory (no sockets) and returns the real routed result; and — new in WP5 —
-> **the five path and query extractors**, including the standardized 400
-> envelope they commit on failure.
+> in-memory (no sockets) and returns the real routed result; the five path and
+> query extractors with their 400 envelopes; and — new in WP6 — **every
+> response helper**: `web.json`, `web.ok`, `web.created`, `web.text`,
+> `web.no_content`, and the five error responders, all with the standardized
+> envelope and a `Content-Type`. The automatic 404/405 now carry that envelope
+> too.
 >
 > What still does NOT work: **`web.body` returns false and binds nothing**
-> (WP7); **no response helper produces output** (`web.ok`, `web.json`,
-> `web.text` and the error helpers commit nothing until WP6), so no JSON is
-> produced except the two extractor error envelopes; and `web.serve` returns
-> immediately without binding a port (WP8). The 404 and 405 bodies are still
-> EMPTY — the general error envelope is WP6.
+> (WP7), and `web.serve` returns immediately without binding a port (WP8).
 >
-> WP5 emits `invalid_path_parameter` and `invalid_query_parameter` and nothing
-> else. Do not expect `web.bad_request` or `web.not_found` to produce a body.
+> Payloads are VALUES. `web.ok(ctx, &user)` and pointer-typed payload variables
+> are rejected by the marshaller, logged on the server, and answered with a
+> complete 500 — never a partial body. Write `web.ok(ctx, user)`.
 >
 > A handler that responds with nothing leaves the response uncommitted, and
 > `web.test_request` reports that honestly as a zero status and an empty body.
@@ -295,13 +296,18 @@ web.ok(ctx, user)       // accepted
 ```
 
 If `user` has type `^User`, it is also not an accepted payload. Do not pass a
-pointer variable. WP6 may prototype one-level pointer dereference, but pointer
-support does not exist unless compiler evidence and a later spec amendment
-say otherwise.
+pointer variable. A WP6 disposable prototype confirmed one-level dereference
+compiles and marshals a `^User`, but pointer support was NOT adopted: the
+value-only baseline stands until a human ratifies a spec amendment.
 
-If marshalling rejects a value type, the renderer logs the marshal error on
-the server, then—only while uncommitted—writes one complete standardized
-`internal_error`. A silent 500 or partial JSON is forbidden.
+If marshalling rejects a payload, the renderer logs the failure on the server,
+then—only while uncommitted—writes one complete standardized `internal_error`.
+No byte of the rejected payload reaches the client; a silent 500 or partial
+JSON is forbidden.
+
+`web.json` and `web.text` set `Content-Type` for you — `application/json` and
+`text/plain; charset=utf-8` respectively. `web.no_content` sets none. There is
+no way to set a response header yourself in Phase 1; that is later work.
 
 All error responses share the envelope:
 
@@ -309,8 +315,9 @@ All error responses share the envelope:
 {"error": {"code": "...", "message": "..."}}
 ```
 
-`field` is optional and is omitted when the error is not associated with a
-specific input field.
+`field` is omitted entirely when the error is not associated with a specific
+input field — it is never `null` or `""`. Only the two extractor errors
+(`invalid_path_parameter`, `invalid_query_parameter`) carry it.
 
 ## Testing
 
