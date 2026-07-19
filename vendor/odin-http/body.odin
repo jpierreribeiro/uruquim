@@ -125,8 +125,19 @@ _body_length :: proc(req: ^Request, max_length: int = -1, user_data: rawptr, cb:
 		return
 	}
 
+	// URUQUIM PATCH (WP9 D2): the length must be a WHOLE non-negative decimal.
+	// `strconv.parse_int` accepts a leading '-' and stops at the first
+	// non-digit, so `-1` parsed as -1 and reached `max_token_size`, tripping the
+	// scanner's `n >= 0` assertion and KILLING THE SERVER — a remote denial of
+	// service from one header. A comma list ("2, 2") likewise parsed as 2 and
+	// silently accepted an ambiguous framing. See VENDOR.md.
+	if !_is_plain_decimal(len) {
+		cb(user_data, "", .Bad_Read_Count)
+		return
+	}
+
 	ilen, lenok := strconv.parse_int(len, 10)
-	if !lenok {
+	if !lenok || ilen < 0 {
 		cb(user_data, "", .Bad_Read_Count)
 		return
 	}
@@ -244,7 +255,15 @@ _body_chunked :: proc(req: ^Request, max_length: int = -1, user_data: rawptr, cb
 				s.cb(s.user_data, "", err)
 				return
 			}
-			assert(len(token) == 0)
+			// URUQUIM PATCH (WP9 D3): a chunk that is not terminated by CRLF is
+			// MALFORMED INPUT, not a programming error. Upstream asserted here,
+			// so a hand-written chunked body without the trailing CRLF killed
+			// the server — a second remote denial of service. It is now
+			// rejected like any other malformed chunk. See VENDOR.md.
+			if len(token) != 0 {
+				s.cb(s.user_data, "", .Unknown)
+				return
+			}
 
 			scanner_scan(s.req._scanner, s, on_scan)
 		}
@@ -307,4 +326,20 @@ _body_chunked :: proc(req: ^Request, max_length: int = -1, user_data: rawptr, cb
 
 	s.req._scanner.split = scan_lines
 	scanner_scan(s.req._scanner, s, on_scan)
+}
+
+// URUQUIM PATCH (WP9 D2): a Content-Length must be one or more ASCII digits and
+// nothing else — no sign, no whitespace, no comma list, no trailing text. See
+// VENDOR.md.
+@(private)
+_is_plain_decimal :: proc(s: string) -> bool {
+	if len(s) == 0 {
+		return false
+	}
+	for i in 0 ..< len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }

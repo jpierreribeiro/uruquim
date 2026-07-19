@@ -13,6 +13,7 @@
 // back-edge is a compile cycle, ratified as probe C5).
 package web
 
+import transport "uruquim:web/internal/transport"
 import testing "uruquim:web/testing"
 
 // Recorded_Response is the read-only result of `web.test_request`.
@@ -45,9 +46,10 @@ Recorded_Response :: struct {
 // path registered under another method produces a 405. Only `web.destroy` and
 // the recorder stand between the caller and the framework's own dispatch.
 //
-// A handler that responds with nothing still yields the ZERO status and an
-// EMPTY body — the framework does not fabricate a 200 on a handler's behalf.
-// The public responders that would fill in a body are WP6.
+// The framework never fabricates a 200 on a handler's behalf. A handler that
+// responds with nothing is finalized by the DRIVER to a logged
+// `internal_error`/500 (WP8 D5), exactly as it is over a real socket — HTTP has
+// no zero status.
 //
 // The App's test-support state is created LAZILY here, on the first call, using
 // `context.allocator`. An application that never calls `test_request` allocates
@@ -56,7 +58,7 @@ Recorded_Response :: struct {
 // eliminates it too (planning/public-api-guardrails.md G-11). Every copy the
 // recorder makes is released by `web.destroy(&app)`.
 test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response {
-	transport := &a.private.test_transport
+	recorder := &a.private.test_transport
 
 	// Register the teardown on first use. This assignment is the ONLY reference
 	// to `testing.destroy` in the whole package, which is precisely the point:
@@ -69,22 +71,13 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 	// 1. The machinery constructs the neutral inbound request.
 	req := testing.build_request(method_token(method), path)
 
-	// 2. The facade converts the neutral request into a framework Context.
+	// 2-3. WP9 — the SHARED driver pipeline: neutral inbound -> Context ->
+	//      dispatch -> finalize a missing response. `serve` runs exactly this
+	//      same procedure, which is what makes semantic parity between the
+	//      in-memory transport and a real socket structural rather than a
+	//      claim (R-10).
 	ctx: Context
-	ctx.request = Request {
-		method = method_from_token(req.method),
-		path   = req.path,
-	}
-
-	// 3. The core-private dispatcher. It takes the App explicitly, because the
-	//    route table is owned by the App and the Context holds no back-pointer
-	//    to it.
-	dispatch(a, &ctx)
-
-	// 3b. WP8 — finalize a response the handler left uncommitted to a logged 500,
-	//     so the in-memory driver and the real transport agree (WP8 D5). Before
-	//     WP8 this yielded the zero status; both drivers now produce a 500.
-	driver_finalize(&ctx)
+	driver_run(a, &ctx, transport.Inbound{method = req.method, path = req.path})
 
 	// 4. The facade hands the internal Response to the recorder as neutral
 	//    values. The header conversion is transient (temp allocator); the
@@ -93,30 +86,22 @@ test_request :: proc(a: ^App, method: Method, path: string) -> Recorded_Response
 	neutral_headers := response_headers_neutral(res.headers)
 
 	status_int, body := testing.capture(
-		transport,
+		recorder,
 		context.allocator,
 		int(res.status),
 		res.body,
 		neutral_headers,
 	)
 
-	// 5. WP6 — this facade is the response DRIVER, so it releases the rendered
-	//    body once the recorder has copied it (ADR-014). The ORDER matters: the
-	//    recorder makes owned copies of status, body and headers above, and only
-	//    after that does the response's own allocation become releasable. Tearing
-	//    down first would hand the recorder a freed buffer to copy.
-	//
-	//    A borrowed body — a static envelope constant, or the fixed request-local
-	//    buffer the WP5 extractor errors use — is left alone; `response_destroy`
-	//    frees only what the Response actually owns.
-	response_destroy(res)
-
-	// 6. WP7 — the driver also frees the request-lifetime arena, after the
-	//    capture above (ADR-012/ADR-006). The recorder copies only the RESPONSE,
-	//    whose body is never an arena allocation, so this order is safe; it is a
-	//    no-op unless a handler actually bound a body. The WP8 adapter must do
-	//    the same.
-	request_arena_destroy(&ctx)
+	// 5. This facade is the response DRIVER, so it tears the request down once
+	//    the recorder has copied it (ADR-014). The ORDER matters: the recorder
+	//    makes owned copies of status, body and headers above, and only after
+	//    that does the response's own allocation become releasable — tearing
+	//    down first would hand the recorder a freed buffer to copy. A borrowed
+	//    body (a static envelope, or the fixed WP5 buffer) is left alone.
+	//    WP9 routes this through the same `driver_cleanup` the real transport
+	//    uses, so both drivers release in one ratified order.
+	driver_cleanup(&ctx)
 
 	// 7. The facade returns the public shape. `body` is the recorder's own copy,
 	//    valid until `web.destroy(&app)`, so it is unaffected by the teardowns

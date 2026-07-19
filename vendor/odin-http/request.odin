@@ -58,8 +58,12 @@ headers_validate :: proc(headers: ^Headers) -> bool {
 	// Content-Length.  Such a message might indicate an attempt to
 	// perform request smuggling (Section 9.5) or response splitting
 	// (Section 9.4) and ought to be handled as an error.
+	// URUQUIM PATCH (WP9 D2): CL+TE is REJECTED, not repaired. Deleting the
+	// Content-Length and proceeding leaves the two ends of a proxy chain
+	// disagreeing about where the body stops, which is precisely the request
+	// smuggling vector RFC 9112 6.1 calls an unrecoverable error. See VENDOR.md.
 	if headers_has_unsafe(headers^, "transfer-encoding") && headers_has_unsafe(headers^, "content-length") {
-		headers_delete_unsafe(headers, "content-length")
+		return false
 	}
 
 	return true

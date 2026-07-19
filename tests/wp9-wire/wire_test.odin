@@ -1,0 +1,289 @@
+// WP9 — RAW-WIRE CONFORMANCE. Real adapters only.
+//
+// This suite sends exact HTTP/1 bytes over a loopback socket and checks the
+// three properties that actually prevent request smuggling and connection
+// desynchronization:
+//
+//	the handler must not run on an ambiguous or partial request;
+//	the connection must be retired rather than left reusable;
+//	trailing bytes must never execute as a second request.
+//
+// It runs ONLY here, never against the in-memory transport: that transport has
+// no TCP parser, so pointing this corpus at it would be meaningless green (D1).
+//
+// The corpus itself is backend-agnostic DATA in
+// `tests/support/transport_conformance/corpus.odin`, so a future adapter can be
+// held to it without touching this file.
+package wp9_wire
+
+import "core:log"
+import "core:net"
+import "core:strings"
+import "core:sync"
+import "core:testing"
+import "core:thread"
+import "core:time"
+import tc "uruquim:tests/support/transport_conformance"
+import web "uruquim:web"
+import transport "uruquim:web/internal/transport"
+
+CANDIDATE_PORTS :: [?]int{51137, 51839, 52267, 52753}
+
+// Handler-execution counters. The corpus asserts on these: a rejected request
+// must leave them untouched.
+ping_hits: int
+echo_hits: int
+smuggled_hits: int
+
+Echo :: struct {
+	name: string `json:"name"`,
+}
+
+ping_handler :: proc(ctx: ^web.Context) {
+	ping_hits += 1
+	web.text(ctx, .OK, "pong")
+}
+
+echo_handler :: proc(ctx: ^web.Context) {
+	echo_hits += 1
+	input: Echo
+	if !web.body(ctx, &input) {
+		return
+	}
+	web.created(ctx, input)
+}
+
+// `/smuggled` exists so a smuggled request WOULD be observable if the adapter
+// executed one. It must stay at zero for the whole suite.
+smuggled_handler :: proc(ctx: ^web.Context) {
+	smuggled_hits += 1
+	web.text(ctx, .OK, "smuggled")
+}
+
+Server :: struct {
+	app:    web.App,
+	port:   int,
+	thread: ^thread.Thread,
+	ready:  sync.Sema,
+}
+
+g_server: ^Server
+
+serve_thread :: proc() {
+	s := g_server
+	sync.post(&s.ready)
+	web.serve(&s.app, s.port)
+}
+
+start_server :: proc(s: ^Server) -> bool {
+	g_server = s
+	for candidate in CANDIDATE_PORTS {
+		s.app = web.app()
+		web.get(&s.app, "/ping", ping_handler)
+		web.post(&s.app, "/ping", ping_handler)
+		web.post(&s.app, "/echo", echo_handler)
+		web.get(&s.app, "/smuggled", smuggled_handler)
+		s.port = candidate
+		s.thread = thread.create_and_start(serve_thread)
+		sync.wait(&s.ready)
+
+		if wait_until_accepting(candidate) {
+			return true
+		}
+
+		transport.request_stop()
+		thread.join(s.thread)
+		thread.destroy(s.thread)
+		s.thread = nil
+		web.destroy(&s.app)
+	}
+	return false
+}
+
+stop_server :: proc(s: ^Server) {
+	if s.thread == nil {
+		return
+	}
+	transport.request_stop()
+	thread.join(s.thread)
+	thread.destroy(s.thread)
+	s.thread = nil
+	web.destroy(&s.app)
+	g_server = nil
+}
+
+wait_until_accepting :: proc(port: int) -> bool {
+	endpoint := net.Endpoint {
+		address = net.IP4_Address{127, 0, 0, 1},
+		port    = port,
+	}
+	for _ in 0 ..< 200 {
+		sock, err := net.dial_tcp(endpoint)
+		if err == nil {
+			net.close(sock)
+			return true
+		}
+		time.sleep(5 * time.Millisecond)
+	}
+	return false
+}
+
+@(test)
+wp9_raw_wire_corpus :: proc(t: ^testing.T) {
+	filter: Log_Filter
+	context.logger = swallow_framework_log(&filter)
+
+	server: Server
+	if !start_server(&server) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+	// Cleanup runs even if an assertion fails: never leak a thread or a socket.
+	defer stop_server(&server)
+
+	for wire_case in tc.wire_corpus() {
+		run_wire_case(t, server.port, wire_case)
+	}
+
+	// Across the WHOLE corpus, not one smuggled request may have executed.
+	testing.expectf(
+		t,
+		smuggled_hits == 0,
+		"a smuggled request executed %d time(s); the adapter desynchronized",
+		smuggled_hits,
+	)
+}
+
+run_wire_case :: proc(t: ^testing.T, port: int, c: tc.Wire_Case) {
+	// Per-case progress. It is not decoration: when an adapter CRASHES or hangs
+	// on a malformed case, the last line printed names the case that did it —
+	// which is how the WP9 RED run identified the negative-Content-Length abort.
+	log.infof("wire case: %s", c.name)
+
+	ping_before := ping_hits
+	echo_before := echo_hits
+	smuggled_before := smuggled_hits
+
+	result := tc.wire_send(port, c.bytes)
+	defer tc.wire_result_destroy(&result)
+
+	testing.expectf(t, result.dialed, "%s: could not connect", c.name)
+	if !result.dialed {
+		return
+	}
+
+	// A timeout is NEVER an acceptable outcome — a rejected case must be
+	// answered or closed, not left hanging.
+	testing.expectf(t, !result.timed_out, "%s: the adapter hung instead of answering or closing", c.name)
+
+	handler_ran := (ping_hits - ping_before) + (echo_hits - echo_before) > 0
+	smuggled_ran := smuggled_hits - smuggled_before > 0
+
+	testing.expectf(
+		t,
+		!smuggled_ran,
+		"%s: a smuggled request EXECUTED — request smuggling is possible",
+		c.name,
+	)
+
+	switch c.outcome {
+	case .Ok:
+		if c.handler_must_run {
+			testing.expectf(t, handler_ran, "%s: the handler did not run", c.name)
+		}
+		if len(result.statuses) > 0 {
+			testing.expectf(
+				t,
+				tc.status_allowed(c.allowed_status, result.statuses[0]),
+				"%s: status %d is not allowed",
+				c.name,
+				result.statuses[0],
+			)
+		} else {
+			testing.expectf(t, false, "%s: expected a response, got none", c.name)
+		}
+		if c.expect_second_request {
+			testing.expectf(
+				t,
+				len(result.statuses) >= 2,
+				"%s: expected a second response on the same connection, got %d",
+				c.name,
+				len(result.statuses),
+			)
+		}
+
+	case .Rejected:
+		// The handler must NOT have run: no application code may observe an
+		// ambiguous or partial request.
+		testing.expectf(
+			t,
+			!handler_ran,
+			"%s: the handler RAN on a request that must be rejected",
+			c.name,
+		)
+
+		// A status is optional (a bare close is acceptable, WP9 D6) but when one
+		// is sent it must be an allowed one.
+		if len(result.statuses) > 0 {
+			testing.expectf(
+				t,
+				tc.status_allowed(c.allowed_status, result.statuses[0]),
+				"%s: rejected with status %d, which is not an allowed outcome",
+				c.name,
+				result.statuses[0],
+			)
+			// Exactly one response: a second would mean the adapter kept parsing.
+			testing.expectf(
+				t,
+				len(result.statuses) == 1,
+				"%s: %d responses on a rejected request; the connection was reused",
+				c.name,
+				len(result.statuses),
+			)
+		}
+
+		if c.connection_must_close {
+			testing.expectf(
+				t,
+				result.saw_eof,
+				"%s: the connection stayed open after a framing error",
+				c.name,
+			)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// A logger filter: rejected requests legitimately produce framework and backend
+// diagnostics, and `odin test` counts any Error record as a failure.
+// ---------------------------------------------------------------------------
+
+Log_Filter :: struct {
+	inner: log.Logger,
+}
+
+filter_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	filter := (^Log_Filter)(data)
+	if level == .Error {
+		return
+	}
+	if filter.inner.procedure != nil {
+		filter.inner.procedure(filter.inner.data, level, text, options, location)
+	}
+}
+
+swallow_framework_log :: proc(filter: ^Log_Filter) -> log.Logger {
+	filter.inner = context.logger
+	return log.Logger {
+		procedure = filter_proc,
+		data = rawptr(filter),
+		lowest_level = .Debug,
+		options = context.logger.options,
+	}
+}

@@ -18,6 +18,10 @@ Requestline_Error :: enum {
 
 Requestline :: struct {
 	method:  Method,
+	// URUQUIM PATCH (WP9 D7): the ORIGINAL method token, preserved so an
+	// unrecognized-but-valid method reaches the application unchanged rather
+	// than being discarded with a 501. See VENDOR.md.
+	method_raw: string,
 	target:  union {
 		string,
 		URL,
@@ -38,8 +42,16 @@ requestline_parse :: proc(s: string, allocator := context.temp_allocator) -> (li
 	if next_space == -1 { return line, .Not_Enough_Fields }
 
 	ok: bool
-	line.method, ok = method_parse(s[:next_space])
-	if !ok { return line, .Method_Not_Implemented }
+	raw_method := s[:next_space]
+	line.method, ok = method_parse(raw_method)
+	if !ok {
+		// URUQUIM PATCH (WP9 D7): a valid but unrecognized method is NOT a
+		// server-side 501. It is handed on as `.Unknown` with its original
+		// token, so the application's dispatcher applies its own 404/405
+		// policy. See VENDOR.md.
+		line.method = .Unknown
+	}
+	line.method_raw = strings.clone(raw_method, allocator)
 	s = s[next_space + 1:]
 
 	next_space = strings.index_byte(s, ' ')
@@ -126,9 +138,13 @@ Method :: enum {
 	Connect,
 	Options,
 	Trace,
+	// URUQUIM PATCH (WP9 D7): a valid but unrecognized method token must reach
+	// the application's dispatcher instead of being answered 501 by the server.
+	// See VENDOR.md.
+	Unknown,
 }
 
-_method_strings := [?]string{"GET", "POST", "DELETE", "PATCH", "PUT", "HEAD", "CONNECT", "OPTIONS", "TRACE"}
+_method_strings := [?]string{"GET", "POST", "DELETE", "PATCH", "PUT", "HEAD", "CONNECT", "OPTIONS", "TRACE", ""}
 
 method_string :: proc(m: Method) -> string #no_bounds_check {
 	if m < .Get || m > .Trace { return "" }
@@ -139,6 +155,9 @@ method_parse :: proc(m: string) -> (method: Method, ok: bool) #no_bounds_check {
 	// PERF: I assume this is faster than a map with this amount of items.
 
 	for r in Method {
+		// URUQUIM PATCH (WP9 D7): `Unknown` carries an empty string and must not
+		// be matched by lookup; it is assigned deliberately in requestline_parse.
+		if r == .Unknown { continue }
 		if _method_strings[r] == m {
 			return r, true
 		}
@@ -177,7 +196,11 @@ header_parse :: proc(headers: ^Headers, line: string, allocator := context.temp_
 	// field-values or a single Content-Length header field having an
 	// invalid value, then the message framing is invalid and the
 	// recipient MUST treat it as an unrecoverable error.
-	if tmp_key == "content-length" && has_cl && cl != value {
+	// URUQUIM PATCH (WP9 D2): ANY repeated Content-Length is rejected, even when
+	// the values are identical. Upstream allowed an exact duplicate through and
+	// then merged it into "2, 2" by the comma rule below, which is an ambiguous
+	// framing. Refusing is simpler and safer than normalizing. See VENDOR.md.
+	if tmp_key == "content-length" && has_cl {
 		return
 	}
 

@@ -466,6 +466,55 @@ timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp8-socket" ||
   fail "the WP8 real-socket contract did not pass within the timeout"
 
+# WP9 — TRANSPORT CONFORMANCE.
+#
+# Three layers, deliberately separate (WP9 D1):
+#
+#   the CONTRACT suite is everything above (WP1-WP8), on the in-memory
+#   transport, not duplicated per backend;
+#
+#   SEMANTIC conformance runs ONE shared matrix through TWO factories. The
+#   in-memory factory is an internal test, because it must drive the same
+#   private `driver_run`/`driver_cleanup` pipeline the real transport uses —
+#   that shared pipeline is what makes parity structural rather than a claim
+#   (R-10). The socket factory is an external consumer;
+#
+#   RAW-WIRE conformance runs ONLY against the real adapter, because the
+#   in-memory transport has no TCP parser and cannot prove framing safety.
+echo "--- WP9 semantic conformance: in-memory factory (throwaway package) ---"
+URUQUIM_WP9_TMP="$(mktemp -d -t uruquim-wp9-semantic-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP9_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP9_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp9-semantic-internal/*.odin "$URUQUIM_WP9_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP9_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp9-semantic-internal"
+rm -rf "$URUQUIM_WP9_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP9_TMP" || fail "the throwaway WP9 semantic package was not removed"
+echo "PASS: the semantic matrix passes on the in-memory transport"
+
+echo "--- WP9 semantic conformance: real HTTP factory (odin test) ---"
+timeout 180 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp9-semantic" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp9-semantic" ||
+  fail "the semantic matrix did not pass on the real HTTP transport within the timeout"
+
+# The raw-wire corpus binds a real port and sends deliberately malformed bytes.
+# It runs under an EXTERNAL timeout: a hang is a FAILURE, never a stall of the
+# gate — an adapter that waits forever on a malformed request is exactly the
+# defect this corpus exists to catch.
+echo "--- WP9 raw-wire conformance: framing corpus against the real adapter ---"
+timeout 240 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp9-wire" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp9-wire" ||
+  fail "the raw-wire framing corpus did not pass within the timeout"
+
+echo "--- WP9 public surface: the conformance harness adds no public symbol ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp9-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp9-public-surface"
+
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
 # actually asserted.

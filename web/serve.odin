@@ -59,22 +59,7 @@ serve_dispatch :: proc(
 	a := (^App)(user)
 
 	ctx: Context
-
-	if inbound.over_limit {
-		// The adapter rejected the body for length BEFORE the handler. The core
-		// authors the WP7 413 envelope; the handler never runs (WP8 D3).
-		error_commit_static(&ctx, STATUS_BODY_TOO_LARGE, ERROR_BODY_TOO_LARGE)
-	} else {
-		ctx.request = Request {
-			method  = method_from_token(inbound.method),
-			path    = inbound.path,
-			query   = inbound.query,
-			headers = header_view_from_pairs(inbound_header_pairs(inbound, allocator)),
-			body    = inbound.body,
-		}
-		dispatch(a, &ctx)
-		driver_finalize(&ctx)
-	}
+	driver_run(a, &ctx, inbound)
 
 	// Copy the committed response into transport-owned storage BEFORE tearing
 	// down the request, so the adapter never holds a view into freed memory.
@@ -86,8 +71,51 @@ serve_dispatch :: proc(
 		allocator,
 	)
 
+	driver_cleanup(&ctx)
+}
+
+// driver_run is the ONE request pipeline every response driver shares
+// (WP9). It fills `ctx` from a neutral inbound request, dispatches, and
+// guarantees a committed response:
+//
+//	neutral inbound -> Context -> dispatch -> finalize a missing response
+//
+// It deliberately stops BEFORE the response is copied out and before teardown,
+// because those two steps differ by driver: the real transport copies into
+// transport-owned storage, while `test_request` hands the response to the
+// recorder. Both then call `driver_cleanup`.
+//
+// Extracting it is what makes "the test transport cannot lie" structural rather
+// than aspirational (R-10): the in-memory and socket drivers now run the same
+// code from inbound to committed response, so a semantic divergence can only
+// come from the transport itself.
+@(private)
+driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
+	if inbound.over_limit {
+		// The adapter rejected the body for length BEFORE the handler. The core
+		// authors the WP7 413 envelope; the handler never runs (WP8 D3).
+		error_commit_static(ctx, STATUS_BODY_TOO_LARGE, ERROR_BODY_TOO_LARGE)
+		return
+	}
+
+	ctx.request = Request {
+		method  = method_from_token(inbound.method),
+		path    = inbound.path,
+		query   = inbound.query,
+		headers = header_view_from_pairs(inbound_header_pairs(inbound, context.temp_allocator)),
+		body    = inbound.body,
+	}
+	dispatch(a, ctx)
+	driver_finalize(ctx)
+}
+
+// driver_cleanup releases the request-local state, in the fixed order WP8 D4
+// ratified: the response first, then the request arena. Every driver calls it
+// AFTER it has captured or written the response.
+@(private)
+driver_cleanup :: proc(ctx: ^Context) {
 	response_destroy(&ctx.private.response)
-	request_arena_destroy(&ctx)
+	request_arena_destroy(ctx)
 }
 
 // inbound_header_pairs converts the neutral request headers into the core's
