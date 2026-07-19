@@ -47,11 +47,13 @@ import transport "uruquim:web/internal/transport"
 
 @(private = "file")
 Wp17_Sink :: struct {
-	order:        [128]u8,
-	n:            int,
-	handler_runs: int,
-	log_buf:      [1024]u8,
-	log_n:        int,
+	order:           [128]u8,
+	n:               int,
+	handler_runs:    int,
+	bounded_entries: int,
+	log_buf:         [1024]u8,
+	log_n:           int,
+	inner:           runtime.Logger,
 }
 
 @(private = "file")
@@ -86,10 +88,14 @@ wp17_run :: proc(a: ^App, ctx: ^Context, method: Method, path: string) {
 	)
 }
 
-// A logger that captures the framework diagnostic into the test's sink, so the
-// ADR-019 diagnostic text (property (c): it names the offending pattern) is an
-// assertion rather than a claim. The logger writes synchronously and retains
-// nothing, per the logging contract.
+// A logger that captures the framework's own `uruquim:` Error diagnostics into
+// the test's sink — so the ADR-019 diagnostic text (property (c): it names the
+// offending pattern) is an assertion rather than a claim, and so an EXPECTED
+// diagnostic is not recorded by the runner as a test failure. Every other
+// message is FORWARDED to the runner's logger: `testing.expect` reports
+// failures through `context.logger`, so a logger that swallowed everything
+// would make its test unable to fail — a mutation control caught exactly that
+// defect in an earlier draft of this file (the WP8 idiom, relearned).
 @(private = "file")
 wp17_capture_logger_proc :: proc(
 	data: rawptr,
@@ -99,11 +105,17 @@ wp17_capture_logger_proc :: proc(
 	location := #caller_location,
 ) {
 	sink := (^Wp17_Sink)(data)
-	for i in 0 ..< len(text) {
-		if sink.log_n < len(sink.log_buf) {
-			sink.log_buf[sink.log_n] = text[i]
-			sink.log_n += 1
+	if level == .Error && wp17_contains(text, "uruquim:") {
+		for i in 0 ..< len(text) {
+			if sink.log_n < len(sink.log_buf) {
+				sink.log_buf[sink.log_n] = text[i]
+				sink.log_n += 1
+			}
 		}
+		return
+	}
+	if sink.inner.procedure != nil {
+		sink.inner.procedure(sink.inner.data, level, text, options, location)
 	}
 }
 
@@ -118,6 +130,7 @@ wp17_logged :: proc(sink: ^Wp17_Sink) -> string {
 // expected diagnostic must be captured, not printed (the WP6/WP8 idiom).
 @(private = "file")
 wp17_capture_logger :: proc(sink: ^Wp17_Sink) -> runtime.Logger {
+	sink.inner = context.logger
 	return runtime.Logger {
 		procedure    = wp17_capture_logger_proc,
 		data         = sink,
@@ -207,6 +220,24 @@ wp17_mw_twice :: proc(ctx: ^Context) {
 @(private = "file")
 wp17_mw_neither :: proc(ctx: ^Context) {
 	wp17_mark("S")
+}
+
+// Bounds its own recursion: if the cursor ever stops advancing, this
+// middleware is re-entered instead of its downstream, and it refuses to recurse
+// past the bound — so the failure is a wrong entry count and a missing
+// handler, not a stack overflow that kills the runner. The WP17 mutation
+// control that deletes the cursor advance relies on exactly this test shape.
+@(private = "file")
+wp17_mw_bounded :: proc(ctx: ^Context) {
+	sink := (^Wp17_Sink)(context.user_ptr)
+	if sink == nil {
+		return
+	}
+	sink.bounded_entries += 1
+	if sink.bounded_entries > 4 {
+		return
+	}
+	next(ctx)
 }
 
 // Deliberately allocates at dispatch: the negative control that proves the
@@ -370,6 +401,25 @@ wp17_second_next_is_a_silent_noop_and_the_handler_runs_once :: proc(t: ^testing.
 	// the terminal handler sits INSIDE the cursor's index bound. The mutation
 	// control that moves it outside the bound must observe handler_runs == 2.
 	testing.expect_value(t, wp17_order(&sink), "T>B>H<B<T")
+	testing.expect_value(t, sink.handler_runs, 1)
+	testing.expect_value(t, res.status, Status.OK)
+}
+
+@(test)
+wp17_the_cursor_advances_exactly_once_per_step :: proc(t: ^testing.T) {
+	sink: Wp17_Sink
+	context.user_ptr = &sink
+
+	a := app()
+	defer destroy(&a)
+	use(&a, wp17_mw_bounded)
+	get(&a, "/x", wp17_h_text)
+
+	res := test_request(&a, .GET, "/x")
+
+	// A cursor that stopped advancing would re-enter the bounded middleware
+	// until its guard trips (entries == 5, handler never runs, driver 500).
+	testing.expect_value(t, sink.bounded_entries, 1)
 	testing.expect_value(t, sink.handler_runs, 1)
 	testing.expect_value(t, res.status, Status.OK)
 }
@@ -573,10 +623,7 @@ wp17_correctly_ordered_program_is_unaffected :: proc(t: ^testing.T) {
 wp17_poison_diagnostic_names_the_offending_pattern :: proc(t: ^testing.T) {
 	sink: Wp17_Sink
 	context.user_ptr = &sink
-	context.logger = {
-		procedure = wp17_capture_logger_proc,
-		data      = &sink,
-	}
+	context.logger = wp17_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
