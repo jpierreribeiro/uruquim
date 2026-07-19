@@ -419,6 +419,13 @@ test_request :: proc{ test_request_path, test_request_full }
 
 **Type: SPEC. Requires owner approval — this is the Phase-2 Spec Gate.**
 
+> **Status: DELIVERED, AWAITING OWNER APPROVAL.** The specification is
+> `planning/phase-2-spec.md`; the open decisions are ADR-022 … ADR-027 in
+> `planning/adrs.md`, all PROPOSED. On approval, `phase-2-spec.md` §9
+> supersedes §3 of this plan as the ledger of record — §9 also corrects an
+> arithmetic slip in §3's application-ledger range and folds in the WP14
+> outcome (test-support stayed at 2 by default parameter, ADR-021 as amended).
+
 Turns WP12/13/14 evidence into normative text. Decisions to close:
 
 * **ADR-005** moves from PROPOSED to ACCEPTED, recording the B1/B3 choice.
