@@ -79,7 +79,18 @@ o buffer já encerrado da requisição:
 - é criado de forma lazy no primeiro `test_request`;
 - permanece válido até `web.destroy(&app)`;
 - nenhum cleanup público adicional é introduzido;
-- aplicações que nunca usam `test_request` não alocam recorder.
+- aplicações que nunca usam `test_request` não alocam recorder;
+- **o teardown do recorder é registrado de forma lazy (emendado, planning/26):**
+  `web.destroy` NÃO referencia estaticamente a rotina de teardown da maquinaria.
+  O primeiro `test_request` registra o teardown num ponteiro de procedimento
+  privado do state do App; `web.destroy` só o invoca se registrado. Num binário
+  que nunca chama `test_request`, `test_request` é eliminado por dead-code e com
+  ele todo o teardown da maquinaria (`recorder_destroy` e as instanciações
+  `delete_*`). O custo de test-support em binários que não testam é ~zero
+  (apenas o campo de ponteiro no `App`), não os ~5 KiB do teardown estático.
+  Isto não muda a API pública nem o contrato acima (storage App-owned, lazy,
+  válido até destroy, liberado uma vez): fixa o mecanismo interno que torna o
+  custo eliminável e o eleva a requisito verificado por `nm` no gate (G-11).
 
 Ergonomia preservada:
 
