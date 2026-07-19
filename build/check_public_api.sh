@@ -5,6 +5,14 @@
 # Header_View, planning/18 Part I). The count is EXACT in both directions: a
 # missing symbol and an extra symbol are equally a failure.
 #
+# WP3 (planning/21 Decision 2, planning/15 G-11) adds a SECOND, separate ledger.
+# The application ledger stays frozen at exactly 32. The test-support facade in
+# `web/test_support.odin` — package `web`, exactly `Recorded_Response` and
+# `test_request` — is its own 2-symbol ledger. The exported union is exactly 34.
+# The machinery lives in `web/testing/` (package `testing`), imports neither
+# `uruquim:web` (cycle) nor `core:testing`, and exposes a locked, minimal set of
+# bridge declarations the facade calls across the package boundary.
+#
 # Verification-only: this script never modifies sources. It enforces the
 # anti-accretion guardrails of `planning/15-public-api-anti-accretion-guardrails.md`
 # against the shipped public package.
@@ -33,8 +41,13 @@ fail() {
 #
 # WP2 adds request.odin, response.odin and headers.odin (planning/05 §WP2).
 # It does NOT add a transport, a dispatch table, or a testing subpackage.
+#
+# WP3 adds exactly one top-level file, `test_support.odin` (the public
+# test-support facade), and exactly one subdirectory, `web/testing/` (the
+# machinery). No other top-level file and no other subdirectory is permitted.
 # ---------------------------------------------------------------------------
-URUQUIM_EXPECTED_FILES="app.odin
+URUQUIM_TEST_SUPPORT_FILE="test_support.odin"
+URUQUIM_EXPECTED_APP_FILES="app.odin
 context.odin
 errors.odin
 extract.odin
@@ -44,6 +57,8 @@ respond.odin
 response.odin
 routing.odin
 serve.odin"
+URUQUIM_EXPECTED_FILES="$URUQUIM_EXPECTED_APP_FILES
+$URUQUIM_TEST_SUPPORT_FILE"
 
 # ---------------------------------------------------------------------------
 # Expected Phase-1 exported surface after WP2 — 7 types + 25 procedures = 32.
@@ -89,7 +104,30 @@ serve
 text
 unauthorized"
 
+# ---------------------------------------------------------------------------
+# Expected test-support ledger after WP3 — exactly two public symbols, both in
+# package `web`, both declared in `web/test_support.odin` (planning/15 G-11,
+# planning/21 Decision 2). `Recorded_Response` exposes only `status` and `body`;
+# no `headers`, `committed`, allocator or transport field is public.
+# ---------------------------------------------------------------------------
+URUQUIM_EXPECTED_TESTSUPPORT_EXPORTS="Recorded_Response
+test_request"
+
+# The exact, locked set of declarations package `testing` (web/testing/) exports
+# so the facade can call it across the package boundary. These are UNSUPPORTED
+# INTERNALS, not a second public API: they are not part of the 34-symbol web
+# surface, are undocumented for direct consumption, and this list exists to stop
+# the bridge from growing silently (planning/23-wp3-gate.md; the WP3 prompt's
+# "bridge exports internos"). Growth here is a human-review item.
+URUQUIM_EXPECTED_BRIDGE_EXPORTS="Header
+Request
+Test_Transport
+build_request
+capture
+destroy"
+
 test -d "$URUQUIM_WEB" || fail "web/ does not exist; WP1 has not created the public package"
+URUQUIM_TESTING="$URUQUIM_WEB/testing"
 
 # Every structural scan below reads CODE, not comments: a comment that names a
 # forbidden construct in order to prohibit it must not be reported as that
@@ -136,12 +174,100 @@ test -d "$URUQUIM_INTERNAL_TESTS" ||
 grep -qx 'package web' "$URUQUIM_INTERNAL_TESTS"/*.odin ||
   fail "tests/wp2-internal/ does not declare 'package web'; it could not reach the package-private declarations it exists to test"
 
+# ---------------------------------------------------------------------------
+# 0b. WP3 test machinery (planning/21, planning/15 G-11)
+#
+# The facade `web/test_support.odin` and the machinery `web/testing/` carry the
+# same permanent bans as the rest of the shipped package, plus the ones the
+# one-way dependency rests on:
+#
+#   - no `*_test.odin` and no `core:testing` in `web/testing/` — the machinery
+#     ships in application binaries exactly like `web/`, so it must not drag the
+#     test runner in either;
+#   - `web/testing/` must NOT import `uruquim:web`: the back-edge is a compile
+#     cycle (ratified as probe C5), and forbidding the import statically catches
+#     it before the slower compile probe runs;
+#   - no `@(init)` anywhere in the test-support facade or the machinery: the
+#     App's test-support state is zero/lazy, created only on the first
+#     `test_request`, and an `@(init)` would run in every application binary
+#     (planning/15 G-11, "no test-support package init side effect").
+# ---------------------------------------------------------------------------
+test -d "$URUQUIM_TESTING" ||
+  fail "web/testing/ is missing; WP3 has not created the test machinery"
+
+if find "$URUQUIM_TESTING" -mindepth 1 -maxdepth 1 -name '*_test.odin' -print -quit | grep -q .; then
+  fail "web/testing/ contains a test file; internal machinery tests belong in tests/wp3-internal/ and are compiled by build/check.sh in a throwaway package"
+fi
+
+if grep -lE '"core:testing"' "$URUQUIM_TESTING"/*.odin; then
+  fail "web/testing/ imports core:testing; the machinery ships in every application binary and must not link the test runner"
+fi
+
+if grep -lE '"core:testing"' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE"; then
+  fail "web/$URUQUIM_TEST_SUPPORT_FILE imports core:testing; the facade ships in every application binary"
+fi
+
+if grep -nE '"uruquim:web"' "$URUQUIM_TESTING"/*.odin; then
+  fail "web/testing/ imports uruquim:web; the dependency is one-way and the back-edge is a compile cycle (planning/21 C5)"
+fi
+
+# `@(init)` (with or without a run-order argument) is banned in both the facade
+# and the machinery: it would run unconditionally in every binary.
+if grep -nE '^@\(init' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" "$URUQUIM_TESTING"/*.odin; then
+  fail "an @(init) proc appears in the test-support facade or machinery; the state must be zero/lazy (planning/15 G-11)"
+fi
+
+# The machinery may import `core:` freely; it may import nothing else. In
+# particular it names no backend and does not reach back into `uruquim:web`.
+URUQUIM_TESTING_IMPORTS="$(grep -hE '^import' "$URUQUIM_TESTING"/*.odin || true)"
+if test -n "$URUQUIM_TESTING_IMPORTS"; then
+  if grep -vE '"core:' <<<"$URUQUIM_TESTING_IMPORTS"; then
+    fail "web/testing/ imports a package outside the core collection"
+  fi
+fi
+
+# The test transport is IN-MEMORY: no socket, port, or network syscall on its
+# path. Neither the facade nor the machinery may import a networking package.
+# This makes "no sockets" a static property, not just a runtime observation.
+if grep -nE '"core:(net|nbio|sys)' \
+  "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" "$URUQUIM_TESTING"/*.odin; then
+  fail "the test-support facade or machinery imports a networking/syscall package; the test transport must be in-memory (planning/21, KB §Test transport)"
+fi
+
+# The machinery file set is exactly the three planning/21 files.
+URUQUIM_TESTING_ACTUAL_FILES="$(cd "$URUQUIM_TESTING" && find . -mindepth 1 -maxdepth 1 -type f -printf '%f\n' | LC_ALL=C sort)"
+URUQUIM_TESTING_EXPECTED_FILES="$(printf 'recorder.odin\nrequest_builder.odin\ntest_transport.odin\n')"
+if test "$URUQUIM_TESTING_ACTUAL_FILES" != "$URUQUIM_TESTING_EXPECTED_FILES"; then
+  echo "--- expected web/testing/ files ---" >&2
+  echo "$URUQUIM_TESTING_EXPECTED_FILES" >&2
+  echo "--- actual web/testing/ files ---" >&2
+  echo "$URUQUIM_TESTING_ACTUAL_FILES" >&2
+  fail "web/testing/ file set does not match the planning/21 machinery contract"
+fi
+if test -n "$(find "$URUQUIM_TESTING" -mindepth 1 -maxdepth 1 -type d -print -quit)"; then
+  fail "web/testing/ has subdirectories; the machinery is flat"
+fi
+# The declared package name is `web_testing`, NOT `testing`: a package named
+# `testing` collides with `core:testing` at link time (link-name prefixing
+# requires a unique package name across the binary). The import ALIAS in the
+# facade is still `testing`, so callers write `testing.*` and the C5 cyclic
+# diagnostic still names 'testing'.
+grep -qx 'package web_testing' "$URUQUIM_TESTING"/*.odin ||
+  fail "web/testing/ does not declare 'package web_testing'"
+
 # The export inventory below reads only files that are NOT `#+private`, which
 # is exactly what the compiler exports. This narrows the scan to match the
 # language; it never widens what may be exported.
+#
+# `test_support.odin` is held out of this list: it is the SEPARATE test-support
+# ledger (planning/15 G-11) and is scanned on its own below, so a symbol added
+# to the facade can never be laundered into the frozen application count.
 URUQUIM_PUBLIC_FILES=()
 while IFS= read -r URUQUIM_FILE; do
   if head -n 20 "$URUQUIM_FILE" | grep -qx '#+private'; then
+    continue
+  fi
+  if test "$(basename "$URUQUIM_FILE")" = "$URUQUIM_TEST_SUPPORT_FILE"; then
     continue
   fi
   URUQUIM_PUBLIC_FILES+=("$URUQUIM_FILE")
@@ -151,6 +277,13 @@ test "${#URUQUIM_PUBLIC_FILES[@]}" -gt 0 || fail "web/ contains no public produc
 
 uruquim_public_code_only() {
   sed -E 's://.*$::' "${URUQUIM_PUBLIC_FILES[@]}"
+}
+
+test -f "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE" ||
+  fail "web/$URUQUIM_TEST_SUPPORT_FILE is missing; WP3 has not created the test-support facade"
+
+uruquim_testsupport_code_only() {
+  sed -E 's://.*$::' "$URUQUIM_WEB/$URUQUIM_TEST_SUPPORT_FILE"
 }
 
 # ---------------------------------------------------------------------------
@@ -166,8 +299,14 @@ if test "$URUQUIM_ACTUAL_FILES" != "$URUQUIM_EXPECTED_FILES_SORTED"; then
   fail "web/ file set does not match the Phase-1 contract (WP1 seven + WP2 three + WP2 internal tests)"
 fi
 
-if test -n "$(find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -type d -print -quit)"; then
-  fail "web/ has subdirectories; Phase 1 through WP2 ships no internals, middleware, or testing package"
+# WP3 permits exactly ONE subdirectory, `web/testing/` (the machinery). It does
+# NOT relax the general ban: `web/internal/` and any other subdirectory remain
+# out of scope until their own work packages (planning/21 checker contract §1).
+URUQUIM_WEB_SUBDIRS="$(find "$URUQUIM_WEB" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)"
+if test "$URUQUIM_WEB_SUBDIRS" != "testing"; then
+  echo "--- web/ subdirectories (only 'testing' is allowed) ---" >&2
+  echo "$URUQUIM_WEB_SUBDIRS" >&2
+  fail "web/ has an unexpected subdirectory; WP3 permits only web/testing/"
 fi
 
 # ---------------------------------------------------------------------------
@@ -216,11 +355,106 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
+echo "public API contract: application ledger is exactly 32 Phase-1 symbols"
+
+# ---------------------------------------------------------------------------
+# 2b. Test-support ledger (planning/15 G-11, planning/21 Decision 2)
+#
+# `web/test_support.odin` exports EXACTLY `Recorded_Response` and
+# `test_request`, and nothing else. Held apart from the application count so the
+# two ledgers cannot grow against each other under one number.
+# ---------------------------------------------------------------------------
+URUQUIM_TESTSUPPORT_PUBLIC_CODE="$(uruquim_testsupport_code_only)"
+URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS="$(URUQUIM_WEB_PUBLIC_CODE="$URUQUIM_TESTSUPPORT_PUBLIC_CODE" uruquim_exported_names)"
+URUQUIM_TESTSUPPORT_EXPECTED_SORTED="$(LC_ALL=C sort -u <<<"$URUQUIM_EXPECTED_TESTSUPPORT_EXPORTS")"
+
+URUQUIM_TS_EXTRA="$(LC_ALL=C comm -13 <(echo "$URUQUIM_TESTSUPPORT_EXPECTED_SORTED") <(echo "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS"))"
+URUQUIM_TS_MISSING="$(LC_ALL=C comm -23 <(echo "$URUQUIM_TESTSUPPORT_EXPECTED_SORTED") <(echo "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS"))"
+if test -n "$URUQUIM_TS_EXTRA"; then
+  echo "--- unexpected test-support exports ---" >&2
+  echo "$URUQUIM_TS_EXTRA" >&2
+  fail "web/$URUQUIM_TEST_SUPPORT_FILE exports outside the 2-symbol test-support ledger (planning/15 G-11)"
+fi
+if test -n "$URUQUIM_TS_MISSING"; then
+  echo "--- missing test-support exports ---" >&2
+  echo "$URUQUIM_TS_MISSING" >&2
+  fail "web/$URUQUIM_TEST_SUPPORT_FILE is missing part of the test-support ledger"
+fi
+
+# `Recorded_Response` exposes exactly `status` and `body`, in that order, and NO
+# other field — no `headers`, `committed`, allocator or transport (planning/21).
+URUQUIM_RECORDED_FIELDS="$(awk '/^Recorded_Response :: struct \{/{f=1;next} /^\}/{f=0} f' \
+  <<<"$URUQUIM_TESTSUPPORT_PUBLIC_CODE" | sed -E 's/^[[:space:]]*([a-z_]+):.*/\1/' | grep -v '^$')"
+URUQUIM_RECORDED_EXPECTED="$(printf 'status\nbody\n')"
+if test "$URUQUIM_RECORDED_FIELDS" != "$URUQUIM_RECORDED_EXPECTED"; then
+  echo "--- expected Recorded_Response fields ---" >&2
+  echo "$URUQUIM_RECORDED_EXPECTED" >&2
+  echo "--- actual Recorded_Response fields ---" >&2
+  echo "$URUQUIM_RECORDED_FIELDS" >&2
+  fail "Recorded_Response must expose exactly status and body (planning/21 Decision 1)"
+fi
+
+# 2c. The exported union is EXACTLY 34 (32 application + 2 test-support), and the
+# two ledgers are disjoint.
+URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
+URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
+URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
+if test "$URUQUIM_APP_COUNT" -ne 32; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 32"
+fi
+if test "$URUQUIM_TS_COUNT" -ne 2; then
+  fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
+fi
+if test "$URUQUIM_UNION" -ne 34; then
+  fail "exported union is $URUQUIM_UNION, not 34 (the two ledgers must be disjoint)"
+fi
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 34"
+
+# ---------------------------------------------------------------------------
+# 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
+# facade can call it across the package boundary (planning/23-wp3-gate.md).
+#
+# These are unsupported internals, not a public API. The list is exact in both
+# directions so the bridge cannot grow silently: a new machinery export is a
+# human-review item, exactly like a new public symbol.
+# ---------------------------------------------------------------------------
+uruquim_testing_public_code() {
+  URUQUIM_TESTING_FILES=()
+  while IFS= read -r URUQUIM_TF; do
+    if head -n 20 "$URUQUIM_TF" | grep -qx '#+private'; then
+      continue
+    fi
+    URUQUIM_TESTING_FILES+=("$URUQUIM_TF")
+  done < <(find "$URUQUIM_TESTING" -mindepth 1 -maxdepth 1 -name '*.odin' -type f | LC_ALL=C sort)
+  sed -E 's://.*$::' "${URUQUIM_TESTING_FILES[@]}"
+}
+URUQUIM_BRIDGE_ACTUAL="$(URUQUIM_WEB_PUBLIC_CODE="$(uruquim_testing_public_code)" uruquim_exported_names)"
+URUQUIM_BRIDGE_EXPECTED_SORTED="$(LC_ALL=C sort -u <<<"$URUQUIM_EXPECTED_BRIDGE_EXPORTS")"
+URUQUIM_BRIDGE_EXTRA="$(LC_ALL=C comm -13 <(echo "$URUQUIM_BRIDGE_EXPECTED_SORTED") <(echo "$URUQUIM_BRIDGE_ACTUAL"))"
+URUQUIM_BRIDGE_MISSING="$(LC_ALL=C comm -23 <(echo "$URUQUIM_BRIDGE_EXPECTED_SORTED") <(echo "$URUQUIM_BRIDGE_ACTUAL"))"
+if test -n "$URUQUIM_BRIDGE_EXTRA"; then
+  echo "--- unexpected web/testing bridge exports ---" >&2
+  echo "$URUQUIM_BRIDGE_EXTRA" >&2
+  fail "web/testing/ exports a declaration outside the locked bridge set; minimize it or record the growth for human review (planning/23)"
+fi
+if test -n "$URUQUIM_BRIDGE_MISSING"; then
+  echo "--- missing web/testing bridge exports ---" >&2
+  echo "$URUQUIM_BRIDGE_MISSING" >&2
+  fail "web/testing/ no longer exports part of the locked bridge set the facade depends on"
+fi
+echo "public API contract: web/testing bridge exports match the locked minimal set"
+
 # ---------------------------------------------------------------------------
 # 3. Phase-2+ surface must not exist yet
+#
+# `test_request` is REMOVED from this list by WP3 (planning/21 §5): it is now a
+# ratified test-support symbol, pinned by ledger 2b above. `Response` stays
+# forbidden; `Recorded_Response` is a different exact name and is allowed.
+# The application ledger scanned here excludes test_support.odin, so the two
+# ratified test-support names never reach this loop.
 # ---------------------------------------------------------------------------
 for URUQUIM_FUTURE in use router group mount next state app_with_state \
-  header bearer_token serve_with serve_transport app_init test_request \
+  header bearer_token serve_with serve_transport app_init \
   redirect conflict bytes logger recovery request_id cors \
   Response Header Header_Pair Header_View_Internal Params Route_Info \
   Transport method_raw headers commit; do
@@ -244,6 +478,15 @@ for URUQUIM_BAG in 'map\[string\]any' 'map\[any\]any' '\bany\b' '\brawptr\b' \
   'Handler_Error' 'Handler_Outcome'; do
   if grep -nE "$URUQUIM_BAG" <<<"$URUQUIM_WEB_CODE"; then
     fail "web/ uses a forbidden construct matching /$URUQUIM_BAG/ (planning/15 G-03, ADR-011)"
+  fi
+done
+
+# The machinery is production code too: no `any`, no `rawptr`, no state bag, no
+# duplicated public web type. It moves data as neutral records only.
+URUQUIM_TESTING_CODE="$(sed -E 's://.*$::' "$URUQUIM_TESTING"/*.odin)"
+for URUQUIM_BAG in 'map\[string\]any' 'map\[any\]any' '\bany\b' '\brawptr\b'; do
+  if grep -nE "$URUQUIM_BAG" <<<"$URUQUIM_TESTING_CODE"; then
+    fail "web/testing/ uses a forbidden construct matching /$URUQUIM_BAG/ (WP3 prompt: no any/rawptr/state bag in machinery)"
   fi
 done
 
@@ -425,9 +668,10 @@ if grep -nE '^(header|headers|bearer_token|header_get) ::' <<<"$URUQUIM_WEB_PUBL
   fail "a header lookup entered the Phase-1 package; web.header is Phase 2"
 fi
 
-echo "public API contract: web/ file set matches the Phase-1 contract through WP2"
-echo "public API contract: exported surface is exactly $(wc -l <<<"$URUQUIM_ACTUAL_EXPORTS") Phase-1 symbols"
+echo "public API contract: web/ file set matches the Phase-1 contract through WP3"
+echo "public API contract: application ledger 32 + test-support ledger 2 = union 34"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
+echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"
 echo "public API contract: no later-phase symbol, dynamic storage, or backend leak"
 echo "PASS: Phase-1 public API anti-accretion contract (WP1 + WP2)"

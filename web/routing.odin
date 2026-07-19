@@ -39,3 +39,15 @@ patch :: proc(a: ^App, pattern: string, handler: Handler) {
 // WP1 STUB: the registration is discarded. See `get`.
 delete :: proc(a: ^App, pattern: string, handler: Handler) {
 }
+
+// dispatch is the core-private request dispatcher.
+//
+// WP3 STUB: it performs NO routing and produces NO automatic response — it
+// leaves `ctx` exactly as it received it, with the response uncommitted. It
+// exists so `web.test_request` has a real core dispatch call to drive; WP4
+// replaces this body with the route table, `:param` matching, the standardized
+// 404, and the minimal 405 with its `Allow` header. Deliberately NOT a fake
+// 200/echo: an uncommitted response is the honest WP3 result.
+@(private)
+dispatch :: proc(ctx: ^Context) {
+}

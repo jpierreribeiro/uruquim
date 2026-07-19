@@ -463,6 +463,24 @@ web.mount(&app, &api)
 ```odin
 res := web.test_request(&app, .GET, "/users/42")
 testing.expect(t, res.status == .OK)
+testing.expect_value(t, res.body, `{"id":42}`)
 ```
 
-In-memory, no sockets, no ports.
+`web.test_request(a: ^App, method: Method, path: string) -> Recorded_Response`
+drives one request through the framework IN-MEMORY: no socket, no port, no
+network syscall. `Recorded_Response` has exactly two fields:
+
+```odin
+res.status  // web.Status — copied by value
+res.body    // string — a view over a copy the App owns
+```
+
+Lifetime: every response `test_request` returns stays readable — alongside all
+the others from the same App — until `web.destroy(&app)`, which frees them. There
+is no per-response cleanup, and there is no public `headers` field.
+
+Routing is not wired until WP4, so today `test_request` returns the uncommitted
+response (a zero status and an empty body): it proves the in-memory round trip
+and the response lifetime, not routed behavior. Once WP4 lands, this same
+`web.test_request` returns real routed status and body. The machinery lives in
+`web/testing/` and is not meant to be imported directly.
