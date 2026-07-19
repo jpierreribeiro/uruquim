@@ -193,6 +193,42 @@ if ! diff -u "$URUQUIM_FREEZE_SIGNATURES" "$URUQUIM_FREEZE_ACTUAL_SIG" \
 fi
 
 # ---------------------------------------------------------------------------
+# 3b. An exported procedure group must not hide its members' signatures.
+# ---------------------------------------------------------------------------
+#
+# `odin doc` renders a group as `name :: proc{member_a, member_b}` — member
+# NAMES only. If those members are `@(private)` they never appear in the
+# `procedures` section, so the snapshot pins the group's name and nothing else.
+# Measured on the pinned compiler: rewriting a private member's parameters from
+# `(Method, string, string)` to `(Method, string, []u8, int)` left the snapshot
+# line byte-identical. The symbol stays publicly callable the whole time.
+#
+# That is strictly worse than the blind spot fixed above: this hides a public
+# symbol's entire calling contract rather than its existence. There is no way to
+# recover the signatures from `odin doc`, so the gate refuses the construct
+# instead of pretending to freeze it. A group whose members are all public is
+# fine — their signatures are pinned individually.
+while IFS=$'\t' read -r ledger kind decl; do
+  [ "$kind" = "group" ] || continue
+  gname="${decl%% ::*}"
+  members="${decl#*proc\{}"; members="${members%\}}"
+  IFS=',' read -ra gmembers <<<"$members"
+  for m in "${gmembers[@]}"; do
+    m="$(printf '%s' "$m" | tr -d '[:space:]')"
+    [ -n "$m" ] || continue
+    grep -qE "^(application|test-support)"$'\t'"proc"$'\t'"${m} ::" "$URUQUIM_FREEZE_ACTUAL_SIG" ||
+      fail "the exported procedure group '$gname' has a member '$m' that is not itself exported, so its signature cannot be frozen.
+  \`odin doc\` renders a group as member NAMES only, and private members appear
+  nowhere else, so the snapshot would pin '$gname' while its actual parameters
+  and results stayed free to change. Verified: rewriting a private member's
+  parameter types leaves the snapshot line byte-identical.
+  Either export the members so their signatures are pinned individually, or use
+  a single procedure with default parameters, which keeps the whole signature in
+  the frozen record."
+  done
+done <"$URUQUIM_FREEZE_ACTUAL_SIG"
+
+# ---------------------------------------------------------------------------
 # 4. The ledgers still add up: 32 application + 2 test-support = 34.
 # ---------------------------------------------------------------------------
 URUQUIM_FREEZE_APP_COUNT="$(grep -c '^application	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"

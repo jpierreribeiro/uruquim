@@ -597,9 +597,34 @@ the stop API at the same time.
   calling `web.body` can never reach its success path in memory — it always sees
   `invalid_json`. The framework's own tests reach it only by copying
   `web/*.odin` into a throwaway package, which a user cannot do.
-- **Decision.** Add the body/header-carrying variant through an explicit Odin
-  **procedure group**, with the explicit objective of **remaining ONE public
-  name**: `test_request`.
+- **AMENDED 2026-07-19 — the mechanism changes, the objective does not.** The
+  variant is added by a **default parameter on the existing procedure**, not by
+  a procedure group. One public name, ledger unchanged at 2, existing call sites
+  untouched — every goal below is still met, by a simpler means.
+
+  **Why the group was withdrawn.** Measured on the pinned compiler: `odin doc`
+  renders a group as `name :: proc{member_a, member_b}` — member names only.
+  With `@(private)` members those names resolve to nothing else in the doc
+  output, so the freeze snapshot pins the group's name and **not its signature**.
+  Rewriting a member's parameters from `(Method, string, string)` to
+  `(Method, string, []u8, int)` left the snapshot line byte-identical while the
+  symbol stayed publicly callable. A group over private members is therefore
+  unfreezable, and `build/check_phase1_freeze.sh` now rejects the construct
+  outright rather than pretending to freeze it.
+
+  A default parameter keeps the entire contract in the frozen record:
+
+  ```
+  test_request :: proc(a: ^App, method: Method, path: string,
+                       body: string = "") -> Recorded_Response
+  ```
+
+  It also introduces no new concept, and matches how `core` adds optional
+  behaviour everywhere (`allocator := context.allocator`, 726 occurrences).
+
+- **Superseded decision.** Add the body/header-carrying variant through an
+  explicit Odin **procedure group**, with the objective of **remaining ONE
+  public name**: `test_request`.
 - **Why a group and not a second name.** This is the whole reason the audit
   recommended a group. If the variants stay `@(private)` under the group, the
   **test-support ledger stays at 2** and only the signature snapshot changes.
