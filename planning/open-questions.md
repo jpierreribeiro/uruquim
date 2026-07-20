@@ -153,3 +153,20 @@ owning WP does not rediscover them.
 | OQ-26 | What is the supported-Odin-version policy, given the pin is a nightly and `core:os` is mid-redesign in that very build? | state a single pinned version as the contract and re-pin deliberately | Phase-2 documentation WP | yes |
 | OQ-27 | Does `ops/ci` stay, or move to `tools/`? | left open by the local cleanup plan | Phase-2 housekeeping WP | no |
 | OQ-28 | Which licence? | MIT matches the vendored dependency and is lowest-friction | corrective PR, before Phase 2 | **yes** — cannot be defaulted by an agent |
+
+
+## OQ — request-scoped typed state (opened 2026-07-20, tracked as ADR-028)
+
+Can a middleware hand a typed value to a handler? Today it cannot, and the
+canonical auth pattern pays for it — `current_user` revalidates the token on
+every call.
+
+**This is not ADR-004.** That ADR accepted `web.state` for APPLICATION state
+(one rawptr+typeid on the App, set before serving). Per-request values have a
+different lifetime and owner, and conflating the two produced a false promise
+in shipped documentation that had to be corrected under G-08.
+
+Research finding C-6 argues against a request-scoped mechanism, and ADR-028
+recommends ratifying the cost permanently. **Until ADR-028 is accepted, no
+document may state or imply that the revalidation cost will go away.**
+Owned by WP37 (`planning/phase-3-plan.md`).
