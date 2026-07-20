@@ -91,7 +91,7 @@ observe :: proc(a: ^App, observer: proc(event: Framework_Event)) {
 // path needs no `^App` — the back-pointer `Context_Internal` deliberately does
 // not have (WP4 D3) stays absent.
 @(private)
-framework_observe_request :: proc($T: typeid, ctx: ^Context, kind: Framework_Error) {
+framework_observe_request :: proc(payload_type: typeid, ctx: ^Context, kind: Framework_Error) {
 	if ctx.private.observer == nil {
 		return
 	}
@@ -101,7 +101,7 @@ framework_observe_request :: proc($T: typeid, ctx: ^Context, kind: Framework_Err
 			method = ctx.request.method,
 			route = ctx.private.route,
 			status = ctx.private.response.status,
-			payload_type = T,
+			payload_type = payload_type,
 		},
 	)
 }
@@ -114,9 +114,9 @@ framework_observe_request :: proc($T: typeid, ctx: ^Context, kind: Framework_Err
 // no request and no response, and inventing values would be worse than saying
 // nothing (§6.2 — a field the framework cannot supply is not populated).
 @(private)
-framework_observe_app :: proc($T: typeid, a: ^App, kind: Framework_Error) {
+framework_observe_app :: proc(payload_type: typeid, a: ^App, kind: Framework_Error) {
 	if a.private.observer == nil {
 		return
 	}
-	a.private.observer(Framework_Event{kind = kind, payload_type = T})
+	a.private.observer(Framework_Event{kind = kind, payload_type = payload_type})
 }
