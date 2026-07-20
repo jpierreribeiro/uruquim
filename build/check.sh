@@ -815,6 +815,15 @@ trap - EXIT
 test ! -d "$URUQUIM_WP27_TMP" || fail "the throwaway WP27 internal-test package was not removed"
 echo "PASS: WP27 allocation audit ran against the real sources; throwaway package removed"
 
+# WP33 — more than one path parameter. No public symbol: web.path and
+# web.path_int keep their signatures and stay the one canonical accessor. The
+# suite pins the bound AND what happens past it, because the capacity ledger
+# does not accept a bound without that half.
+echo "--- WP33 multi-parameter routes without a map (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp33-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp33-public-surface"
+
 # WP32b — automatic HEAD and OPTIONS.
 #
 # It runs as a THROWAWAY internal package for a reason that is itself the

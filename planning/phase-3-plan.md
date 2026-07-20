@@ -637,6 +637,30 @@ automatic OPTIONS *is* miss policy.
   the capacity silently turns those routes into 404s. Reversible only before
   anyone ships a two-param route.
 
+**WP33 DONE, 2026-07-20 — `tests/wp33-public-surface`.** The bound moved from
+one parameter to `ROUTE_PARAM_MAX` (8), using C-6's convergent design: a fixed
+inline array of views in request-local storage. Not a map, not an allocation,
+not a bag.
+
+**No public symbol.** `web.path` and `web.path_int` keep their exact signatures
+and stay the one canonical accessor (G-01). What changed is how many questions
+they can answer, not how you ask them. **G-03 held:** this added CAPACITY to an
+existing private slot, not a general-purpose keyed store — there is still no
+`ctx.params`.
+
+**The capacity ledger has its row**, with the behaviour when full stated as that
+ledger requires: a pattern declaring more than eight parameters is invalid at
+registration, never matches, and never contributes to an `Allow` value. The same
+fail-closed answer WP4 gave to a two-parameter pattern, at a higher bound.
+
+**`web.path` scans rather than hashes.** At eight slots a linear scan beats a
+hash, and a per-request map is exactly what C-6's design exists to avoid.
+
+**The radix tree made this cheap**, as WP29 predicted: a second parameter is
+another level, not another scan. Values are captured during the descent at each
+branch's own index, so a failed branch's write is overwritten by the next branch
+at the same depth before anything reads it.
+
 ### WP34 — Route identity accessor
 
 **Type: SPEC + IMPLEMENTATION. Requires owner approval — public surface.**

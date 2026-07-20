@@ -37,6 +37,13 @@
 #+private
 package web
 
+// WP33 NOTE. `Context_Internal.param` became a `Route_Params` — a fixed inline
+// array of captures plus a count — when the one-parameter bound was raised to
+// eight. These assertions therefore read `param.slot[0]` and `param.count`
+// instead of `param.value` and `param.found`. The PROPERTIES they pin are
+// unchanged; only the storage shape moved, which is exactly the freedom a
+// private slot exists to have.
+
 import json_oracle "core:encoding/json"
 import "core:mem"
 import "core:slice"
@@ -54,7 +61,11 @@ import "core:testing"
 
 @(private = "file")
 wp5_with_param :: proc(ctx: ^Context, name: string, value: string) {
-	ctx.private.param = Route_Param{name = name, value = value, found = true}
+	// WP33: one capture written into the first inline slot. The fixture used to
+	// assign a single `Route_Param`; the storage is now a fixed array plus a
+	// count, and `count` is what makes a slot visible to `web.path`.
+	ctx.private.param.slot[0] = Route_Param{name = name, value = value, found = true}
+	ctx.private.param.count = 1
 }
 
 @(private = "file")
@@ -143,7 +154,7 @@ wp5_path_returns_empty_for_a_different_name :: proc(t: ^testing.T) {
 wp5_path_on_a_static_route_has_no_parameter :: proc(t: ^testing.T) {
 	// A static match captures nothing (WP4), so every lookup is an absence.
 	ctx: Context
-	testing.expect(t, !ctx.private.param.found)
+	testing.expect(t, ctx.private.param.count == 0)
 
 	testing.expect_value(t, path(&ctx, "id"), "")
 	testing.expect_value(t, path(&ctx, ""), "")
@@ -154,7 +165,10 @@ wp5_path_ignores_a_capture_that_was_not_found :: proc(t: ^testing.T) {
 	// `found` is authoritative. A zero-value name/value pair must not be
 	// readable just because the name happens to compare equal.
 	ctx: Context
-	ctx.private.param = Route_Param{name = "id", value = "42", found = false}
+	// A capture that was never made: count stays 0, so `web.path` finds nothing
+	// — the WP33 equivalent of the old `found = false`.
+	ctx.private.param.slot[0] = Route_Param{name = "id", value = "42", found = false}
+	ctx.private.param.count = 0
 
 	testing.expect_value(t, path(&ctx, "id"), "")
 }
@@ -629,7 +643,8 @@ wp5_a_failure_commits_exactly_once :: proc(t: ^testing.T) {
 	// A SECOND failing extraction, with a different name, must change nothing.
 	// If the second call rewrote the shared request-local envelope buffer, the
 	// first response's body — which is a VIEW over it — would silently mutate.
-	ctx.private.param = Route_Param{name = "other", value = "nope", found = true}
+	ctx.private.param.slot[0] = Route_Param{name = "other", value = "nope", found = true}
+	ctx.private.param.count = 1
 	_, second_ok := query_int(&ctx, "page")
 	testing.expect(t, !second_ok, "a second failure still reports failure")
 

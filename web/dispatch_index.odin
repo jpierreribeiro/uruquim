@@ -216,12 +216,11 @@ index_walk :: proc(
 	path: string,
 	cursor: int,
 	method: Method,
-	param_name: string,
-	param_value: string,
+	captures: ^[ROUTE_PARAM_MAX]string,
+	captured: int,
 ) -> (
 	entry: int,
-	name: string,
-	value: string,
+	count: int,
 	found: bool,
 ) {
 	local := cursor
@@ -229,50 +228,78 @@ index_walk :: proc(
 	if !ok {
 		hit := a.private.route_index.nodes[node].by_method[method]
 		if hit != ROUTE_NODE_NONE {
-			return hit, param_name, param_value, true
+			return hit, captured, true
 		}
-		return ROUTE_NODE_NONE, "", "", false
+		return ROUTE_NODE_NONE, 0, false
 	}
 
 	if child, has := a.private.route_index.nodes[node].children[segment]; has {
-		if e, n, v, f := index_walk(a, child, path, local, method, param_name, param_value); f {
-			return e, n, v, true
+		if e, c, f := index_walk(a, child, path, local, method, captures, captured); f {
+			return e, c, true
 		}
 	}
 
 	pc := a.private.route_index.nodes[node].param_child
-	if pc != ROUTE_NODE_NONE && len(segment) > 0 {
-		// The parameter's NAME lives on the pattern and the VALUE on the path;
-		// neither is copied, and neither survives the request (G-05).
-		if e, n, v, f := index_walk(a, pc, path, local, method, param_name, segment); f {
-			_ = n
-			_ = v
-			return e, index_param_name(a, e), segment, true
+	if pc != ROUTE_NODE_NONE && len(segment) > 0 && captured < ROUTE_PARAM_MAX {
+		// WP33: the value is written at THIS branch's own index and the
+		// recursion continues with one more. A branch that fails leaves a stale
+		// write at that index, which is harmless — any later branch overwrites
+		// it before reading, because it writes at the same depth.
+		captures[captured] = segment
+		if e, c, f := index_walk(a, pc, path, local, method, captures, captured + 1); f {
+			return e, c, true
 		}
 	}
 
-	return ROUTE_NODE_NONE, "", "", false
+	return ROUTE_NODE_NONE, 0, false
 }
 
-// index_param_name recovers the parameter's declared name from the winning
-// entry's own pattern.
+// index_params_fill pairs the captured values with the winning pattern's
+// declared names.
 //
-// Storing it on the node would duplicate a string the pattern already owns, and
-// two copies of a name is two chances for them to disagree. The pattern is
-// walked once, only on a parametric hit, and the result is a view into it.
+// The array is called `captures` and not `values`: G-03's static check bans a
+// declaration by that name anywhere in `web/`, because `values` is one of the
+// classic extension-bag names it exists to keep out. This is a fixed inline
+// array of path captures and not a bag — and the name should say so rather than
+// resemble the thing the guardrail forbids.
+//
+// The names are read from the pattern rather than stored on the nodes, for the
+// reason WP29 gave for the single-parameter case: the pattern already owns
+// them, and two copies of a name is two chances for them to disagree. The
+// pattern is walked once, only on a parametric hit.
+//
+// Both halves are VIEWS — the name into the App-owned pattern, the value into
+// the request path — and neither survives the request (G-05).
 @(private)
-index_param_name :: proc(a: ^App, entry_index: int) -> string {
+index_params_fill :: proc(
+	a: ^App,
+	entry_index: int,
+	captures: ^[ROUTE_PARAM_MAX]string,
+	count: int,
+	out: ^Route_Params,
+) {
+	if count == 0 {
+		return
+	}
 	pattern := a.private.routes[entry_index].pattern
 	cursor := 1
-	for {
+	filled := 0
+	for filled < count {
 		segment, ok := segment_next(pattern, &cursor)
 		if !ok {
-			return ""
+			break
 		}
-		if len(segment) > 0 && segment[0] == ':' {
-			return segment[1:]
+		if len(segment) == 0 || segment[0] != ':' {
+			continue
 		}
+		out.slot[filled] = Route_Param {
+			name  = segment[1:],
+			value = captures[filled],
+			found = true,
+		}
+		filled += 1
 	}
+	out.count = filled
 }
 
 // index_collect unions the methods registered at every node a path can reach.

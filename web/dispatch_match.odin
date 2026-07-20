@@ -92,10 +92,13 @@ pattern_classify :: proc(pattern: string) -> (has_param: bool, valid: bool) {
 		param_count += 1
 	}
 
-	if param_count > 1 {
+	// WP33: up to ROUTE_PARAM_MAX parameters, not one. Beyond that the pattern
+	// is invalid and never matches — the same fail-closed answer Phase 1 gave
+	// to a two-param pattern, moved to a higher bound rather than removed.
+	if param_count > ROUTE_PARAM_MAX {
 		return false, false
 	}
-	return param_count == 1, true
+	return param_count >= 1, true
 }
 
 // route_match matches one pattern against one request path.
@@ -189,7 +192,7 @@ route_lookup :: proc(
 	path: string,
 ) -> (
 	entry: ^Route_Entry,
-	param: Route_Param,
+	param: Route_Params,
 	found: bool,
 ) {
 	// WP29: the two-pass scan became a radix walk. The PRECEDENCE RULE IS
@@ -199,20 +202,21 @@ route_lookup :: proc(
 	// order. The observable contract is identical; only the representation
 	// moved, which is exactly the freedom the old comment here reserved.
 	if len(a.private.route_index.nodes) == 0 {
-		return nil, Route_Param{}, false
+		return nil, Route_Params{}, false
 	}
 	if len(path) == 0 || path[0] != '/' {
-		return nil, Route_Param{}, false
+		return nil, Route_Params{}, false
 	}
 
-	idx, name, value, ok := index_walk(a, 0, path, 1, method, "", "")
+	captures: [ROUTE_PARAM_MAX]string
+	idx, count, ok := index_walk(a, 0, path, 1, method, &captures, 0)
 	if !ok {
-		return nil, Route_Param{}, false
+		return nil, Route_Params{}, false
 	}
-	if value == "" {
-		return &a.private.routes[idx], Route_Param{}, true
-	}
-	return &a.private.routes[idx], Route_Param{name = name, value = value, found = true}, true
+
+	captured: Route_Params
+	index_params_fill(a, idx, &captures, count, &captured)
+	return &a.private.routes[idx], captured, true
 }
 
 // allow_value builds the `Allow` header value for a path, into `buffer`.
