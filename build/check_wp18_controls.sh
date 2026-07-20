@@ -88,7 +88,9 @@ NAMES="web.wp18_mounted_route_is_reachable_at_prefix_plus_pattern"
 T="$(internal_tree swallow)"
 assert_green_baseline "$T" "$NAMES" "1: prefix swallow"
 H="$(md5sum "$T/router.odin" | cut -d' ' -f1)"
-sed -i 's/owned := strings.concatenate({prefix, entry.pattern}, a.private.routes.allocator)/owned := strings.concatenate({prefix, entry.pattern[1:]}, a.private.routes.allocator)/' \
+# Anchored on the ARGUMENT line alone, so a future reflow of the call does not
+# turn this control into a BROKEN PROBE (it already did once, at Amendment 1).
+sed -i 's/^\t\t\t{prefix, entry.pattern},$/\t\t\t{prefix, entry.pattern[1:]},/' \
   "$T/router.odin"
 assert_mutated "prefix swallow" "$T/router.odin" "$H"
 must_go_red "$T" "$NAMES" "1: prefix swallow -> verbatim-concat test"
@@ -100,8 +102,20 @@ NAMES="web.wp18_nested_routers_outer_use_before_inner_use_before_handler"
 T="$(internal_tree dropped)"
 assert_green_baseline "$T" "$NAMES" "2: router middleware dropped"
 H="$(md5sum "$T/router.odin" | cut -d' ' -f1)"
-sed -z -i 's/\tfor step in r.private.mw_pool\[entry.chain_start:entry.chain_start + entry.chain_len\] {\n\t\tappend(&a.private.mw_pool, step)\n\t}/\tappend(\&a.private.mw_pool, r.private.mw_pool[entry.chain_start + entry.chain_len - 1])/' \
-  "$T/router.odin"
+python3 - "$T/router.odin" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = """	for step in r.private.mw_pool[entry.chain_start:entry.chain_start + entry.chain_len] {
+		appended, err := append(&a.private.mw_pool, step)
+		if err != nil || appended != 1 {
+			return 0, 0, false
+		}
+	}"""
+new = """	append(&a.private.mw_pool, r.private.mw_pool[entry.chain_start + entry.chain_len - 1])"""
+assert old in s, "pattern not found"
+open(p, 'w').write(s.replace(old, new, 1))
+PYEOF
 assert_mutated "router middleware dropped" "$T/router.odin" "$H"
 must_go_red "$T" "$NAMES" "2: router middleware dropped -> nested-order test"
 
@@ -140,25 +154,63 @@ python3 - "$T/router.odin" <<'PYEOF'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = """	start = len(a.private.mw_pool)
-	for middleware in a.private.mw_globals {
-		append(&a.private.mw_pool, middleware)
+# WP18 Amendment 1 repaired this probe: `mount_chain_flatten` now checks every
+# append, so the old anchor no longer exists. The mutation is the same one --
+# app globals appended AFTER the router's steps -- expressed against the
+# current body.
+old = """	for middleware in a.private.mw_globals {
+		appended, err := append(&a.private.mw_pool, middleware)
+		if err != nil || appended != 1 {
+			return 0, 0, false
+		}
 	}
 	for step in r.private.mw_pool[entry.chain_start:entry.chain_start + entry.chain_len] {
-		append(&a.private.mw_pool, step)
+		appended, err := append(&a.private.mw_pool, step)
+		if err != nil || appended != 1 {
+			return 0, 0, false
+		}
 	}"""
-new = """	start = len(a.private.mw_pool)
-	for step in r.private.mw_pool[entry.chain_start:entry.chain_start + entry.chain_len - 1] {
-		append(&a.private.mw_pool, step)
+new = """	for step in r.private.mw_pool[entry.chain_start:entry.chain_start + entry.chain_len] {
+		appended, err := append(&a.private.mw_pool, step)
+		if err != nil || appended != 1 {
+			return 0, 0, false
+		}
 	}
 	for middleware in a.private.mw_globals {
-		append(&a.private.mw_pool, middleware)
-	}
-	append(&a.private.mw_pool, r.private.mw_pool[entry.chain_start + entry.chain_len - 1])"""
+		appended, err := append(&a.private.mw_pool, middleware)
+		if err != nil || appended != 1 {
+			return 0, 0, false
+		}
+	}"""
 assert old in s, "pattern not found"
 open(p, 'w').write(s.replace(old, new))
 PYEOF
 assert_mutated "composition order reversed" "$T/router.odin" "$H"
 must_go_red "$T" "$NAMES" "5: composition order reversed -> order test"
 
-echo "PASS: all five WP18 mutation controls behaved as required"
+# --- 6. the append result discarded again (WP18 Amendment 1) ----------------
+# The regression this refuses is the original defect: Odin's `append` returns
+# `num_appended = 0` instead of panicking when it cannot allocate, so dropping
+# the check makes routes vanish in silence while the App still reports healthy
+# -- a route the developer wrote answering 404 as though it never existed.
+NAMES="web.wp18_mount_that_cannot_allocate_rejects_the_application,web.wp18_a_mount_that_cannot_allocate_never_serves"
+T="$(internal_tree unchecked_append)"
+assert_green_baseline "$T" "$NAMES" "6: append result discarded"
+H="$(md5sum "$T/router.odin" | cut -d' ' -f1)"
+python3 - "$T/router.odin" <<'PYEOF'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = """		if append_err != nil || appended != 1 {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}"""
+new = """		_ = append_err
+		_ = appended"""
+assert old in s, "pattern not found"
+open(p, 'w').write(s.replace(old, new, 1))
+PYEOF
+assert_mutated "append result discarded" "$T/router.odin" "$H"
+must_go_red "$T" "$NAMES" "6: append result discarded -> the fail-closed mount tests"
+
+echo "PASS: all six WP18 mutation controls behaved as required"

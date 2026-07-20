@@ -710,3 +710,142 @@ wp18_an_unmounted_router_leaks_nothing :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(track.allocation_map), 0)
 	testing.expect_value(t, len(track.bad_free_array), 0)
 }
+
+// ---------------------------------------------------------------------------
+// WP18 Amendment 1 — `mount` is FAIL-CLOSED when registration cannot allocate.
+//
+// The defect these tests exist to refuse: `mount` publishes routes with
+// `strings.concatenate` and `append`, and Odin's `append` does NOT panic when
+// it cannot allocate — `_append_elem` returns `num_appended = 0` and reports
+// the failure through `#optional_allocator_error`, which a call site is free
+// to discard. Discarding it means routes vanish with no diagnostic while the
+// App still reports healthy: `serve` binds, and every lost route answers 404.
+//
+// That is fail-OPEN, in the one place ADR-019 exists to make fail-closed. It
+// was measured before this test was written: with a fixed `mem.Arena` in
+// `context.allocator`, 8 of 12 routes mounted and `poisoned` stayed false.
+//
+// The fixture is an arena small enough to run out mid-publication. It is a
+// legal, documented Odin practice — nothing in the framework is patched to
+// provoke this — and Phase 3's arena work (P3-10) makes bounded allocators
+// MORE common, not less.
+// ---------------------------------------------------------------------------
+
+@(private = "file")
+WP18_MOUNT_PATTERNS :: [?]string {
+	"/a1", "/a2", "/a3", "/a4", "/a5", "/a6",
+	"/a7", "/a8", "/a9", "/a10", "/a11", "/a12",
+}
+
+// wp18_mount_under_arena mounts the full pattern set through an arena of
+// `size` bytes and reports what the App ended up with.
+@(private = "file")
+wp18_mount_under_arena :: proc(
+	size: int,
+) -> (
+	mounted: int,
+	poisoned: bool,
+	closed: bool,
+) {
+	backing := make([]u8, size)
+	defer delete_slice(backing)
+	arena: mem.Arena
+	mem.arena_init(&arena, backing)
+
+	a := app()
+	r := router()
+	for pattern in WP18_MOUNT_PATTERNS {
+		get(&r, pattern, wp18_h)
+	}
+
+	// Only the MOUNT runs under the bounded arena; building the router used
+	// the ordinary allocator, so the failure is isolated to publication.
+	previous := context.allocator
+	context.allocator = mem.arena_allocator(&arena)
+	mount(&a, "/api", &r)
+	context.allocator = previous
+
+	// The Router's own storage came from the ORDINARY allocator, so it is
+	// released normally. The App's storage came from the arena and is
+	// reclaimed wholesale when `backing` goes — destroying it here would hand
+	// arena pointers to the ordinary allocator.
+	destroy(&r)
+
+	return len(a.private.routes), a.private.poisoned, r.private.closed
+}
+
+@(test)
+wp18_mount_that_cannot_allocate_rejects_the_application :: proc(t: ^testing.T) {
+	sink: Wp18_Sink
+	context.logger = wp18_capture_logger(&sink)
+
+	// 1024 B was measured to publish 8 of 12 routes before running out — the
+	// exact partial state the amendment describes.
+	mounted, poisoned, _ := wp18_mount_under_arena(1024)
+
+	testing.expect(
+		t,
+		mounted < len(WP18_MOUNT_PATTERNS),
+		"precondition: the arena must be too small to publish every route",
+	)
+	testing.expect(
+		t,
+		poisoned,
+		"a mount that could not publish every route must reject the application fail-closed (ADR-019), never leave it healthy with routes missing",
+	)
+	testing.expect(
+		t,
+		sink.log_n > 0,
+		"the rejection must be diagnosed, not silent",
+	)
+}
+
+@(test)
+wp18_a_mount_that_cannot_allocate_never_serves :: proc(t: ^testing.T) {
+	sink: Wp18_Sink
+	context.logger = wp18_capture_logger(&sink)
+
+	backing := make([]u8, 1024)
+	defer delete_slice(backing)
+	arena: mem.Arena
+	mem.arena_init(&arena, backing)
+
+	a := app()
+	r := router()
+	for pattern in WP18_MOUNT_PATTERNS {
+		get(&r, pattern, wp18_h)
+	}
+
+	previous := context.allocator
+	context.allocator = mem.arena_allocator(&arena)
+	mount(&a, "/api", &r)
+	context.allocator = previous
+	defer destroy(&r)
+
+	// The consequence that matters, asked of a route that was actually LOST.
+	// `/api/a12` is past the point the arena ran out, so today it answers 404
+	// — indistinguishable from a route the developer never wrote. A poisoned
+	// App answers 500 on EVERY path through the dispatch-path guard, which is
+	// what makes the silent 404 impossible.
+	ctx: Context
+	defer driver_cleanup(&ctx)
+	wp18_run(&a, &ctx, .GET, "/api/a12")
+
+	testing.expect_value(t, ctx.private.response.status, Status.Internal_Server_Error)
+}
+
+@(test)
+wp18_a_mount_with_room_to_spare_is_unaffected :: proc(t: ^testing.T) {
+	sink: Wp18_Sink
+	context.logger = wp18_capture_logger(&sink)
+
+	// The positive control. Without it, a `mount` that poisoned
+	// unconditionally would pass both tests above while breaking every
+	// application — the probe must fail for the RIGHT reason.
+	mounted, poisoned, closed := wp18_mount_under_arena(16 * 1024)
+
+	testing.expect_value(t, mounted, len(WP18_MOUNT_PATTERNS))
+	testing.expect(t, !poisoned, "a mount that fully succeeded must NOT reject the application")
+	testing.expect(t, closed, "a successful mount still closes the Router")
+	testing.expect_value(t, sink.log_n, 0)
+}

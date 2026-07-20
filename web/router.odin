@@ -106,11 +106,29 @@ mount :: proc(a: ^App, prefix: string, r: ^Router) {
 		return
 	}
 	if a.private.routes == nil {
-		a.private.routes = make([dynamic]Route_Entry, context.allocator)
+		routes, alloc_err := make([dynamic]Route_Entry, context.allocator)
+		if alloc_err != nil {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}
+		a.private.routes = routes
 	}
 
 	for entry in r.private.routes {
-		owned := strings.concatenate({prefix, entry.pattern}, a.private.routes.allocator)
+		// EVERY allocation below is checked. Odin's `append` returns
+		// `num_appended = 0` rather than panicking when it cannot allocate,
+		// and `strings.concatenate` reports the same way — so discarding
+		// these results is precisely how routes disappear in silence while
+		// the application still reports healthy (WP18 Amendment 1). A partial
+		// mount is rejected fail-closed, exactly like a mis-ordered one.
+		owned, concat_err := strings.concatenate(
+			{prefix, entry.pattern},
+			a.private.routes.allocator,
+		)
+		if concat_err != nil {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}
 
 		// Combined validity: the router-level classification AND the
 		// classification of the concatenated result. An entry that was invalid
@@ -120,9 +138,13 @@ mount :: proc(a: ^App, prefix: string, r: ^Router) {
 		has_param, valid := pattern_classify(owned)
 		valid = valid && entry.valid
 
-		chain_start, chain_len := mount_chain_flatten(a, r, entry)
+		chain_start, chain_len, chain_ok := mount_chain_flatten(a, r, entry)
+		if !chain_ok {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}
 
-		append(
+		appended, append_err := append(
 			&a.private.routes,
 			Route_Entry {
 				method = entry.method,
@@ -134,6 +156,10 @@ mount :: proc(a: ^App, prefix: string, r: ^Router) {
 				chain_len = chain_len,
 			},
 		)
+		if append_err != nil || appended != 1 {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}
 	}
 }
 
@@ -158,20 +184,43 @@ mount_prefix_valid :: proc(prefix: string) -> bool {
 // already spells `router globals ++ … ++ handler` (flattened at the router's
 // own registration, or by an inner mount), so prepending the application's
 // globals yields exactly the §2.1 order: app, outermost router, …, handler.
+// It returns `ok = false` when the pool could not grow. The caller rejects the
+// application: a chain that is missing a step would run a route with fewer
+// middleware than it was registered with, which is a SECURITY failure — an
+// auth guard silently absent from a protected route — and is exactly why this
+// cannot be allowed to fail quietly (WP18 Amendment 1).
 @(private)
-mount_chain_flatten :: proc(a: ^App, r: ^Router, entry: Route_Entry) -> (start: int, length: int) {
+mount_chain_flatten :: proc(
+	a: ^App,
+	r: ^Router,
+	entry: Route_Entry,
+) -> (
+	start: int,
+	length: int,
+	ok: bool,
+) {
 	if a.private.mw_pool == nil {
-		a.private.mw_pool = make([dynamic]Handler, context.allocator)
+		pool, alloc_err := make([dynamic]Handler, context.allocator)
+		if alloc_err != nil {
+			return 0, 0, false
+		}
+		a.private.mw_pool = pool
 	}
 	start = len(a.private.mw_pool)
 	for middleware in a.private.mw_globals {
-		append(&a.private.mw_pool, middleware)
+		appended, err := append(&a.private.mw_pool, middleware)
+		if err != nil || appended != 1 {
+			return 0, 0, false
+		}
 	}
 	for step in r.private.mw_pool[entry.chain_start:entry.chain_start + entry.chain_len] {
-		append(&a.private.mw_pool, step)
+		appended, err := append(&a.private.mw_pool, step)
+		if err != nil || appended != 1 {
+			return 0, 0, false
+		}
 	}
 	length = len(a.private.mw_pool) - start
-	return
+	return start, length, true
 }
 
 // mount_poison rejects the application with a static diagnostic — the WP17
