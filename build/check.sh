@@ -606,6 +606,32 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp18-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp18-public-surface"
 
+# WP19 — request header lookup: `header`, `bearer_token`, the ADR-027 overlay
+# read path, and the `test_request` headers parameter.
+#
+# The overlay slot, Header_Pair and the facade's line splitter are
+# package-private, so the internal tests run in a THROWAWAY package exactly
+# like WP2-WP18.
+echo "--- WP19 header lookup, internal behavior (throwaway package) ---"
+URUQUIM_WP19_TMP="$(mktemp -d -t uruquim-wp19-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP19_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP19_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp19-internal/*.odin "$URUQUIM_WP19_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP19_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp19-internal"
+rm -rf "$URUQUIM_WP19_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP19_TMP" || fail "the throwaway WP19 internal-test package was not removed"
+echo "PASS: WP19 internal tests ran against the real sources; throwaway package removed"
+
+# WP19 public surface — an EXTERNAL consumer reading headers through the
+# ratified surface; the canonical bearer-auth middleware pattern end to end.
+echo "--- WP19 public surface contract: header, bearer_token, headers param (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp19-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp19-public-surface"
+
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
 # actually asserted.
