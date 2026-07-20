@@ -209,6 +209,28 @@ see §4.
   speaks HTTP/1.0, the strict server rejected it, and the tool reported 100%
   non-2xx **as throughput**. A load generator that gets rejected still reports
   a number, and the number looks like a number.
+* **The status distribution is DATA, not hygiene.** Every run reports its
+  status counts next to its latencies, and a run containing any status the
+  scenario did not predict is **discarded as invalid, never averaged in**. The
+  ApacheBench failure was not caught by reading the throughput number — the
+  number looked fine; it was caught by reading the error column. Make the
+  error column impossible to omit.
+* **The harness is TWO instruments, and they are named separately.** An
+  **in-process dispatch benchmark** drives the in-memory transport and owns
+  every allocation count — C-5's zero-allocation claim is measured here, where
+  the allocator can be instrumented and the run is deterministic. A
+  **socket-level load run** owns latency and throughput distributions
+  (FINDING-A). Neither can produce the other's numbers: a load generator
+  cannot count allocations, and an in-process loop cannot see the kernel. The
+  load generator itself is named in the methodology, and its HTTP/1.1 and
+  keep-alive conformance is asserted before any of its numbers count.
+* **Baselines are keyed to the hardware that produced them.** The recorded
+  baseline states its machine identity — CPU model, core count, frequency
+  governor, OS — and a regression comparison is valid only against a baseline
+  from the same identity. On a machine with no baseline — a new CI runner, a
+  different laptop — the gate re-derives baseline and tolerance first and says
+  so; it never fails a build by comparing numbers from two different machines,
+  which would manufacture a regression out of a hardware change.
 * **FINDING-A applies directly.** Report distributions from repeated
   alternating runs, never a single figure. State the ~100-byte binary-size
   noise floor. A benchmark that cannot distinguish its own noise from a change
@@ -241,6 +263,10 @@ see §4.
   `driver_run`/`driver_cleanup` and explicitly **not** around `test_request`.
   Any change here must keep that measurement valid and must not quietly widen
   the perimeter the claim names.
+* **The instrument is named so nobody invents one:** `core:mem`'s
+  `Tracking_Allocator` around the request path, plus the temp-allocator probes
+  WP17 already uses — the same instruments that produced C-5's measurement, so
+  the audit's numbers and the claim they protect come from the same ruler.
 * **Out of scope.** Fixing them. This work package measures and decides; the
   fixes land in WP29 and WP35 where they can be regression-tested.
 
@@ -334,6 +360,11 @@ changes observably.
 * **Note the interaction with WP29:** a bucketed or tree representation makes
   some conflicts *structurally* detectable that a linear scan never noticed.
   Do not let a representation change silently become a behaviour change.
+* **Rollback.** Depends on the arm chosen, and the deciding ADR must say so:
+  ratifying the silence ships nothing and stays HIGH; diagnose-and-poison is
+  MEDIUM and decays — withdrawing a shipped diagnostic un-breaks the programs
+  it poisoned, but re-hides the conflicts it existed to surface, and programs
+  written after it shipped will rely on registration failing loudly.
 
 ### WP31 — Path normalisation policy
 
@@ -348,6 +379,24 @@ semantics.**
   means.
 * **The output is a policy or a permanent ratification of its absence** — and
   either way it is written down, tested, and given a negative control.
+* **The spec half decides `web.path`'s ENCODING contract too, not only path
+  equality.** Whether a captured `:param` view arrives percent-decoded or raw
+  is currently stated nowhere, and it is the same security decision wearing a
+  different name: a decoded `%2F` inside a parameter is the classic
+  route-confusion primitive. 31a states the answer; 31b implements it; the
+  answer joins the lifetime ledger's view rules.
+* **The negative-control corpus is named now**, so the test cannot be written
+  to fit the implementation: dot segments raw and encoded (`/../`,
+  `%2e%2e%2f`), an encoded slash (`%2F`) inside a segment, NUL (`%00`),
+  doubled slashes, the trailing-slash pair (`/users` vs `/users/`), and
+  mixed-case percent escapes (`%2f` vs `%2F`). It lives beside WP9's raw-wire
+  corpus and runs against both transports (R-10).
+* **Rollback. LOW once a policy ships, HIGH if the absence is ratified.** A
+  normalisation rule is observable routing semantics: applications and the
+  clients calling them start depending on which paths are equal, and
+  withdrawing a rule later re-splits paths that had become one route.
+  Ratifying the absence ships nothing and remains fully reversible — an
+  asymmetry the decision must weigh, not a reason to pre-empt it here.
 
 ### WP32 — HEAD, OPTIONS, and the 501 decision
 
@@ -364,6 +413,11 @@ semantics.**
 * **Interaction to respect:** the `Allow` value and its byte-exact order are
   ratified (WP4 D4) and pinned by the gate. OPTIONS reuses that machinery; it
   does not grow a second one.
+* **Rollback. LOW once shipped.** Automatic HEAD and OPTIONS are visible to
+  every client and intermediary; caches and health checks will depend on them
+  within days of a deployment. Withdrawing either turns a 200 into a 404/405
+  for traffic that never appears in a test suite. The 501 decision is the
+  reversible part — declining it ships nothing.
 
 ### WP33 — Multi-param routes without a map
 
@@ -400,6 +454,11 @@ semantics.**
 * **The redaction rule travels with it:** the pattern, never the path. The
   gate assertion that keeps `Framework_Event` free of request-derived strings
   has an obvious analogue here.
+* **Rollback. LOW once shipped, like every public symbol.** The accessor is a
+  promise kept for as long as the name exists — WP36's asymmetry argument
+  applies unchanged. The redaction rule is the half that must never be
+  loosened later: pattern-to-path is invisible in a type signature and
+  visible in an operator's logs.
 
 ### WP35 — Arena, buffer reuse and oversize policy
 
@@ -607,6 +666,19 @@ had and the first draft of this one silently dropped.
 Recorded because the reasoning is the reviewable part, and because a plan that
 hides its own corrections teaches the next reader to hide theirs.
 
+A **second review pass** (2026-07-20, later the same day) applied six more, at
+the owner's request that this plan be improved rather than merely verified:
+rollback statements for the four packages the first pass missed (WP30, WP31,
+WP32, WP34 — including the two whose approval halves carry the least
+reversible decisions in the phase); the status-distribution rule and the
+hardware-identity rule in WP26, without which the regression gate would
+manufacture a failure on any new machine — including the CI runner this same
+change introduces; the two-instrument split in WP26 (allocation counts and
+latency distributions cannot come from the same tool); the named instrument in
+WP27; `web.path`'s encoding contract and the named negative-control corpus in
+WP31; and the full P-T accounting in §6. Applied in place, recorded here, same
+reasoning as before.
+
 ---
 
 ## 5. Risks this plan does not resolve
@@ -700,6 +772,13 @@ workload matrix — it is what exposed the eighth defect in this plan's own
 review). **P-T5**, the deterministic transport fault plan, is **not** scheduled
 here: it is a hardening lab and belongs with Phase 4, but it is named so the
 Phase-4 planner finds it rather than inventing it.
+
+The remaining P-T numbers are accounted for so nobody goes looking: **P-T1,
+P-T2 and P-T4** were absorbed by Phase 2 itself (the three ledgers, the
+ownership table, and WP18 Amendment 1 plus the single-commit invariant);
+**P-T3** lives on as WP9's raw-wire corpus and grows in Phase 4 (P4-16);
+**P-T9 and P-T10** are the product track's `uruquim dev` and `uruquim doctor`,
+deliberately outside every phase.
 
 ---
 
