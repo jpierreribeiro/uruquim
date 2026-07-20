@@ -68,9 +68,14 @@ package web
 // behaviour — `tests/wp22-public-surface` asserts the exact bytes of the line.
 //
 // COST: no allocation, no import, and one fixed-size stack buffer per logged
-// request. An application that never names `web.logger` links none of this
-// code and its binary is byte-identical to one built before this file existed
-// (`build/check_wp22_controls.sh`, control 6, proves it with `nm`).
+// request. An application that never names `web.logger` links ZERO logger
+// symbols — measured with `nm` against a positive control by
+// `build/check_wp22_controls.sh` control 7. The plan asked for a stronger
+// claim, "the binary is byte-identical to the baseline"; that one is not
+// testable on the pinned toolchain, which does not build reproducibly (five
+// builds of an IDENTICAL tree produced five distinct binaries — the vendored
+// `nbio`'s polymorphic instantiations carry run-varying mangled names). The
+// symbol count is stable and is what is asserted.
 //
 // A line longer than the buffer is TRUNCATED and says so — see
 // `LOGGER_TRUNCATED`.

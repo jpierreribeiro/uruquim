@@ -54,9 +54,11 @@ freeze amendments.
   mark. CR, LF, backslash and control bytes are escaped, so a route pattern
   cannot forge a second log record. It imports **nothing**: not `core:log`
   (measured at ~37 KiB added to every application, referenced or not) and not
-  `core:fmt`; an application that never names `web.logger` links zero logger
-  symbols and its binary is byte-identical to one built without it, proven with
-  `nm` against a positive control. No levels, sinks, sampling, structured
+  `core:fmt`; an application that never names `web.logger` links **zero** logger
+  symbols, proven with `nm` against a positive control (an application that does
+  use it links six). Byte-identity of the binary is deliberately **not** claimed:
+  the pinned toolchain does not build reproducibly, so that property fails for a
+  tree compared against itself (plan amendment, 2026-07-20). No levels, sinks, sampling, structured
   fields or latency measurement — those are Phase-4 observability, and a log
   ring or drop policy would put an unbounded queue behind a bounded-buffer
   claim. Application ledger 42 → 43 (freeze Amendment 8).

@@ -176,9 +176,10 @@ CR, LF, backslash and control bytes in a pattern are **escaped** (`\r`, `\n`,
 
 ### Cost
 
-- **Zero when unused.** An application that never names `web.logger` links none
-  of it and its binary is byte-identical to one built without it — proven with
-  `nm` in `build/check_wp22_controls.sh`, against a positive control.
+- **Zero when unused.** An application that never names `web.logger` links
+  **zero** logger symbols — proven with `nm` in
+  `build/check_wp22_controls.sh`, against a positive control (an application
+  that does use it links six). Roughly 2.8 KiB of code when you do use it.
 - **No imports.** Not `core:log` (measured at ~37 KiB added to *every*
   application, referenced or not — Odin links an imported package whether or
   not anything uses it), and not `core:fmt`. It writes through the

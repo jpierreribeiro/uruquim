@@ -854,9 +854,13 @@ silently break:
   reported through the WP20 observer, which is the channel that does see it.
 * **It costs nothing when unused.** No import at all: not `core:log` (WP6
   measured ~37 KiB added to every application, referenced or not), not
-  `core:fmt`. An application that never names `web.logger` links zero logger
-  symbols, proven with `nm` against a positive control in
-  `build/check_wp22_controls.sh`.
+  `core:fmt`. An application that never names `web.logger` links **zero**
+  logger symbols, proven with `nm` against a positive control in
+  `build/check_wp22_controls.sh` (control 7). What is NOT claimed, because it
+  is not testable here: byte-identity of the binary. The pinned toolchain does
+  not build reproducibly — five builds of an identical tree produced five
+  distinct binaries — so byte-identity fails for a tree compared against
+  itself. Recorded as a plan amendment rather than quietly downgraded.
 
 Evidence rows, same schema as §5:
 
