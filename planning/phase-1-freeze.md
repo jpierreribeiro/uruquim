@@ -685,3 +685,67 @@ Evidence rows, same schema as §5:
 | `Router` | A | WP18 | `tests/wp18-public-surface/contract_test.odin::wp18_public_signatures_are_pinned` | `tests/wp18-internal/wp18_internal_test.odin::wp18_app_and_router_each_release_their_own_storage_exactly_once` | `docs/canonical-patterns.md::Router` | embeds App via `using`; own storage, destroyed exactly once, never copied |
 | `router` | A | WP18 | `tests/wp18-public-surface/contract_test.odin::wp18_public_signatures_are_pinned` | `tests/wp18-internal/wp18_internal_test.odin::wp18_an_unmounted_router_leaks_nothing` | `docs/canonical-patterns.md::web.router` | returns Router by value; allocates nothing; no default responses |
 | `mount` | A | WP18 | `tests/wp18-public-surface/contract_test.odin::wp18_public_signatures_are_pinned` | `tests/wp18-internal/wp18_internal_test.odin::wp18_nested_routers_outer_use_before_inner_use_before_handler` | `docs/canonical-patterns.md::web.mount` | COPIES into the App; closes the router; counts as a registration |
+
+## Amendment 5 — WP19: request header lookup (`header`, `bearer_token`)
+
+**Date:** 2026-07-19. **Authority:** owner — the approved Phase-2 ledger
+(`planning/phase-2-spec.md` §9.2) assigns both names to WP19 ("plan WP19, no
+new decision"); the behaviour contract is `planning/phase-2-plan.md` §WP19.
+**Ledger effect: application 37 → 39.** 39 application + 2 test-support = 41.
+The snapshot diff for this amendment was exactly two added application lines.
+
+The two recorded lines:
+
+```
+application	proc	bearer_token :: proc(ctx: ^Context) -> (value: string, ok: bool)
+application	proc	header :: proc(ctx: ^Context, name: string) -> (value: string, ok: bool)
+```
+
+Both are PURE lookups — no response side effect (the documented asymmetry with
+the extractors: an absent header is routinely not an error), nothing logged
+(values are attacker-controlled; the WP6 `core:log`/`core:fmt` ban holds), no
+allocation, `(value, ok)` with no `#optional_ok` (ADR-002). Names compare
+case-insensitively with ASCII folding; duplicates: first occurrence wins (the
+WP5 D4 rule); an empty value is present. `header` reads the EFFECTIVE request
+header: the private ADR-027 overlay first, then what arrived — WP19 ships the
+read path, WP23 the writer. `bearer_token` parses RFC 6750 strictly (scheme
+case-insensitive, exactly one space, non-empty token, no whitespace tolerance)
+and returns the token verbatim, never trimmed or normalised. Returned values
+are VIEWS invalidated at request end — the WP2 view test is ported. **Audit
+A-8 is resolved**: the per-request header materialisation the transport has
+performed since WP8 is now read by these two procedures.
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `header` | A | WP19 | `tests/wp19-public-surface/contract_test.odin::wp19_public_signatures_are_pinned` | `tests/wp19-internal/wp19_internal_test.odin::wp19_header_value_is_a_view_invalidated_by_buffer_reuse` | `docs/canonical-patterns.md::web.header` | returns a view over transport memory; overlay consulted first; allocates nothing |
+| `bearer_token` | A | WP19 | `tests/wp19-public-surface/contract_test.odin::wp19_public_signatures_are_pinned` | `tests/wp19-internal/wp19_internal_test.odin::wp19_bearer_rejects_every_malformed_shape` | `docs/canonical-patterns.md::web.bearer_token` | strict RFC 6750 parse; token verbatim, never normalised; allocates nothing |
+
+## Amendment 6 — WP19: `test_request` carries optional request headers
+
+**Date:** 2026-07-19. **Authority:** owner, ADR-021 (scope as accepted) and
+spec §9.3, which pre-authorised exactly this mechanism.
+**Ledger effect: none.** Test-support stays 2 — the §9.3 contingency (a new
+public type forcing the number up) was NOT needed.
+
+The frozen line becomes:
+
+```
+test-support	proc	test_request :: proc(a: ^App, method: Method, path: string, body: string = "", query: string = "", headers: []string = nil) -> Recorded_Response
+```
+
+`headers` is the THIRD fully visible default parameter, on Amendment 1/2's
+exact terms: the whole callable contract stays inside the frozen record and
+every earlier call shape compiles unchanged (pinned by the amended
+`tests/wp7-public-surface/contract_test.odin::wp7_test_request_signature_is_pinned`).
+
+**Representation choice, presented.** Each element is one header line,
+`"Name: value"` — split at the FIRST colon, optional whitespace trimmed around
+the value (RFC 9110 field parsing, i.e. exactly what a socket delivers to the
+core), inner colons kept, a colon-less element is a name with an empty value.
+Considered and rejected: a public pair type (grows a ledger — needs owner
+approval, and §9.3 said avoid if expressible); alternating name/value strings
+(silently truncatable on an odd count, teaches nothing about wire form). The
+header lines travel the SHARED driver pipeline as neutral pairs, so nothing
+downstream can tell the two transports apart (R-10).

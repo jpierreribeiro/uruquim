@@ -487,11 +487,11 @@ web.get(&app, "/admin/users", list_users)
 Write — an ordinary handler; allow by calling `web.next`, reject by responding
 and returning without it:
 
-<!-- fragment: phase2/middleware-guard -->
+<!-- fragment: phase2/bearer-auth -->
 ```odin
 require_auth :: proc(ctx: ^web.Context) {
-	token, found := web.query(ctx, "token")
-	if !found || token != "expected" {
+	token, ok := web.bearer_token(ctx)
+	if !ok || !token_is_valid(token) {
 		web.unauthorized(ctx, "authentication required")
 		return
 	}
@@ -512,15 +512,18 @@ values to handlers — there is no `ctx.user_data`, no `locals`, no
 `map[string]any`, by design. Recovery middleware does not exist and never
 will (ADR-020): Odin has no recoverable panic. CORS is a Phase-4 built-in.
 
-## Auth / dependencies (Phase 2 — unavailable in Phase 1)
+## Auth / dependencies (delivered in Phase 2, WP19)
 
-> This example uses `web.bearer_token`, which becomes available in Phase 2.
-> It is architectural guidance only and cannot be copied into a Phase-1 app.
+`web.bearer_token` parses the `Authorization` header against RFC 6750
+STRICTLY — scheme case-insensitive, exactly one space, non-empty token, no
+whitespace tolerance — and returns the token verbatim, never trimmed or
+normalised. It is a PURE lookup: `(value, ok)`, no automatic response,
+nothing logged. The `auth.*` calls below are your application's code.
 
 When the handler needs the user, call a typed extraction procedure directly
 (same contract as extractors) — no middleware involved:
 
-<!-- phase: 2; unavailable -->
+<!-- pseudocode: auth.find_user_by_token / auth.token_is_valid are application code -->
 ```odin
 current_user :: proc(ctx: ^web.Context) -> (^User, bool) {
 	token, found := web.bearer_token(ctx)

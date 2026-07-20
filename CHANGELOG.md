@@ -15,6 +15,15 @@ freeze amendments.
 
 ### Added
 
+- **Request header lookup** (Phase 2, WP19): `web.header` and
+  `web.bearer_token`. Pure lookups — `(value, ok)`, no automatic response,
+  nothing ever logged, values are request-lifetime views. Names are
+  case-insensitive (ASCII folding); duplicates: first occurrence wins; an
+  empty value is present. `bearer_token` parses RFC 6750 strictly and returns
+  the token verbatim — a sloppy `Authorization` is rejected, never repaired.
+  `web.test_request` gains an optional `headers` parameter (`"Name: value"`
+  lines), so header-driven code is testable without a socket. Application
+  ledger 37 → 39 (freeze Amendments 5–6).
 - **Route organisation** (Phase 2, WP18): `web.Router`, `web.router` and
   `web.mount`. A Router accepts the same `use` and the same five registration
   verbs an App does (it embeds an App — no new forms, no mutated signatures),
