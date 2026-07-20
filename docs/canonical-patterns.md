@@ -226,12 +226,13 @@ web.get(&app, "/users/:id", get_user)     // one :param segment
 ```
 
 A pattern begins with `/`. A `:param` occupies exactly one whole segment, must
-be named, and Phase 1 allows **at most one per pattern**. There is no wildcard.
+be named, and a pattern may declare **up to eight** of them (WP33 raised the
+Phase-1 bound of one). There is no wildcard.
 
-A pattern outside that grammar — `/a/:x/:y`, a bare `/users/:`, or one without a
-leading `/` — **never matches any request**, and never contributes to an `Allow`
-header either. Registration accepts it silently and reports nothing, so check
-your patterns: a route that is never reached looks exactly like a 404.
+A pattern outside that grammar — a ninth `:param`, a bare `/users/:`, or one
+without a leading `/` — **never matches any request**, and never contributes to
+an `Allow` header either. Registration accepts it silently and reports nothing,
+so check your patterns: a route that is never reached looks exactly like a 404.
 
 When a static and a parametric route both match, **the static one always
 wins**, independently of registration order:
@@ -245,13 +246,21 @@ web.get(&app, "/users/me", get_current_user)   // /users/me reaches THIS one
 Methods are isolated: registering GET on a path does not register any other
 method on it.
 
-**Paths are not normalized.** `/users` and `/users/` are different, and
-percent-encoding and dot segments are not decoded. Do not write code that
-depends on either behavior; the normalization policy is decided in Phase 3.
+**Paths are not normalized, and the policy is now decided (WP31).** `/users`
+and `/users/` are different, and percent-encoding is never decoded or rewritten.
+The policy REJECTS rather than transforms: a dot segment, an interior empty
+segment, a percent-encoded slash or a percent-encoded NUL is answered `400`
+before route matching. Everything else passes through byte-exact.
 
-Registration conflicts are not diagnosed in Phase 1. A duplicate pattern is
-stored as given, and an unsupported one never wins a match — there is no
-registration error to handle, and no such API is frozen yet.
+**Registration conflicts are diagnosed (WP30).** Registering two routes for the
+same method and the same path shape rejects the application fail-closed: every
+request answers 500 and `web.serve` refuses to start, with a diagnostic naming
+the losing route. Parameter names do not distinguish routes — `/users/:id` and
+`/users/:uid` are one pattern — and a `web.mount` prefix can compose a
+collision with a route registered directly. There is still no registration
+error to handle and no such API: registration reports through the fail-closed
+mechanism, not a return value. A pattern the dispatcher cannot interpret is a
+different case and simply never wins a match.
 
 The pattern string is copied: the App owns its copy, so the caller may reuse or
 free its own buffer immediately after registering.

@@ -18,12 +18,20 @@ package test_wp33_public
 import "core:testing"
 import web "uruquim:web"
 
+// ONE SINK PER TEST, never one shared between two. The pinned runner runs tests
+// on eight threads by default, so a file-scope variable written by two handlers
+// and reset by two tests is a data race that fails at random — `captured_org`
+// was exactly that, shared by `three_params` and `one_param`, and it went red
+// once under an unrelated change before anyone looked at it. Found and fixed
+// during WP30; the defect predates it.
 @(private = "file")
 captured_org: string
 @(private = "file")
 captured_repo: string
 @(private = "file")
 captured_number: int
+@(private = "file")
+captured_id: string
 
 @(private = "file")
 three_params :: proc(ctx: ^web.Context) {
@@ -39,7 +47,7 @@ three_params :: proc(ctx: ^web.Context) {
 
 @(private = "file")
 one_param :: proc(ctx: ^web.Context) {
-	captured_org = web.path(ctx, "id")
+	captured_id = web.path(ctx, "id")
 	web.no_content(ctx)
 }
 
@@ -97,10 +105,10 @@ wp33_one_parameter_still_works :: proc(t: ^testing.T) {
 	defer web.destroy(&app)
 	web.get(&app, "/users/:id", one_param)
 
-	captured_org = ""
+	captured_id = ""
 	res := web.test_request(&app, .GET, "/users/7")
 	testing.expect_value(t, res.status, web.Status.No_Content)
-	testing.expect_value(t, captured_org, "7")
+	testing.expect_value(t, captured_id, "7")
 }
 
 // Static still beats parametric, at every level, with several parameters in
