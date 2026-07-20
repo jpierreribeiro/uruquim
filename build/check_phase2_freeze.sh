@@ -49,11 +49,43 @@ URUQUIM_UNION_COUNT="$(grep -oE 'URUQUIM_UNION" -ne [0-9]+' "$URUQUIM_ROOT/build
 test -n "$URUQUIM_APP_COUNT" && test -n "$URUQUIM_UNION_COUNT" ||
   fail "could not read the canonical ledger counts out of build/check_public_api.sh"
 
-grep -qE "\| application \| 32 \| \+[0-9]+ \| \*\*$URUQUIM_APP_COUNT\*\* \|" "$URUQUIM_P2" ||
-  fail "the freeze document does not record the canonical application ledger ($URUQUIM_APP_COUNT)"
-grep -qE "\| union \| 34 \| \+[0-9]+ \| \*\*$URUQUIM_UNION_COUNT\*\* \|" "$URUQUIM_P2" ||
-  fail "the freeze document does not record the canonical union ($URUQUIM_UNION_COUNT)"
-echo "phase-2 freeze: ledger diff matches the canonical counts ($URUQUIM_APP_COUNT application, $URUQUIM_UNION_COUNT union)"
+# WHAT THIS DOCUMENT'S NUMBERS ARE, and WP34 is the work package that forced the
+# distinction. The table records what Phase 2 FROZE — 32 + 12 = 44 — which is a
+# historical fact and must not move when a later phase adds a symbol. The
+# original check compared it against the LIVE canonical count, which was
+# indistinguishable from correct for as long as no phase grew the ledger after
+# Phase 2, and went red the moment one did. A freeze document that has to be
+# edited every time a later phase ships is not a freeze.
+#
+# So the anti-drift force is kept and re-aimed. Three assertions:
+#
+#   * the recorded Phase-2 totals are exactly the frozen 44 and 46 — the doc
+#     cannot be quietly restated;
+#   * its own arithmetic holds (32 + delta = total, 34 + delta = union), so a
+#     hand-edited delta fails;
+#   * the LIVE ledger is >= the frozen total. Phase 3 may add; nothing may
+#     silently remove a symbol Phase 2 froze and leave this document claiming it.
+URUQUIM_P2_APP=44
+URUQUIM_P2_UNION=46
+
+grep -qE "\| application \| 32 \| \+[0-9]+ \| \*\*$URUQUIM_P2_APP\*\* \|" "$URUQUIM_P2" ||
+  fail "the freeze document no longer records the ledger Phase 2 froze ($URUQUIM_P2_APP application). That number is history, not a live measurement: it must not be edited to track a later phase."
+grep -qE "\| union \| 34 \| \+[0-9]+ \| \*\*$URUQUIM_P2_UNION\*\* \|" "$URUQUIM_P2" ||
+  fail "the freeze document no longer records the union Phase 2 froze ($URUQUIM_P2_UNION)"
+
+URUQUIM_P2_DELTA="$(grep -oE "\| application \| 32 \| \+[0-9]+ \|" "$URUQUIM_P2" | grep -oE '[0-9]+ \|$' | grep -oE '[0-9]+')"
+test "$(( 32 + URUQUIM_P2_DELTA ))" -eq "$URUQUIM_P2_APP" ||
+  fail "the freeze document's own arithmetic does not hold: 32 + $URUQUIM_P2_DELTA is not $URUQUIM_P2_APP"
+URUQUIM_P2_UNION_DELTA="$(grep -oE "\| union \| 34 \| \+[0-9]+ \|" "$URUQUIM_P2" | grep -oE '[0-9]+ \|$' | grep -oE '[0-9]+')"
+test "$(( 34 + URUQUIM_P2_UNION_DELTA ))" -eq "$URUQUIM_P2_UNION" ||
+  fail "the freeze document's own arithmetic does not hold: 34 + $URUQUIM_P2_UNION_DELTA is not $URUQUIM_P2_UNION"
+
+test "$URUQUIM_APP_COUNT" -ge "$URUQUIM_P2_APP" ||
+  fail "the live application ledger is $URUQUIM_APP_COUNT, BELOW the $URUQUIM_P2_APP Phase 2 froze. A frozen symbol was removed while this document still claims it."
+test "$URUQUIM_UNION_COUNT" -ge "$URUQUIM_P2_UNION" ||
+  fail "the live exported union is $URUQUIM_UNION_COUNT, below the $URUQUIM_P2_UNION Phase 2 froze"
+
+echo "phase-2 freeze: ledger diff records the frozen $URUQUIM_P2_APP application / $URUQUIM_P2_UNION union; the live ledger is $URUQUIM_APP_COUNT / $URUQUIM_UNION_COUNT and has not shrunk"
 
 # ---------------------------------------------------------------------------
 # 2. CLAIM ledger — every claim carries a negative control.

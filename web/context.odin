@@ -30,8 +30,15 @@ Handler :: proc(ctx: ^Context)
 // be one (amended in WP4). WP4 matches routes and captures the path parameter
 // into the private slot below; WP5 makes the existing `web.path` and
 // `web.path_int` extractors read it, which keeps one canonical access path
-// instead of announcing a second public field. A stable route identity for
-// observability stays internal and future (OQ-18).
+// instead of announcing a second public field.
+//
+// WP34 amends the second half of that sentence and not the first: route
+// identity became PUBLIC, through the accessor `web.route` (OQ-18, CLOSED) —
+// a procedure, not a field. The distinction is the point. A field would be a
+// second thing to keep in sync and a place for a future `ctx.route = …` to
+// exist; an accessor reads the private slot below, is the only way to ask, and
+// carries its redaction rule (the pattern, never the path) in one place the
+// gate can check.
 //
 // LIFETIME: `request` is a bundle of views over transport-owned storage, valid
 // only for the duration of this request. Copy explicitly to persist, and never

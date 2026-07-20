@@ -27,6 +27,7 @@ application	proc	query :: proc(ctx: ^Context, name: string) -> (value: string, f
 application	proc	query_int :: proc(ctx: ^Context, name: string) -> (value: int, ok: bool)
 application	proc	query_int_or :: proc(ctx: ^Context, name: string, default_value: int) -> (value: int, ok: bool)
 application	proc	request_id :: proc(ctx: ^Context)
+application	proc	route :: proc(ctx: ^Context) -> string
 application	proc	router :: proc() -> Router
 application	proc	serve :: proc(a: ^App, port: int)
 application	proc	text :: proc(ctx: ^Context, status: Status, s: string)

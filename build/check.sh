@@ -834,6 +834,16 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp33-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp33-public-surface"
 
+# WP34 — route identity. ONE public symbol, ledger 44 -> 45. The suite pins the
+# signature by assignment and spends the rest of itself on WHICH STRING comes
+# back: the registered pattern, never the request path. The static half of that
+# rule lives in check_public_api.sh §8b, which checks every write to the slot —
+# a test can only check the routes someone thought to write.
+echo "--- WP34 route identity: the pattern, never the path (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp34-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp34-public-surface"
+
 # WP30 — registration conflict diagnostics. NO public symbol: the five verbs and
 # `mount` keep their frozen signatures, and registration still reports through
 # the ADR-019 mechanism rather than a return value. The public suite sees only
