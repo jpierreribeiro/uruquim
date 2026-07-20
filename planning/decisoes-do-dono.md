@@ -54,24 +54,15 @@ reconferência e funciona normalmente.
 implementa só o que o ADR-004 já aprovou (estado da aplicação, não da
 requisição). Sem pressa real aqui.
 
-### 2. CI no GitHub — rodar o gate automaticamente a cada mudança?
+### 2. CI no GitHub — DECIDIDA: continua sem CI (dono, 2026-07-20)
 
-**O problema em linguagem simples.** O projeto tem um "detector de mentiras"
-excelente (`build/check.sh`) que verifica tudo — mas ele só roda quando alguém
-lembra de rodar, na máquina local ou no seu VPS. Existe inclusive uma decisão
-sua registrada no gate: *"GitHub Actions não é gate obrigatório deste projeto"*
-— o arquivo `.github/workflows` é proibido hoje.
-
-**A favor de ligar o CI:** toda mudança enviada ao GitHub seria verificada
-sozinha, com o compilador exato pinado em `odin-version.txt`; um PR com defeito
-apareceria vermelho sem depender de ninguém lembrar de nada.
-
-**Contra:** é um serviço externo (minutos do GitHub Actions; gratuito para
-repositório público), e o gate local/VPS continua sendo a fonte da verdade —
-o CI seria uma cópia de conveniência, nunca o juiz.
-
-**Se você não decidir nada:** continua tudo como está (sem CI). Um workflow
-pronto ficou preparado fora do repositório, para o caso de você dizer sim.
+O projeto tem um "detector de mentiras" excelente (`build/check.sh`), que roda
+localmente e no VPS do dono. A pergunta era se ele deveria também rodar
+automaticamente no GitHub a cada mudança. **O dono reconfirmou em 2026-07-20 a
+decisão original: não** — o gate permanece local/VPS, `.github/workflows`
+continua proibido pelo `check_docs.sh`, e essa proibição é intencional, não um
+esquecimento. Se um dia houver colaboradores externos abrindo PRs com
+frequência, esta é a primeira decisão que vale a pena revisitar.
 
 ### 3. ADR-010 — a "API avançada" (adiada, sem pressa)
 
