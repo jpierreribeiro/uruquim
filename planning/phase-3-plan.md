@@ -220,6 +220,16 @@ see §4.
 * **Cardinality sweep: 5, 50, 500 and 5,000 routes.** The only property a tree
   uniquely owns is *scaling*, so the sweep must reach far enough for scaling to
   become visible, or the shootout cannot answer the question it exists to ask.
+* **The WORKLOAD SHAPE is part of the measurement, and omitting it flatters the
+  incumbent.** A linear scan's cost depends entirely on *where* the answer is,
+  so a benchmark that only ever hits the first route measures nothing. Every
+  candidate is measured against the same matrix: a hit at the **start**, the
+  **middle** and the **end** of the table; a **miss** (which scans everything);
+  and a **405** (which scans everything and then builds `Allow`). Route
+  composition — the static / `:param` / wildcard proportions — is stated with
+  the numbers, because a bucketed candidate's advantage is a function of exactly
+  that ratio. This is P-T8 in the Tina dossier (§6), and it is the difference
+  between a shootout and a demo.
 * **C-5 governs this work package** (`later-phases-plan.md`): the radix-router
   justification is not what folklore says. "A real, validated system does it
   this way" is not evidence about Uruquim's route cardinalities. Class-bucketed
@@ -349,6 +359,15 @@ semantics.**
   here it has done its job; it must not be "fixed" by weakening it.
 * **Peak and retained memory are reported, not only allocation counts** — the
   register asks for exactly this.
+* **The stale-reference test comes with the reuse, and not before** (P-T7, §6).
+  The moment a slot is reused, a reference held from the previous request stops
+  being merely stale and starts being *wrong*. The shape of the test is already
+  written down: request A arms a timeout; the slot is released; request B
+  reuses it; A's timeout fires; **B must survive**. A generational token is the
+  known answer. The discipline attached to it matters as much as the mechanism:
+  **while nothing is pooled, do not build the abstraction** — an empty
+  generational wrapper around storage that is never reused is complexity with no
+  defect to catch.
 
 ### WP36 — Configurable limits and timeouts
 
@@ -358,6 +377,12 @@ capacity-ledger amendment.**
 * **The shape is already decided** by the P3-8/P3-11 amendment: an options
   struct with a package default constant, on `core:net`'s `DEFAULT_TCP_OPTIONS`
   precedent — **not** a builder.
+* **But the derivation must still be MEASURED, not assumed** (P-T6, §6). Compare
+  the two shapes on real numbers — configuration consulted per request versus an
+  immutable runtime derived once at boot — and report branch count, allocations,
+  binary size and ergonomics. The amendment chose the second on reasoning; this
+  work package is where that reasoning acquires evidence. And do not expose a
+  large tuning struct before there is data to justify each field.
 * **Validate once at boot, read on the hot path.** `serve` derives a private,
   immutable `Server_Runtime` holding resolved budgets — request line, header
   block, body, response bytes, timeouts, arena policy — with every cross-limit
@@ -484,7 +509,76 @@ Everything WP25 required, plus what Phase 3 adds:
 
 ---
 
-## 6. What an implementation agent should read first
+## 6. The Tina dossier — how to use it, and how not to
+
+`tina/` holds a study of **Tina**, a real runtime that was read closely and
+written up. Phase 2 already took four things from it, and they were among the
+better decisions in that phase: the claim / lifetime / capacity ledgers (docket
+D-2), the ownership table, the ApacheBench trap in RG-1, and the warning that
+"bounded" must name a perimeter.
+
+**Read it for Phase 3.** It is the densest available source on exactly the
+problems this phase has — measurement methodology, bounded pools, backpressure,
+slot reuse and compiled configuration — and a second implementation that has
+already hit these walls is worth more than a fresh guess.
+
+### The rule, which has not changed
+
+* **Tina is REFERENCE, never architecture to copy.** "Tina does it this way" is
+  **never** a justification, in a commit message, an ADR or a code comment.
+* **It is not a dependency and must never become one** (R-T2 in the dossier's
+  own rejected list).
+* Take **discipline** — how a claim is evidenced, how a bound states what it
+  does when full, how a benchmark avoids measuring its own error. Do **not**
+  take structure. Tina sizes shards, pools and rings; Uruquim sizes none of
+  those, and importing a general system-specification concept would be
+  cargo-culting a solution to a problem this framework does not have.
+* The dossier says this about its own strongest candidate, and it is the right
+  posture: *"Tina não vence por autoridade: seus buckets também fazem scan
+  linear."* Its ideas enter the shootout as hypotheses, with no head start.
+
+### `tina/` IS NOT VERSIONED — plan for its absence
+
+It is untracked, so a fresh clone will not have it. **A work package must never
+block on it.** If the directory is missing, proceed: everything load-bearing
+that came out of it has already been absorbed into this plan, the ADRs and the
+gate. Nothing in Phase 3 is gated on reading it, and no gate may check for it.
+
+### Where to look, per work package
+
+Read the mapped document, not the whole folder.
+
+| Work package | Read | What is in there |
+|---|---|---|
+| **WP26** benchmark | `docs/06-testes-portabilidade-e-maturidade.md`, `docs/11-…roadmap` §P3-1 | The evidence pyramid, test hygiene, and the ApacheBench failure written up in full |
+| **WP28** shootout | `docs/09-propostas…` **P-T8**, `docs/11-…roadmap` §P3-2 | Cardinality datasets, and the hit-position / miss / 405 matrix this plan was missing |
+| **WP29/WP30** router | `docs/07-catalogo-de-padroes.md` | Pattern catalogue, including the class-bucketed representation |
+| **WP35** arena and reuse | `docs/02-memoria-ownership-e-backpressure.md`, **P-T7** | Bounded pools, the "no malloc" claim examined, and the generational-token test for slot reuse |
+| **WP36** limits | **P-T6**, `docs/11-…roadmap` §P3-10/P3-11 | Compiled limits versus per-request lookup, and why the options struct stays small |
+| **WP37** state | `docs/08-comparacao-com-uruquim.md` | Where the two designs genuinely diverge |
+| **WP38** freeze | `docs/09-propostas…` P-T1/P-T2, `docs/10-limitacoes-e-questoes-abertas.md` | The ledger discipline Phase 2 already adopted, and how the study bounds its own claims |
+
+### Already rejected, and staying rejected
+
+The dossier keeps its own rejected list; these are settled and are not reopened
+by reading it again: recovering a panic inside a handler (**R-T1** — ADR-020
+proved it impossible), making Tina a dependency (**R-T2**), rewriting the HTTP
+server (**R-T3**), and "zero allocation" as a slogan without a perimeter and a
+test (**R-T4** — the claim ledger now enforces exactly this).
+
+### Three items this plan has already absorbed
+
+Recorded so nobody re-derives them: **P-T6** is folded into WP36 (measure both
+shapes, do not assume the derived runtime), **P-T7** into WP35 (the stale-slot
+test arrives *with* the reuse, never before it), and **P-T8** into WP28 (the
+workload matrix — it is what exposed the eighth defect in this plan's own
+review). **P-T5**, the deterministic transport fault plan, is **not** scheduled
+here: it is a hardening lab and belongs with Phase 4, but it is named so the
+Phase-4 planner finds it rather than inventing it.
+
+---
+
+## 7. What an implementation agent should read first
 
 1. This document, for the work package it is doing — **including §0**, because
    three of the four findings there contradict the older skeleton.
@@ -495,7 +589,10 @@ Everything WP25 required, plus what Phase 3 adds:
 4. `planning/public-api-guardrails.md` — G-01 through G-11 are not advice.
 5. `planning/adrs.md` — an ACCEPTED ADR supersedes plan text when they
    disagree. That is what happened in WP21, and this plan is not exempt.
-6. **The code and tests of the work package before it.** Never conclude from
+6. **`tina/`, if it is present — the mapped document only** (§6). Reference,
+   never architecture; "Tina does it this way" is never a justification, and a
+   missing directory is never a blocker.
+7. **The code and tests of the work package before it.** Never conclude from
    documents alone: this project has now had two cases where the documentation
    described behaviour the code did not have, and one of them was introduced by
    the same agent that wrote the gate against it.
