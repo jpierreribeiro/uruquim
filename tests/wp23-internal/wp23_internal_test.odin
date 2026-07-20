@@ -16,8 +16,49 @@
 package web
 
 import transport "uruquim:web/internal/transport"
+import "core:log"
 import "core:strings"
 import "core:testing"
+
+// The quiet-logger idiom (WP17-WP22): the driver-500 test provokes a framework
+// diagnostic on purpose, and the runner records any Error line as a failure.
+// The expected `uruquim:` Errors are swallowed and EVERYTHING ELSE is forwarded
+// — `testing.expect` reports through `context.logger`, so a logger that
+// swallowed everything would make its own test unable to fail.
+@(private = "file")
+Wp23_Quiet :: struct {
+	inner: log.Logger,
+}
+
+@(private = "file")
+wp23_quiet_proc :: proc(
+	data: rawptr,
+	level: log.Level,
+	text: string,
+	options: log.Options,
+	location := #caller_location,
+) {
+	record := (^Wp23_Quiet)(data)
+	if level == .Error && strings.contains(text, "uruquim:") {
+		return
+	}
+	if record.inner.procedure != nil {
+		record.inner.procedure(record.inner.data, level, text, options, location)
+	}
+}
+
+// Returns the logger; the caller arms it in the TEST body — assigning
+// `context.logger` inside a helper would only change the helper's context.
+@(private = "file")
+wp23_quiet_logger :: proc(record: ^Wp23_Quiet) -> log.Logger {
+	record.inner = context.logger
+	return log.Logger {
+		procedure = wp23_quiet_proc,
+		data = rawptr(record),
+		lowest_level = .Debug,
+		options = context.logger.options,
+	}
+}
 
 // wp23_run drives one request through the SAME private pipeline `serve` and
 // `test_request` share, so the caller owns the Context and can inspect the
@@ -34,6 +75,29 @@ wp23_run :: proc(a: ^App, ctx: ^Context, method: Method, path: string, headers: 
 
 @(private = "file")
 wp23_ok :: proc(ctx: ^Context) {
+	text(ctx, .OK, "ok")
+}
+
+// The sink travels through `context.user_ptr`, never a package global: the
+// runner executes tests on several threads and a shared global is a race.
+@(private = "file")
+Wp23_Seen :: struct {
+	id:    [128]u8,
+	n:     int,
+	found: bool,
+}
+
+// wp23_capture reads the ID AT HANDLER TIME, which is the only moment that can
+// distinguish "the overlay was published before `next`" from "after". Reading
+// it once dispatch has returned cannot: by then a late publish looks identical.
+@(private = "file")
+wp23_capture :: proc(ctx: ^Context) {
+	value, ok := header(ctx, REQUEST_ID_HEADER)
+	sink := (^Wp23_Seen)(context.user_ptr)
+	if sink != nil {
+		sink.found = ok
+		sink.n = copy(sink.id[:], value)
+	}
 	text(ctx, .OK, "ok")
 }
 
@@ -77,6 +141,7 @@ wp23_the_id_is_on_the_response :: proc(t: ^testing.T) {
 	get(&a, "/ping", wp23_ok)
 
 	ctx: Context
+	defer driver_cleanup(&ctx)
 	wp23_run(&a, &ctx, .GET, "/ping")
 
 	value, ok := wp23_response_header(&ctx, REQUEST_ID_HEADER)
@@ -100,6 +165,7 @@ wp23_the_header_is_emitted_exactly_once :: proc(t: ^testing.T) {
 	get(&a, "/ping", wp23_ok)
 
 	ctx: Context
+	defer driver_cleanup(&ctx)
 	wp23_run(
 		&a,
 		&ctx,
@@ -121,6 +187,7 @@ wp23_the_id_appears_on_a_404 :: proc(t: ^testing.T) {
 	get(&a, "/ping", wp23_ok)
 
 	ctx: Context
+	defer driver_cleanup(&ctx)
 	wp23_run(&a, &ctx, .GET, "/nope")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
@@ -140,6 +207,7 @@ wp23_the_id_appears_on_a_405_without_displacing_allow :: proc(t: ^testing.T) {
 	post(&a, "/only", wp23_ok)
 
 	ctx: Context
+	defer driver_cleanup(&ctx)
 	wp23_run(&a, &ctx, .GET, "/only")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Method_Not_Allowed)
@@ -157,12 +225,16 @@ wp23_the_id_appears_on_the_driver_500 :: proc(t: ^testing.T) {
 	// from request-local state rather than written by the middleware's own
 	// unwind code — which is exactly why this design was chosen over having the
 	// middleware stamp the response on the way out.
+	quiet: Wp23_Quiet
+	context.logger = wp23_quiet_logger(&quiet)
+
 	a := app()
 	defer destroy(&a)
 	use(&a, request_id)
 	get(&a, "/silent", wp23_silent)
 
 	ctx: Context
+	defer driver_cleanup(&ctx)
 	wp23_run(&a, &ctx, .GET, "/silent")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Internal_Server_Error)
@@ -180,6 +252,7 @@ wp23_without_the_middleware_no_header_is_added :: proc(t: ^testing.T) {
 	get(&a, "/ping", wp23_ok)
 
 	ctx: Context
+	defer driver_cleanup(&ctx)
 	wp23_run(
 		&a,
 		&ctx,
@@ -200,10 +273,50 @@ wp23_bare_adds_no_header_either :: proc(t: ^testing.T) {
 	get(&a, "/ping", wp23_ok)
 
 	ctx: Context
+	defer driver_cleanup(&ctx)
 	wp23_run(&a, &ctx, .GET, "/ping")
 
 	_, ok := wp23_response_header(&ctx, REQUEST_ID_HEADER)
 	testing.expect(t, !ok, "`bare()` installs nothing, including this")
+}
+
+@(test)
+wp23_the_handler_reads_the_effective_id_not_the_arrived_one :: proc(t: ^testing.T) {
+	// The overlay is published BEFORE `next`, and this is the test that says so.
+	// Publishing it afterwards would leave the handler reading the ARRIVED
+	// header — the very value the framework rejected — while the response
+	// carried the effective one: two different IDs for one request, and the
+	// rejected bytes back in the application's hands.
+	sink: Wp23_Seen
+	context.user_ptr = &sink
+
+	a := app()
+	defer destroy(&a)
+	use(&a, request_id)
+	get(&a, "/ping", wp23_capture)
+
+	ctx: Context
+	defer driver_cleanup(&ctx)
+	wp23_run(
+		&a,
+		&ctx,
+		.GET,
+		"/ping",
+		[]transport.Header{{name = "X-Request-Id", value = "evil\r\nX-Injected: yes"}},
+	)
+
+	seen := string(sink.id[:sink.n])
+	testing.expect(t, sink.found, "the handler must see an effective ID")
+	testing.expect(
+		t,
+		!strings.contains(seen, "evil") && !strings.contains(seen, "\r"),
+		"the handler must never be handed the rejected inbound value",
+	)
+
+	// And it is the SAME value the response carries.
+	value, ok := wp23_response_header(&ctx, REQUEST_ID_HEADER)
+	testing.expect(t, ok, "the response carries it too")
+	testing.expect_value(t, seen, value)
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +360,7 @@ wp23_a_rejected_value_never_reaches_the_response :: proc(t: ^testing.T) {
 	get(&a, "/ping", wp23_ok)
 
 	ctx: Context
+	defer driver_cleanup(&ctx)
 	wp23_run(
 		&a,
 		&ctx,

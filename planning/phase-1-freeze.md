@@ -867,3 +867,68 @@ Evidence rows, same schema as §5:
 | Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
 |---|---|---|---|---|---|---|
 | `logger` | A | WP22 | `tests/wp22-public-surface/contract_test.odin::wp22_public_signature_is_pinned` | `tests/wp22-public-surface/contract_test.odin::wp22_public_never_emits_query_header_or_body` | `docs/middleware.md::web.logger` | a `Handler` value; composes into a fixed STACK buffer no response can alias; owns no storage; consults the commit guard through `logger_status` before reading response state |
+
+## Amendment 9 — WP23: the `request_id` middleware and its trust policy
+
+**Date:** 2026-07-20. **Authority:** owner — ADR-027 (ACCEPTED, option A) and
+the approved Phase-2 ledger (`planning/phase-2-spec.md` §9.2).
+**Ledger effect: application 43 → 44.** 44 application + 2 test-support = 46.
+The snapshot diff for this amendment was exactly one added line.
+
+The recorded line:
+
+```
+application	proc	request_id :: proc(ctx: ^Context)
+```
+
+**+1, not +2.** ADR-027 closed the `request_id_value` accessor contingency: the
+effective ID is read through `web.header(ctx, "X-Request-Id")`, the one
+canonical name for reading a request header (G-01). The cost of that choice is
+declared rather than discovered — WP19 already documents `header` as returning
+the **effective** request header, and this is the work package that makes the
+word load-bearing.
+
+**The trust policy is the deliverable, and it is frozen with the symbol.** A
+client-supplied `X-Request-Id` is honoured **only** if it matches charset
+`[A-Za-z0-9._-]` and length 1..64. Everything else — too long, empty, a space,
+a semicolon, a control byte, non-ASCII, and above all CR or LF — causes the
+value to be **discarded** and a fresh ID generated. Discarded is absolute: the
+rejected bytes are never echoed, never written to the overlay, never logged,
+and never reachable by a handler. There is no sanitising pass, because a
+repaired attacker value is still an attacker value.
+
+**The attack this closes** is CR/LF response-header injection. The charset
+makes it impossible by construction rather than by a sanitiser that must be
+remembered at every write site; the suites send `\r\n` anyway, because a
+construction argument is a claim until something asserts it.
+
+Four properties are recorded because a later change would break them silently:
+
+* **The ID is NOT unguessable, and is never authentication.** Generation is a
+  per-process seed (mixed from two ASLR-derived addresses — no import, see
+  below) plus a monotonic counter: enough to be unique, deliberately not enough
+  to be unpredictable. `core:crypto` is not imported, partly because a request
+  ID must not be mistaken for a secret.
+* **No dependency was added.** `web`'s direct-import set stays at the five
+  pinned in `build/phase1-direct-dependencies.txt`. A cycle counter
+  (`base:intrinsics`) or a clock (`core:time`) would each have grown it for a
+  value that is explicitly not a secret.
+* **The header is APPENDED, never seeded first.** WP4 ratified `Allow` first
+  and `Content-Type` second for a 405, and a merged WP17 test pins both by
+  index; seeding at slot 0 would have renumbered them. `RESPONSE_HEADER_MAX`
+  grows 2 → 3.
+* **It is attached where response headers are BUILT**, not by the middleware's
+  unwind code, which is what puts it on a 404, a 405 **and** the driver's
+  standardized 500. WP22 measured that the driver finalizes a missing response
+  after the chain has unwound — a middleware stamping on the way out would miss
+  exactly the response an operator most needs to correlate.
+
+**The counter is not atomic**, and that is a stated assumption: one server per
+process (audit R-10) with a single-threaded event loop. Phase 4 owns
+concurrency and owns this line with it.
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `request_id` | A | WP23 | `tests/wp23-public-surface/contract_test.odin::wp23_public_signature_is_pinned` | `tests/wp23-public-surface/contract_test.odin::wp23_public_crlf_is_never_echoed` | `docs/middleware.md::web.request_id` | a `Handler` value; the effective ID is copied into fixed request-local storage on the Context, viewed by the committed response and by the overlay; owns no allocation |

@@ -58,6 +58,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp19_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp20_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp21_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp22_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp23_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -754,6 +755,36 @@ echo "--- WP22 public surface contract: web.logger and the bytes it writes (odin
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp22-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp22-public-surface"
+
+# ---------------------------------------------------------------------------
+# WP23 — THE `request_id` MIDDLEWARE AND ITS TRUST POLICY (ledger 43 -> 44).
+#
+# The committed Response, the overlay slot, the request-local ID storage and
+# the validator are all package-private, so the internal half runs in a
+# THROWAWAY package exactly like WP2-WP22. It is where the SECURITY assertions
+# live: `Recorded_Response` exposes no headers by design, so "a rejected value
+# never reaches a response header" is unobservable from outside the package.
+# ---------------------------------------------------------------------------
+echo "--- WP23 request_id, internal behavior: response header, overlay, validator (throwaway package) ---"
+URUQUIM_WP23_TMP="$(mktemp -d -t uruquim-wp23-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP23_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP23_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp23-internal/*.odin "$URUQUIM_WP23_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP23_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp23-internal"
+rm -rf "$URUQUIM_WP23_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP23_TMP" || fail "the throwaway WP23 internal-test package was not removed"
+echo "PASS: WP23 internal tests ran against the real sources; throwaway package removed"
+
+# WP23 public surface — the TRUST POLICY as an external consumer meets it: a
+# CR/LF value is discarded rather than repaired, an oversized one is replaced,
+# and a well-formed one is honoured.
+echo "--- WP23 public surface contract: request_id trust policy (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp23-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp23-public-surface"
 
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never

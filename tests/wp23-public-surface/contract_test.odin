@@ -36,23 +36,27 @@ Seen :: struct {
 	calls: int,
 }
 
-seen_sink: ^Seen
-
+// The sink travels through `context.user_ptr`, NOT a package global (the WP20
+// precedent). The runner executes tests on several threads at once, and a
+// shared global sink is a data race that shows up as one test reading another
+// test's request ID — which is exactly how the first draft of this file failed.
+// `context` is per-test and propagates synchronously into the handler.
 capture_id :: proc(ctx: ^web.Context) {
 	value, ok := web.header(ctx, "X-Request-Id")
-	if seen_sink != nil {
-		seen_sink.calls += 1
-		seen_sink.found = ok
-		seen_sink.n = copy(seen_sink.id[:], value)
+	sink := (^Seen)(context.user_ptr)
+	if sink != nil {
+		sink.calls += 1
+		sink.found = ok
+		sink.n = copy(sink.id[:], value)
 	}
 	web.text(ctx, .OK, "ok")
 }
 
-seen_id :: proc() -> string {
-	if seen_sink == nil {
+seen_id :: proc(sink: ^Seen) -> string {
+	if sink == nil {
 		return ""
 	}
-	return string(seen_sink.id[:seen_sink.n])
+	return string(sink.id[:sink.n])
 }
 
 // ---------------------------------------------------------------------------
@@ -62,8 +66,7 @@ seen_id :: proc() -> string {
 @(test)
 wp23_public_absent_inbound_is_generated_and_readable :: proc(t: ^testing.T) {
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	defer web.destroy(&a)
@@ -74,14 +77,14 @@ wp23_public_absent_inbound_is_generated_and_readable :: proc(t: ^testing.T) {
 
 	testing.expect_value(t, res.status, web.Status.OK)
 	testing.expect(t, sink.found, "the handler must be able to read the generated ID")
-	testing.expect(t, len(seen_id()) > 0, "a generated ID is not empty")
-	testing.expect(t, len(seen_id()) <= 64, "a generated ID respects the ratified length bound")
+	testing.expect(t, len(seen_id(&sink)) > 0, "a generated ID is not empty")
+	testing.expect(t, len(seen_id(&sink)) <= 64, "a generated ID respects the ratified length bound")
 
 	// The generated form must satisfy the same charset the inbound policy
 	// enforces: the framework does not hold itself to a looser rule than it
 	// imposes on clients.
-	for i in 0 ..< len(seen_id()) {
-		c := seen_id()[i]
+	for i in 0 ..< len(seen_id(&sink)) {
+		c := seen_id(&sink)[i]
 		ok :=
 			(c >= 'A' && c <= 'Z') ||
 			(c >= 'a' && c <= 'z') ||
@@ -96,8 +99,7 @@ wp23_public_absent_inbound_is_generated_and_readable :: proc(t: ^testing.T) {
 @(test)
 wp23_public_two_requests_get_different_ids :: proc(t: ^testing.T) {
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	defer web.destroy(&a)
@@ -106,10 +108,10 @@ wp23_public_two_requests_get_different_ids :: proc(t: ^testing.T) {
 
 	_ = web.test_request(&a, .GET, "/ping")
 	first: [128]u8
-	first_n := copy(first[:], seen_id())
+	first_n := copy(first[:], seen_id(&sink))
 
 	_ = web.test_request(&a, .GET, "/ping")
-	second := seen_id()
+	second := seen_id(&sink)
 
 	testing.expect(t, second != string(first[:first_n]), "each request gets its own ID")
 }
@@ -123,8 +125,7 @@ wp23_public_an_id_never_leaks_into_the_next_request :: proc(t: ^testing.T) {
 	// accident into a defended invariant on the day something starts being
 	// pooled.
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	defer web.destroy(&a)
@@ -133,15 +134,15 @@ wp23_public_an_id_never_leaks_into_the_next_request :: proc(t: ^testing.T) {
 
 	// A request that supplies a valid ID, then one that supplies none.
 	_ = web.test_request(&a, .GET, "/ping", headers = []string{"X-Request-Id: caller-supplied-1"})
-	testing.expect_value(t, seen_id(), "caller-supplied-1")
+	testing.expect_value(t, seen_id(&sink), "caller-supplied-1")
 
 	_ = web.test_request(&a, .GET, "/ping")
 	testing.expect(
 		t,
-		seen_id() != "caller-supplied-1",
+		seen_id(&sink) != "caller-supplied-1",
 		"the second request must never observe the first request's ID",
 	)
-	testing.expect(t, len(seen_id()) > 0, "the second request still gets an ID of its own")
+	testing.expect(t, len(seen_id(&sink)) > 0, "the second request still gets an ID of its own")
 }
 
 // ---------------------------------------------------------------------------
@@ -153,8 +154,7 @@ wp23_public_a_valid_inbound_id_is_honoured :: proc(t: ^testing.T) {
 	// Honouring a well-formed inbound ID is what makes correlation work behind
 	// a gateway that already stamps one.
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	defer web.destroy(&a)
@@ -168,7 +168,7 @@ wp23_public_a_valid_inbound_id_is_honoured :: proc(t: ^testing.T) {
 		headers = []string{"X-Request-Id: abc.DEF_123-xyz"},
 	)
 
-	testing.expect_value(t, seen_id(), "abc.DEF_123-xyz")
+	testing.expect_value(t, seen_id(&sink), "abc.DEF_123-xyz")
 }
 
 @(test)
@@ -177,8 +177,7 @@ wp23_public_crlf_is_never_echoed :: proc(t: ^testing.T) {
 	// rejected by charset, and the handler must see a framework-generated ID
 	// with no trace of the client's bytes.
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	defer web.destroy(&a)
@@ -195,12 +194,12 @@ wp23_public_crlf_is_never_echoed :: proc(t: ^testing.T) {
 	testing.expect(t, sink.found, "a rejected inbound value is REPLACED, never left absent")
 	testing.expect(
 		t,
-		!strings.contains(seen_id(), "\r") && !strings.contains(seen_id(), "\n"),
+		!strings.contains(seen_id(&sink), "\r") && !strings.contains(seen_id(&sink), "\n"),
 		"no CR or LF may survive into the effective ID",
 	)
 	testing.expect(
 		t,
-		!strings.contains(seen_id(), "evil") && !strings.contains(seen_id(), "Injected"),
+		!strings.contains(seen_id(&sink), "evil") && !strings.contains(seen_id(&sink), "Injected"),
 		"an attacker-supplied value must be DISCARDED, not repaired",
 	)
 }
@@ -208,8 +207,7 @@ wp23_public_crlf_is_never_echoed :: proc(t: ^testing.T) {
 @(test)
 wp23_public_oversized_and_malformed_values_are_replaced :: proc(t: ^testing.T) {
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	// 65 characters: one past the ratified bound.
 	long: [65]u8
@@ -238,12 +236,12 @@ wp23_public_oversized_and_malformed_values_are_replaced :: proc(t: ^testing.T) {
 		testing.expect(t, sink.found, "a rejected value is replaced by a generated one")
 		testing.expect(
 			t,
-			len(seen_id()) > 0 && len(seen_id()) <= 64,
+			len(seen_id(&sink)) > 0 && len(seen_id(&sink)) <= 64,
 			"the replacement respects the ratified bound",
 		)
 		testing.expect(
 			t,
-			!strings.contains(header_line, seen_id()),
+			!strings.contains(header_line, seen_id(&sink)),
 			"no part of a rejected client value may appear in the effective ID",
 		)
 	}
@@ -258,8 +256,7 @@ wp23_public_is_opt_in :: proc(t: ^testing.T) {
 	// Without the middleware there is no overlay and no ID: `web.header` reads
 	// exactly what arrived, which is nothing.
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	defer web.destroy(&a)
@@ -277,8 +274,7 @@ wp23_public_without_the_middleware_an_inbound_id_is_just_a_header :: proc(t: ^te
 	// arrived value is returned verbatim, unvalidated, because validation is
 	// the MIDDLEWARE's job and not the accessor's.
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	defer web.destroy(&a)
@@ -287,7 +283,7 @@ wp23_public_without_the_middleware_an_inbound_id_is_just_a_header :: proc(t: ^te
 	_ = web.test_request(&a, .GET, "/ping", headers = []string{"X-Request-Id: whatever;;"})
 
 	testing.expect(t, sink.found, "the arrived header is still readable")
-	testing.expect_value(t, seen_id(), "whatever;;")
+	testing.expect_value(t, seen_id(&sink), "whatever;;")
 }
 
 @(test)
@@ -298,8 +294,7 @@ wp23_public_signature_is_pinned :: proc(t: ^testing.T) {
 	handler_sig: web.Handler = web.request_id
 
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	defer web.destroy(&a)
@@ -316,8 +311,7 @@ wp23_public_request_id_app_tears_down_cleanly :: proc(t: ^testing.T) {
 	// `odin test` tracks allocations: the ID lives in fixed request-local
 	// storage and must own nothing.
 	sink: Seen
-	seen_sink = &sink
-	defer seen_sink = nil
+	context.user_ptr = &sink
 
 	a := web.app()
 	web.use(&a, web.request_id)
