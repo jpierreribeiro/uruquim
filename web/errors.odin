@@ -756,6 +756,34 @@ FRAMEWORK_MESSAGE_USE_AFTER_DISPATCH ::
 	"or request. This application is rejected fail-closed: every request will " +
 	"answer 500 and web.serve will refuse to start."
 
+// WP30 — the registration-conflict member of the same fail-closed family.
+//
+// WHY IT ADDS NO `Framework_Error` MEMBER, decided under the ADR-029
+// delegation. The WP18 family — `mount_poison`, `mount_poison_prefix`,
+// `router_poison_closed` — poisons with a static diagnostic and NO enum member,
+// because the enum names failures that reach an OBSERVER, and an observer is
+// registered on an App that is already rejected: `serve` refuses to start and
+// every dispatch answers 500 through `mw_poison_intercept`, which reports
+// `.Use_After_Route` for the whole poisoned family already. `Framework_Error`
+// is a public enum pinned byte-for-byte by the freeze snapshot, so growing it
+// is a signature amendment; spending one for a failure no observer can be alive
+// to see would buy nothing and cost the ledger. A conflict therefore joins the
+// WP18 family exactly as it stands. Reversible in the cheap direction: adding
+// the member later is an amendment, removing one would be a break.
+//
+// The offending route is appended by `route_conflict_poison` through a fixed
+// buffer — never `core:fmt` — exactly like the invalid-prefix diagnostic.
+@(private)
+FRAMEWORK_MESSAGE_ROUTE_CONFLICT ::
+	"uruquim: two routes were registered for the same method and the same path " +
+	"shape, so the second could never serve — the first already owns that slot " +
+	"and first registration wins. PARAMETER NAMES DO NOT DISTINGUISH ROUTES: " +
+	"\"/users/:id\" and \"/users/:uid\" are the same pattern to the router, and " +
+	"a prefix given to web.mount can compose one that collides with a route " +
+	"registered directly. Remove the duplicate registration, or change the path. " +
+	"This application is rejected fail-closed: every request will answer 500 " +
+	"and web.serve will refuse to start."
+
 @(private)
 framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_location) {
 	report := Framework_Report {

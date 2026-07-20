@@ -168,6 +168,16 @@ mount :: proc(a: ^App, prefix: string, r: ^Router) {
 			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
 			return
 		}
+
+		// WP30: `index_insert` diagnoses a registration conflict in place and
+		// still returns true, so the poison is read here rather than from the
+		// result. Stopping matters: continuing would copy the rest of the
+		// router into an application that is already rejected, and — worse —
+		// a second colliding route would log a second diagnostic, when the
+		// family's rule is that the FIRST diagnosis stands.
+		if a.private.poisoned {
+			return
+		}
 	}
 }
 

@@ -112,14 +112,21 @@ Pattern rules:
 
 - patterns begin with `/`; `/` itself is valid;
 - `:name` matches exactly one whole segment and never spans a `/`;
-- at most one `:param` per pattern in Phase 1; no wildcards;
+- up to eight `:param` segments per pattern (WP33); no wildcards. A pattern
+  declaring more is invalid and never matches;
 - a static route beats a parametric one by SHAPE, not by registration order;
 - methods are isolated: registering GET does not register POST;
-- **nothing is normalized.** `/users` and `/users/` are different paths.
-  Percent-encoding and `.`/`..` segments are not decoded.
+- **nothing is normalized.** `/users` and `/users/` are different paths, and
+  percent-encoding is neither decoded nor rewritten. WP31b adds REJECTION, not
+  transformation: a dot segment, an interior empty segment, a percent-encoded
+  slash or a percent-encoded NUL is answered `400` before matching.
 
-Registration conflicts are not diagnosed in Phase 1. A pattern this dispatcher
-cannot interpret simply never matches.
+Registration conflicts ARE diagnosed (WP30). Two routes registered for the same
+method and the same path shape reject the application fail-closed — every
+request answers 500 and `web.serve` refuses to start — because the second route
+could never have served. Parameter NAMES do not distinguish routes: `/users/:id`
+and `/users/:uid` are the same pattern. A pattern this dispatcher cannot
+interpret is a separate case and simply never matches.
 
 `web.app()` adds two automatic responses; `web.bare()` adds neither:
 

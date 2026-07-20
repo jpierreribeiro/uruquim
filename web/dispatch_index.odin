@@ -111,6 +111,12 @@ index_node :: proc(a: ^App) -> int {
 // match, and must never make a path look "known under another method" either.
 // It reports whether the route reached the index. A caller that is fail-closed
 // about allocation — `mount` — must reject the application when it did not.
+//
+// WP30: the RETURN VALUE is about allocation only. A registration conflict is
+// diagnosed and poisoned here, in place, and still returns `true` — see
+// `route_conflict_poison` for why the two failures must not share a channel.
+// A caller that continues registering must therefore re-read `a.private.poisoned`
+// rather than the result.
 @(private)
 index_insert :: proc(a: ^App, entry_index: int) -> bool {
 	entry := &a.private.routes[entry_index]
@@ -170,13 +176,67 @@ index_insert :: proc(a: ^App, entry_index: int) -> bool {
 		node = child
 	}
 
-	// FIRST REGISTRATION WINS, which is what the flat scan did: it returned the
-	// first entry in table order that matched, so a duplicate method+pattern
-	// never reached dispatch. Overwriting here would silently change that.
-	if a.private.route_index.nodes[node].by_method[entry.method] == ROUTE_NODE_NONE {
-		a.private.route_index.nodes[node].by_method[entry.method] = entry_index
+	// WP30 — THE CONFLICT IS THE OCCUPIED SLOT, and that is why this check lives
+	// here and nowhere else.
+	//
+	// First registration wins is what the flat scan did: it returned the first
+	// entry in table order that matched, so a duplicate method+pattern never
+	// reached dispatch — silently. WP4 D5 deferred the diagnosis to Phase 3 and
+	// this is it: diagnose-and-poison, the ADR-029-delegated arm, through the
+	// ADR-019 mechanism that already exists rather than a second one.
+	//
+	// WHY THE TREE MAKES THIS HONEST. A linear scan can only compare pattern
+	// TEXT, so it would have to decide by hand that "/users/:id" and
+	// "/users/:uid" are the same route. The tree does not have to decide: both
+	// walk to the SAME node, because a parametric segment is one child whatever
+	// it is called. An occupied `by_method` slot therefore IS the conflict, in
+	// every spelling of it — including the one where a `mount` prefix composes a
+	// pattern that collides with a directly registered route. This is exactly
+	// the WP30 caution about a representation change becoming a behaviour change
+	// by accident, answered deliberately: the tree surfaces conflicts the scan
+	// never noticed, so the behaviour change is SHIPPED and tested, not silent.
+	//
+	// The winner is left in place. The application is rejected, so which entry
+	// holds the slot decides nothing — but leaving it means the poisoned App's
+	// index is still the one first-registration-wins built, and a diagnosis
+	// never rearranges the thing it is diagnosing.
+	if a.private.route_index.nodes[node].by_method[entry.method] != ROUTE_NODE_NONE {
+		route_conflict_poison(a, entry.method, entry.pattern)
+		return true
 	}
+	a.private.route_index.nodes[node].by_method[entry.method] = entry_index
 	return true
+}
+
+// route_conflict_poison rejects the application and names the losing route.
+//
+// It returns `true` to its caller's caller through `index_insert`, not `false`:
+// `false` there means the index COULD NOT ALLOCATE, and both callers answer
+// that with the allocation diagnostic. A conflict is a different failure with
+// its own sentence, and reporting it as an allocation failure would send a
+// developer looking for an out-of-memory condition that never happened.
+//
+// The composed tail is `METHOD pattern` through a fixed buffer, like
+// `mount_poison_prefix`: the approved sentence is never touched, and a pattern
+// longer than the tail is truncated — its prefix identifies it.
+@(private)
+route_conflict_poison :: proc(a: ^App, method: Method, pattern: string, loc := #caller_location) {
+	a.private.poisoned = true
+
+	logger := context.logger
+	if logger.procedure == nil {
+		return
+	}
+
+	buf: [len(FRAMEWORK_MESSAGE_ROUTE_CONFLICT) + MW_POISON_DETAIL_MAX]u8
+	n := copy(buf[:], FRAMEWORK_MESSAGE_ROUTE_CONFLICT)
+	n += copy(buf[n:], " Offending route: \"")
+	n += copy(buf[n:], method_token(method))
+	n += copy(buf[n:], " ")
+	n += copy(buf[n:], pattern)
+	n += copy(buf[n:], "\"")
+
+	logger.procedure(logger.data, .Error, string(buf[:n]), logger.options, loc)
 }
 
 // index_destroy frees the tree exactly once and returns it to its zero state.

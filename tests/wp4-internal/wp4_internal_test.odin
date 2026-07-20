@@ -429,8 +429,22 @@ wp4_allow_lists_only_registered_methods :: proc(t: ^testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 8. Several registrations of the same method+path produce ONE `Allow` entry,
-//    with no duplicates.
+// 8. `Allow` names each method exactly once, and never "GET, GET".
+//
+// AMENDED BY WP30, and the reason belongs here rather than in a commit message.
+// This test used to construct the duplicate the obvious way — `get(&a, "/dup")`
+// twice — and its own comment said why that was allowed: "duplicate
+// registrations are not rejected in WP4; definitive conflict diagnostics are
+// Phase 3 (D5)". WP30 IS that Phase 3 answer. A duplicate method+pattern now
+// rejects the application fail-closed, so the old construction no longer builds
+// an App that dispatches at all, and a test written against it would be pinning
+// behaviour the framework has deliberately stopped having.
+//
+// The PROPERTY is unchanged and still worth a test: the `Allow` builder walks
+// the six `by_method` slots of one node, so a method can appear at most once by
+// construction. What changed is the only legal way to reach the builder. The
+// duplicate half of the old test now lives in `tests/wp30-internal/` and
+// `tests/wp30-public-surface/`, where the answer to it is the 500.
 // ---------------------------------------------------------------------------
 
 @(test)
@@ -438,11 +452,7 @@ wp4_allow_has_no_duplicates :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
 
-	// Duplicate registrations are not rejected in WP4 — definitive conflict
-	// diagnostics are Phase 3 (D5) — but they must not produce "GET, GET".
 	get(&a, "/dup", wp4_noop_handler)
-	get(&a, "/dup", wp4_noop_handler)
-	post(&a, "/dup", wp4_noop_handler)
 	post(&a, "/dup", wp4_noop_handler)
 
 	ctx: Context

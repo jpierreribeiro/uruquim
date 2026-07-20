@@ -62,6 +62,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp23_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp24_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp25_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp26_bench.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp30_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
@@ -832,6 +833,34 @@ echo "--- WP33 multi-parameter routes without a map (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp33-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp33-public-surface"
+
+# WP30 — registration conflict diagnostics. NO public symbol: the five verbs and
+# `mount` keep their frozen signatures, and registration still reports through
+# the ADR-019 mechanism rather than a return value. The public suite sees only
+# what an application can see — the 500 — and spends most of its tests on the
+# routes that must KEEP serving, because a rejection rule that quietly grew
+# would break applications that were correct when they were written.
+echo "--- WP30 registration conflicts: the public half (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp30-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp30-public-surface"
+
+# The internal half: `poisoned` is private, the diagnostic goes to the log, and
+# which branch `serve` took is not observable from outside the package. All
+# three are the contract, so the suite runs as a throwaway internal package
+# against the real sources — the WP2-WP18 arrangement.
+echo "--- WP30 registration conflicts: diagnose and poison (throwaway package) ---"
+URUQUIM_WP30_TMP="$(mktemp -d -t uruquim-wp30-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP30_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP30_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp30-internal/*.odin "$URUQUIM_WP30_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP30_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp30-internal"
+rm -rf "$URUQUIM_WP30_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP30_TMP" || fail "the throwaway WP30 internal-test package was not removed"
+echo "PASS: WP30 conflict diagnostics ran against the real sources; throwaway package removed"
 
 # WP32b — automatic HEAD and OPTIONS.
 #

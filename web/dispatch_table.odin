@@ -147,16 +147,23 @@ ALLOW_VALUE_MAX :: 29
 // uses that same allocator — read back from the array — so registration and
 // teardown can never disagree about which allocator owns the storage.
 //
-// WP4 REPORTS NOTHING. A malformed pattern, a duplicate method+path, or a
-// pattern with more than one `:param` is stored as given and returns no error:
-// definitive registration-conflict detection and its diagnostics are Phase 3
-// (D5), and inventing an error contract here would freeze a public
-// registration-error API that no work package has ratified.
+// IT STILL RETURNS NO ERROR, and it never will: registration reports through
+// the ADR-019 fail-closed mechanism, not through a return value. Inventing an
+// error contract here would freeze a public registration-error API that no work
+// package has ratified — and the five verbs' signatures are frozen anyway.
 //
-// What WP4 DOES guarantee is that such a registration cannot behave like a
-// supported one. `pattern_classify` marks it invalid, and both lookup and the
-// `Allow` builder skip invalid entries, so it never matches a request and never
-// contributes a method to a 405.
+// A MALFORMED PATTERN is stored as given and marked invalid by
+// `pattern_classify`; both lookup and the `Allow` builder skip invalid entries,
+// so it never matches a request and never contributes a method to a 405. That
+// is WP4's guarantee and it is unchanged.
+//
+// A CONFLICTING PATTERN is a different thing and, since WP30, has a different
+// answer: a second registration for the same method and the same path shape
+// REJECTS the application fail-closed, because the second route could never
+// serve and Phase 1's silence about that was the D5 debt this phase pays. The
+// detection lives in `index_insert`, where an occupied slot IS the conflict.
+// The App is poisoned by the time this returns, so the next `route_register`
+// takes the early exit above and the first diagnosis stands.
 @(private)
 route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handler) {
 	// WP18: a registration on an already-rejected owner stays quiet (the first

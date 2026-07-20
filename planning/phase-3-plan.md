@@ -496,6 +496,56 @@ changes observably.
   it poisoned, but re-hides the conflicts it existed to surface, and programs
   written after it shipped will rely on registration failing loudly.
 
+**WP30 DONE, 2026-07-20 — `web/dispatch_index.odin`, `tests/wp30-internal`,
+`tests/wp30-public-surface`, `build/check_wp30_controls.sh`.** Diagnose-and-poison,
+**decided under the ADR-029 delegation** (§2b) and implemented through the
+existing ADR-019 mechanism rather than a second one. **No public symbol**: the
+five verbs and `mount` keep their frozen signatures, registration still returns
+void, and the ledger does not move.
+
+**The conflict is the occupied slot**, and that is what makes the WP29 caution
+answerable instead of merely noted. A linear scan could only compare pattern
+TEXT, so it would have had to decide by hand that `/users/:id` and `/users/:uid`
+are one route; the tree does not decide, because both walk to the same node — a
+node has ONE parametric child whatever it is called. So the representation
+change surfacing conflicts the scan never noticed is **shipped and tested**, not
+silent. The same mechanism catches a `mount` prefix composing a pattern that
+collides with a directly registered route, with nothing in `mount` comparing
+strings for it.
+
+**Decided in implementation, and recorded because the plan required it:
+`Framework_Error` gains NO member.** The WP18 fail-closed family —
+`mount_poison`, `mount_poison_prefix`, `router_poison_closed` — already poisons
+with a static diagnostic and no enum member. The enum names failures that reach
+an OBSERVER, and an observer cannot be alive to see this one: the App is already
+rejected, `serve` refuses, and every dispatch answers 500 through the guard that
+reports `.Use_After_Route` for the whole family. Spending a byte-pinned public
+enum member on it would buy nothing and cost a signature amendment. Adding the
+member later is an amendment; removing one would be a break — the reversible
+arm, as the delegation requires.
+
+**Three mutation controls**, because a diagnostic has two ways to be wrong: the
+detection deleted (Phase 1 restored) turns the poison tests red; the detection
+**inverted** — every route reads as a conflict — turns the *not*-a-conflict
+tests red; and a `mount` that does not stop at the first diagnosis turns the
+one-line test red. The second is the one worth having: a suite that only proved
+conflicts are caught would stay green against an implementation that rejects
+everything.
+
+**One existing test was amended and its reason is in the file.** WP4's
+`wp4_allow_has_no_duplicates` built its fixture by registering `/dup` twice, and
+its own comment said why that was legal — "definitive conflict diagnostics are
+Phase 3 (D5)". This is that answer, so the fixture became illegal; the property
+it tested is unchanged and is now reached through two methods on one path.
+
+**Two findings, both predating this work package.** `tests/wp33-public-surface`
+shared one file-scope capture variable between two handlers on an eight-thread
+runner — a data race that failed at random and did, once, under an unrelated
+change; each test now owns its sink. And `docs/ai-context.md` /
+`docs/canonical-patterns.md` still stated the Phase-1 answers for the WP31 path
+policy and the WP33 parameter bound, both of which shipped without the docs
+following; corrected in this change.
+
 ### WP31 — Path normalisation policy
 
 **Type: SPEC + IMPLEMENTATION. Requires owner approval — observable HTTP
