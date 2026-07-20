@@ -128,6 +128,18 @@ Context_Internal :: struct {
 	miss_kind:  Miss_Kind,
 	miss_allow: string,
 
+	// WP20 — the observer this request reports to (copied from the App by the
+	// driver, nil when none is registered) and the REGISTERED PATTERN this
+	// request matched (empty on a miss).
+	//
+	// The observer is a PROCEDURE POINTER, not an `^App`: the back-pointer
+	// `Context_Internal` deliberately does not have (WP4 D3) stays absent, and
+	// a failure inside a handler still reaches the observer. `route` is a view
+	// over the App-owned pattern, valid until `destroy` — which is what lets an
+	// observer store an event by value without dangling (§6.2).
+	observer: proc(event: Framework_Event),
+	route:    string,
+
 	// WP19 — the ADR-027 request-header OVERLAY, read by `web.header` before
 	// the arrived headers ("the effective request header"). ONE slot, on
 	// purpose: Phase 2 has exactly one writer — WP23's request-ID middleware —

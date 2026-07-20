@@ -293,6 +293,7 @@ body :: proc(ctx: ^Context, dst: ^$T) -> bool {
 		if !ctx.private.response.committed {
 			error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
 		}
+		framework_observe_request(T, ctx, .Body_Consumed_Twice)
 		return false
 	}
 	ctx.private.body_state = .Consumed
@@ -322,6 +323,7 @@ body :: proc(ctx: ^Context, dst: ^$T) -> bool {
 			// response is still uncommitted (R-05), then answer 500.
 			framework_report(T, .Body_Decode_Failed)
 			error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
+			framework_observe_request(T, ctx, .Body_Decode_Failed)
 		}
 		return false
 	}

@@ -55,6 +55,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp16_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp17_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp18_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp19_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp20_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -632,6 +633,44 @@ echo "--- WP19 public surface contract: header, bearer_token, headers param (odi
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp19-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp19-public-surface"
+
+# WP20 — the typed framework-error observer: `observe`, `Framework_Event`,
+# and the now-public `Framework_Error`.
+#
+# The emit helpers, the Context-carried observer slot and the recorded route
+# pattern are package-private, so the internal tests run in a THROWAWAY
+# package exactly like WP2-WP19.
+echo "--- WP20 framework-error observer, internal behavior (throwaway package) ---"
+URUQUIM_WP20_TMP="$(mktemp -d -t uruquim-wp20-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP20_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP20_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp20-internal/*.odin "$URUQUIM_WP20_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP20_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp20-internal"
+rm -rf "$URUQUIM_WP20_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP20_TMP" || fail "the throwaway WP20 internal-test package was not removed"
+echo "PASS: WP20 internal tests ran against the real sources; throwaway package removed"
+
+# WP20 public surface — an EXTERNAL consumer registering an observer. The
+# redaction guarantee is visible here as a SIGNATURE: an observer receives the
+# event by value and nothing else, so it cannot respond or read a request byte
+# the event does not carry.
+echo "--- WP20 public surface contract: observe, Framework_Event (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp20-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp20-public-surface"
+
+# WP20 socket contract — `Serve_Listen_Failed` needs a genuinely occupied port,
+# so it is the one variant that cannot be provoked in memory. Under an
+# EXTERNAL timeout like every socket suite: a `serve` that blocked instead of
+# returning would hang, and a hang is a failure, never a stalled gate.
+echo "--- WP20 socket contract: listen failure is observed (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp20-socket" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp20-socket" ||
+  fail "the WP20 socket observer contract did not pass within the timeout"
 
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never

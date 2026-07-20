@@ -317,6 +317,10 @@ dispatch :: proc(a: ^App, ctx: ^Context) {
 	entry, param, found := route_lookup(a, ctx.request.method, ctx.request.path)
 	if found {
 		ctx.private.param = param
+		// WP20: the LOW-CARDINALITY route identity a framework event carries —
+		// the registered pattern, App-owned, never the raw path (§6.2). A miss
+		// leaves it empty, which is the event's "no route" answer.
+		ctx.private.route = entry.pattern
 		chain_enter(a, ctx, entry.chain_start, entry.chain_len)
 		return
 	}

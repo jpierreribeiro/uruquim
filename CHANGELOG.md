@@ -15,6 +15,15 @@ freeze amendments.
 
 ### Added
 
+- **Typed framework-error observer** (Phase 2, WP20): `web.observe`,
+  `web.Framework_Event` and the now-public `web.Framework_Error`. One observer
+  per application receives a typed event — kind, method, registered route
+  pattern, committed status, offending typeid — for every framework-detected
+  failure, on both transports, exactly once. The event carries **no message
+  and no request path**: route identity is low-cardinality by construction,
+  and an observer receives the event by value and nothing else, so it can
+  neither respond nor read request bytes. Installing one changes no response.
+  Application ledger 39 → 42 (freeze Amendment 7).
 - **Request header lookup** (Phase 2, WP19): `web.header` and
   `web.bearer_token`. Pure lookups — `(value, ok)`, no automatic response,
   nothing ever logged, values are request-lifetime views. Names are
