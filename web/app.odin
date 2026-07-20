@@ -32,6 +32,13 @@ App_Internal :: struct {
 	// replaces this table wholesale without any public change.
 	routes: [dynamic]Route_Entry,
 
+	// WP29 route index: the radix tree chosen by the WP28 shootout. It is an
+	// INDEX over `routes` — it stores integers into that array and owns nothing
+	// else — so the flat table remains the single owner of every pattern,
+	// handler and chain index pair. Like everything else here it is LAZY: an
+	// application that registers no route allocates nothing for it.
+	route_index: Route_Index,
+
 	// WP4 default-policy flag: whether dispatch installs the automatic 404 and
 	// 405. `app()` sets it; `bare()` leaves it false. It is the mechanism behind
 	// the documented app()/bare() distinction, and it deliberately is NOT

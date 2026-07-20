@@ -131,7 +131,7 @@ is a known, measured 838 ns.** That is a fact WP29 may use, not a plan.
 
 ---
 
-## 4. THE CAVEAT WP29 MUST NOT IGNORE
+## 4. THE CAVEAT WP29 MUST NOT IGNORE — **WITHDRAWN BY WP29, see the note at the end of this section**
 
 **This shootout measures matchers in isolation. It does not measure the
 framework.**
@@ -162,6 +162,27 @@ And one gap named rather than implied: **where the other 90% goes has not been
 measured.** WP27 accounted for the allocation *count* on the socket path, not
 the *time*. That is a real open question, and on this evidence it is worth more
 than any further router work.
+
+### WITHDRAWN, 2026-07-20, by WP29's measurement
+
+**Everything above in §4 is wrong, and `planning/router-implementation.md` §3
+explains why.** Matching was approximately **99%** of end-to-end cost at 5,000
+routes, not 10%: replacing it took dispatch from 883 us to 1.5 us.
+
+The error was a methodology failure. The `linear` entrant in this shootout is
+one I wrote for the shootout, and it pre-split every pattern at build time —
+this file says so, approvingly. **The shipped framework was not a candidate and
+had not precomputed:** `route_lookup` re-parsed the pattern string on every
+comparison, for every route, on every request, making the real baseline roughly
+10x slower than the "linear" measured here. The 10% figure divided the real
+scan's end-to-end cost by an isolated faster reimplementation's.
+
+**A baseline must be the shipped code, or it is a different program.** The
+fair-head-start rule was right for comparing candidates to each other and wrong
+the moment one of those numbers was compared to production.
+
+What survives: at low cardinality there is still nothing to win, and the radix
+tree is justified there because it does not degrade.
 
 ---
 

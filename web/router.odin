@@ -160,6 +160,14 @@ mount :: proc(a: ^App, prefix: string, r: ^Router) {
 			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
 			return
 		}
+
+		// WP29: a mounted route joins the index exactly like a directly
+		// registered one. `mount` COPIES, so the entry the index points at is
+		// the App's own.
+		if !index_insert(a, len(a.private.routes) - 1) {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}
 	}
 }
 
