@@ -15,6 +15,16 @@ freeze amendments.
 
 ### Added
 
+- **Route organisation** (Phase 2, WP18): `web.Router`, `web.router` and
+  `web.mount`. A Router accepts the same `use` and the same five registration
+  verbs an App does (it embeds an App — no new forms, no mutated signatures),
+  and `mount(&app, "/prefix", &r)` attaches every route at prefix + pattern
+  verbatim. Chains compose outermost-first: app globals, each enclosing
+  router, the handler. Route-level middleware is a one-route Router
+  (ADR-025 B). Fail-closed: an invalid prefix, a mis-ordered router, a
+  mounted-router write, or a second mount rejects the application with a
+  diagnostic. There is no `web.group`, ever (ADR-024). Application ledger
+  34 → 37 (freeze Amendment 4).
 - **Middleware** (Phase 2, WP17): `web.use` and `web.next` — onion execution
   with exact reverse unwind, total short-circuit, and a monotonic per-request
   cursor (a second `next()` is a no-op; the handler runs exactly once).
