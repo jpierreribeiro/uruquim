@@ -80,6 +80,27 @@ for URUQUIM_NAME in $URUQUIM_EXPECTED_EXAMPLES; do
     fi
   done
 
+  # A PROMISE IN A COMMENT IS STILL A PROMISE (G-08).
+  #
+  # The scan above deliberately reads code with comments stripped, because a
+  # comment may legitimately NAME a future symbol to say it does not exist.
+  # That blindness had a cost: WP24's auth example told readers that "typed
+  # request-local storage" would arrive in Phase 3 and make `current_user` a
+  # lookup — a feature no ADR has decided, and one research finding C-6 argues
+  # against. It shipped, because the ban list only ever saw the code.
+  #
+  # An example's comments teach as loudly as its code. So the COMMENTS are
+  # scanned too, for the one thing that actually went wrong: a promise that a
+  # named future capability WILL arrive. Naming a thing to deny it stays legal;
+  # scheduling it does not.
+  URUQUIM_COMMENTS="$(grep -oE '//.*$' "$URUQUIM_SRC" || true)"
+  if grep -nEi '(phase [3-5]|later phase|a future phase) (will|is going to|adds|brings|makes)' <<<"$URUQUIM_COMMENTS"; then
+    fail "examples/$URUQUIM_NAME PROMISES a future capability in a comment (G-08). State a cost as permanent until an ADR decides otherwise; do not schedule features in teaching text."
+  fi
+  if grep -nEi 'until then|for now,? (this|the) (cost|limitation)' <<<"$URUQUIM_COMMENTS"; then
+    fail "examples/$URUQUIM_NAME implies a limitation is temporary ('until then'). If no ADR has decided the fix, say the cost is permanent until one does (G-08)."
+  fi
+
   # The canonical call-site rules the examples exist to teach.
   if grep -nE 'or_else[[:space:]]*\{' <<<"$URUQUIM_CODE"; then
     fail "examples/$URUQUIM_NAME uses an 'or_else { ... }' block, which is not valid Odin"

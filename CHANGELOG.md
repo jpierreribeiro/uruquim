@@ -48,9 +48,12 @@ freeze amendments.
   application supplies its own typed gate and typed lookup. The example states
   its cost plainly rather than hiding it — **`current_user` revalidates the
   token on every call**, because a middleware cannot hand a typed value to a
-  handler while `Context` is deliberately not an extension bag (G-03) and
-  typed request-local state is Phase 3. The workaround (call it once, pass the
-  value down) is documented with it.
+  handler while `Context` is deliberately not an extension bag (G-03). Whether
+  a later phase removes that cost is **undecided and not promised**: ADR-004
+  reserves `web.state` for application state, not per-request values, and
+  research finding C-6 argues against a request-scoped extension mechanism
+  altogether. The workaround (call it once, pass the value down) is documented
+  with it and does not depend on a future feature.
   A single canonical **ownership table** now answers the same four questions —
   owner, valid until, may it escape, who cleans up — for every value an
   application can touch, replacing the same rule restated across a dozen doc
