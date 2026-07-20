@@ -402,6 +402,30 @@ this evidence that is worth more than further router work.**
   difference with it, this stops being revertible and becomes a behaviour
   change that applications may already depend on.
 
+**WP29 DONE, 2026-07-20 — `planning/router-implementation.md`.** The flat scan
+is replaced by the radix index; the flat array remains the single owner of every
+pattern, handler and chain index pair, and the tree stores integers into it.
+Built at registration, never at dispatch, so C-5's perimeter does not silently
+acquire a first-request cost. Precedence is now structural rather than enforced
+by loop order.
+
+**End to end at 5,000 mixed routes: 883 us -> 1.5 us on p50, about 594x. And
+dispatch is now FLAT** — 1,341 ns at 5 routes against 1,486 ns at 5,000, an 11%
+difference that sits inside the noise floor. The framework no longer cares how
+many routes an application registers.
+
+**WP28's "matching is only ~10% of end-to-end" caveat is WITHDRAWN.** It was
+approximately 99%. The shootout's `linear` entrant pre-split its patterns at
+build time; the shipped `route_lookup` re-parsed the pattern string on every
+comparison, so the real baseline was ~10x slower than the one measured. **A
+baseline must be the shipped code, or it is a different program** — and the
+correction runs in the flattering direction, which is exactly when a project is
+least likely to check.
+
+**Still owed:** registration cost was not measured, and the tree allocates a node
+per distinct segment plus a map per node. That is now the largest unmeasured
+thing in the router.
+
 ### WP30 — Registration conflict diagnostics
 
 **Type: SPEC + IMPLEMENTATION.** Owner approval if registration behaviour
