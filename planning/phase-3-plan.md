@@ -104,10 +104,22 @@ starts with **two concepts of headroom** before that sentence becomes true of
 this project.
 
 Three Phase-3 work packages propose public surface (WP34 route identity, WP36
-limits, WP37 typed state). **This plan therefore sets an explicit budget: at
-most +4 application symbols in Phase 3**, and the freeze re-runs the lab. If
-the guarded number passes 25, the freeze must say so in those words rather than
-quietly noting a larger table.
+limits, WP37 typed state).
+
+**The budget is stated in CONCEPTS, not symbols, because they are not the same
+unit** — an earlier draft of this plan conflated them. The usage lab counts
+`web.*` names that appear *in a program*. A metrics accessor (WP34) costs a
+symbol and very likely **zero** concepts, because a CRUD service never calls it;
+a limits struct taken at its defaults (WP36) does the same. A symbol budget
+would block a change that costs a reader nothing and wave through one that costs
+three.
+
+**So: the guarded lab program may reach at most 25 concepts, and WP38 measures
+it with the instrument that produced 23.** Symbol growth stays governed by what
+already governs it — G-01 (one name per operation) and G-09 (growth carries
+evidence), per symbol, as in every phase so far. If the guarded number passes
+25, the freeze says so in those words rather than quietly printing a longer
+table.
 
 ---
 
@@ -135,8 +147,10 @@ representations before it can measure them.
 | 28 | P3-2 | Route representation shootout | PROTOTYPE | no — **but must not choose before measuring** |
 | 29 | P3-3 | Router implementation | IMPLEMENTATION | no (internal only) |
 | 30 | P3-4 | Registration conflict diagnostics | SPEC + IMPLEMENTATION | **yes** if it changes registration behaviour |
-| 31 | P3-5 | Path normalisation policy | SPEC + IMPLEMENTATION | **yes** — observable HTTP semantics |
-| 32 | P3-6 | HEAD, OPTIONS, and the 501 decision | SPEC + IMPLEMENTATION | **yes** — observable HTTP semantics |
+| **31a** | P3-5 | Path normalisation — **the policy** | SPEC | **yes** — observable HTTP semantics |
+| **32a** | P3-6 | HEAD, OPTIONS, 501 — **the decision** | SPEC | **yes** — observable HTTP semantics |
+| 31b | P3-5 | Path normalisation — implementation | IMPLEMENTATION | covered by 31a |
+| 32b | P3-6 | HEAD, OPTIONS, 501 — implementation | IMPLEMENTATION | covered by 32a |
 | 33 | P3-7 | Multi-param routes without a map | IMPLEMENTATION | no |
 | 34 | P3-9 | Route identity accessor | SPEC + IMPLEMENTATION | **yes** — public surface |
 | 35 | P3-10 | Arena, buffer reuse and oversize policy | IMPLEMENTATION | no |
@@ -144,14 +158,25 @@ representations before it can measure them.
 | 37 | P3-12 | Typed application state, and the request-scope question | PROTOTYPE + IMPLEMENTATION | **yes** — public surface |
 | 38 | P3-13 | Phase-3 freeze | FREEZE | **yes** |
 
-**Dependencies:** 26 → {27, 28}; {27, 28} → 29; 29 → {30, 31, 32, 33}; 26 → 35;
-{26, 35} → 36; 34 and 37 are independent of the router work and may run in
-parallel; all → 38.
+**Dependencies:** 26 → {27, **31a**, **32a**}; {27, 31a, 32a} → 28 → 29;
+29 → {30, 31b, 32b, 33}; 26 → 35; {26, 35} → 36; 34 and 37 are independent of
+the router work and may run in parallel; all → 38.
 
 **Note the shape:** the first three work packages produce **no user-visible
 feature at all**. That is deliberate and is the single most important structural
 decision in this plan — a performance phase that starts by implementing is a
 performance phase that has chosen its representation by taste.
+
+**WHY 31a AND 32a COME BEFORE THE SHOOTOUT, and this is a correction to the
+first draft of this plan.** Path normalisation decides which paths are *equal*,
+and OPTIONS decides which methods the table must *answer*. Both change what the
+router has to match. Running the shootout first and those decisions afterwards
+gives two bad outcomes and no good one: either WP29 is rewritten once the
+semantics arrive, or — quieter and worse — the semantics get silently
+constrained by a representation chosen without knowing about them. That would be
+a design decision made by scheduling accident. So the two **specs** run before
+the shootout and the two **implementations** after the router exists; the
+approval each needs attaches to the spec half, where the decision actually is.
 
 Note also that P3-8 (precomputed chains) is **absent as its own work package**;
 see §4.
@@ -184,9 +209,16 @@ see §4.
   alternating runs, never a single figure. State the ~100-byte binary-size
   noise floor. A benchmark that cannot distinguish its own noise from a change
   is not a benchmark.
+* **The tolerance is DERIVED, and here is the procedure** — an earlier draft
+  said "measured, not chosen" without saying how, which is an instruction to
+  pick a number and call it measured. Run the unchanged baseline **at least ten
+  times, in alternating order**, and take the observed **p95 spread** as the
+  tolerance floor. A later change counts as a regression only when it exceeds
+  that floor. The number then comes from the machine rather than from taste, and
+  it is re-derived — not inherited — whenever the hardware changes.
 * **Completion criteria.** The harness runs from the gate; the Phase-2 baseline
   is committed as data; re-running on unchanged code reproduces the baseline
-  **within its stated tolerance** — and that tolerance is measured, not chosen.
+  within the derived tolerance above.
 * **Out of scope.** Choosing anything. This work package produces numbers.
 
 ### WP27 — Allocation audit
@@ -237,17 +269,32 @@ see §4.
   bucket** — and is a hypothesis to measure, not a result to adopt.
 * **The losing candidates and their numbers are RECORDED.** A shootout that
   publishes only the winner is a decision dressed as a measurement.
-* **Deliverable.** A representation chosen from data, with the data.
+* **THE STOPPING RULE, stated before any number is collected so it cannot be
+  chosen to fit the result:** *if no candidate beats the incumbent by more than
+  the measured noise floor, at the cardinalities this project actually targets,
+  **the incumbent wins**.* Given FINDING-A, that is a likely outcome at 5 and 50
+  routes — which is what almost every real application has.
+* **A no-op WP29 is a SUCCESS, not a wasted phase.** Without this said out loud,
+  a work package named "router implementation" will produce a router
+  implementation whether or not the data asked for one — which is C-5's warning
+  arriving through a different door. The phase's job is to find out whether a
+  change is warranted, and "it is not" is a finding worth the same as any other.
+* **Deliverable.** A representation chosen from data, with the data — or a
+  recorded decision to keep the current one, with the same data.
 
 ### WP29 — Router implementation
 
 **Type: IMPLEMENTATION. Change classification: internal only.**
 
 * **Public surface. None.**
-* **The hard constraint:** observable behaviour stays **byte-identical to
-  Phase 1/2 for every existing test**, and those tests pass *unchanged and
-  unmodified*. A test edited to accommodate a "performance" change is a
-  behaviour change wearing a costume.
+* **The hard constraint:** every existing test produces a **byte-identical
+  RESPONSE** — same status, same headers, same body — and those tests pass
+  *unchanged and unmodified*. A test edited to accommodate a "performance"
+  change is a behaviour change wearing a costume.
+* **Read that word carefully:** byte-identical *responses* are testable and are
+  required here. Byte-identical *binaries* are not a valid assertion anywhere in
+  this project (FINDING-A). The two words look alike and mean different things;
+  an implementation agent reads both in one sitting.
 * **The pool invariant survives.** WP12 P8 measured a stored `[]Handler`
   dangling into `0xAAAAAAAAAAAAAAAA` the moment the pool reallocated, and P8b
   measured the same defect reading back *correctly* on the plain heap — a
@@ -261,6 +308,12 @@ see §4.
 * **Mutation probes.** The existing WP17/WP18 probes must still pass — and if
   the representation changes the lines they anchor on, the probes are updated
   in the same change with their reasoning, never deleted.
+* **Rollback.** HIGH while the change is internal-only: revert the commit and
+  the old table returns, because no public signature and no observable
+  behaviour moved. That is exactly why the "internal only" classification is
+  worth defending — the moment a representation change drags an observable
+  difference with it, this stops being revertible and becomes a behaviour
+  change that applications may already depend on.
 
 ### WP30 — Registration conflict diagnostics
 
@@ -322,6 +375,10 @@ semantics.**
 * **Capacity ledger row required:** the new fixed bound joins the "fixed at
   compile time" table, with its behaviour when full stated — like every other
   bound in that table.
+* **Rollback.** MEDIUM. No symbol is added, but a pattern that was *invalid*
+  becomes *valid*: applications will register two-param routes, and withdrawing
+  the capacity silently turns those routes into 404s. Reversible only before
+  anyone ships a two-param route.
 
 ### WP34 — Route identity accessor
 
@@ -359,6 +416,11 @@ semantics.**
   here it has done its job; it must not be "fixed" by weakening it.
 * **Peak and retained memory are reported, not only allocation counts** — the
   register asks for exactly this.
+* **Rollback.** MEDIUM, and it decays. Reverting the reuse policy is a revert
+  while the change is purely internal; but once something is pooled, any code
+  written against the pooled lifetime — including a generational token, if one
+  is introduced — has to come out with it. Keep the reuse and the token in one
+  commit so they revert as one.
 * **The stale-reference test comes with the reuse, and not before** (P-T7, §6).
   The moment a slot is reused, a reference held from the previous request stops
   being merely stale and starts being *wrong*. The shape of the test is already
@@ -401,6 +463,27 @@ capacity-ledger amendment.**
 * **The word "bounded" is still gated.** Configurable limits bound the
   framework's own per-request working memory. They do not bound connections,
   backlog or header counts, and no document may say they do.
+* **THIS WORK PACKAGE OWNS THE CONCURRENCY DECISION** (P3-8's other half, which
+  an earlier draft of this plan left unassigned). The boot-time snapshot is
+  taken here, so this is where it must be recorded whether registration *during
+  serving* is **rejected** or **made impossible** — and the choice is written
+  down rather than left to whichever happens to be true of the implementation.
+  **Name the interaction with what already ships:** ADR-019 and ADR-023 already
+  poison an App on `use()` after the first dispatch. A snapshot model either
+  subsumes that guard or sits beside it, and the plan must say which; silently
+  replacing a shipped fail-closed guarantee is the one outcome not available.
+* **`test_request` must honour the same limits, and this work package owns
+  that too.** R-10 parity is the property both transports exist to keep: if the
+  body limit becomes configurable and the in-memory transport keeps a hard-coded
+  4 MiB, then `test_request` answers 200 where a socket answers 413 — on exactly
+  the kind of boundary a test suite is supposed to prove. The test-support
+  ledger stays at 2; this is behaviour, not a new symbol.
+* **Rollback. LOW — this is the least reversible package in the phase.** An
+  options struct is a public type: once an application writes a limit, removing
+  or renaming a field breaks its build, and *tightening a default* breaks its
+  traffic. Ship the smallest struct that HTTP actually needs, because every
+  field is a promise kept for as long as the type exists. Adding a field later
+  is easy; that asymmetry is the whole argument for starting small.
 
 ### WP37 — Typed application state, and the request-scope question
 
@@ -445,6 +528,12 @@ live options:
    clear reason why the existing pattern is insufficient.
 3. **A typed slot for exactly one application value**, mirroring the WP19/WP23
    overlay design (one slot, known capacity, one writer ratified per phase).
+
+**Rollback.** Option 1 is HIGH — it ships nothing, so there is nothing to
+withdraw, and adding a mechanism later is a pure strengthening. Options 2 and 3
+are **LOW**: once an application stores a value per request, removing the slot
+breaks it at compile time and no deprecation window helps. That asymmetry is
+itself an argument, and it is the reason the recommendation falls where it does.
 
 **ADR-028 recommends option 1** and places the burden of proof on the others.
 The evidence for 2 or 3 must be a real program that cannot be written cleanly
@@ -497,6 +586,24 @@ Everything WP25 required, plus what Phase 3 adds:
 
 ---
 
+## 4b. A note on this plan's own review
+
+Eight defects were found reviewing the first draft, and all eight are applied
+above rather than left as commentary. Three changed the structure — the spec
+halves of WP31/WP32 moved ahead of the shootout, the shootout gained a stopping
+rule, and the concurrency decision gained an owner — and one, the shootout's
+workload matrix, came from mapping in the Tina dossier (§6).
+
+The rest were precision: the budget now counts concepts rather than symbols,
+the benchmark tolerance has a procedure instead of an adjective, and every
+implementation package carries **Rollback** again, which the Phase-2 template
+had and the first draft of this one silently dropped.
+
+Recorded because the reasoning is the reviewable part, and because a plan that
+hides its own corrections teaches the next reader to hide theirs.
+
+---
+
 ## 5. Risks this plan does not resolve
 
 | Risk | Why it stays open |
@@ -537,12 +644,25 @@ already hit these walls is worth more than a fresh guess.
   posture: *"Tina não vence por autoridade: seus buckets também fazem scan
   linear."* Its ideas enter the shootout as hypotheses, with no head start.
 
-### `tina/` IS NOT VERSIONED — plan for its absence
+### `tina/` STAYS OUT OF THE REPOSITORY — owner decision, 2026-07-20
 
-It is untracked, so a fresh clone will not have it. **A work package must never
-block on it.** If the directory is missing, proceed: everything load-bearing
-that came out of it has already been absorbed into this plan, the ADRs and the
-gate. Nothing in Phase 3 is gated on reading it, and no gate may check for it.
+The dossier is **deliberately not versioned and will not be.** It is supplied in
+the working environment of whoever is doing the work, out of band, and it is
+never committed.
+
+Three consequences, and they are requirements rather than observations:
+
+* **No gate may check for it, ever.** A gate that tests for `tina/` would fail
+  on every clean clone and in CI, which is the whole reason this is a decision
+  rather than an oversight.
+* **No work package may block on it.** If the directory is not there, proceed —
+  everything load-bearing has already been absorbed into this plan, the ADRs and
+  the gate, which is exactly why §6 lists what was absorbed instead of telling
+  you to go and find it again.
+* **Nothing may cite it as evidence.** A freeze citation must resolve inside the
+  repository; the Phase-1 and Phase-2 evidence matrices are checked that way and
+  Phase 3's will be too. Read Tina for ideas, then prove the idea *here*, with a
+  test and a negative control that live in this tree.
 
 ### Where to look, per work package
 
@@ -589,9 +709,10 @@ Phase-4 planner finds it rather than inventing it.
 4. `planning/public-api-guardrails.md` — G-01 through G-11 are not advice.
 5. `planning/adrs.md` — an ACCEPTED ADR supersedes plan text when they
    disagree. That is what happened in WP21, and this plan is not exempt.
-6. **`tina/`, if it is present — the mapped document only** (§6). Reference,
-   never architecture; "Tina does it this way" is never a justification, and a
-   missing directory is never a blocker.
+6. **`tina/` — the mapped document only** (§6), when the environment supplies
+   it. Reference, never architecture; "Tina does it this way" is never a
+   justification; it is never committed, never cited as evidence, and its
+   absence is never a blocker.
 7. **The code and tests of the work package before it.** Never conclude from
    documents alone: this project has now had two cases where the documentation
    described behaviour the code did not have, and one of them was introduced by
