@@ -276,6 +276,66 @@ done
 echo "docs: the Quick Start is real and teaches no internals"
 
 # ---------------------------------------------------------------------------
+# 6e. WP21 — THE FAULT-BEHAVIOUR STATEMENT (ADR-020, G-08).
+#
+# This is the half of WP21 that only a documentation gate can hold. ADR-020
+# settled that Phase 2 ships NO recovery middleware and no public symbol for
+# it: Odin has no recoverable panic, so the promise as written was not hard but
+# impossible. What replaced it is the WP8 driver guarantee plus a plain
+# statement that a faulting handler aborts the process.
+#
+# G-08 says a default is claimed only when it is delivered. A document that
+# still lists "panic recovery (Phase 2)" among the things that are coming is
+# therefore not merely out of date — it claims a default that will NEVER be
+# delivered, which is the exact failure G-08 exists to prevent. Both halves are
+# asserted: the promise must be gone, AND the honest statement must be present.
+# ---------------------------------------------------------------------------
+for URUQUIM_DOC in "${URUQUIM_ACTIVE_DOCS[@]}"; do
+  URUQUIM_BODY="$(cat "$URUQUIM_DOC")"
+  # A line naming recovery AND a phase number is a promise, in any order:
+  # "panic recovery (Phase 2)", "recovery (Phase 2)", "Phase 2: ... recovery".
+  # The ADR is allowed to be cited on such a line, because a line that names
+  # ADR-020 is stating the decision, not making the promise.
+  if grep -niE 'recovery' <<<"$URUQUIM_BODY" |
+    grep -viE 'ADR-020|no recovery|never|does not exist|not.*recoverable|no recoverable' |
+    grep -iE 'phase [2-4]|coming|still ahead|to come|not.*yet'; then
+    fail "$(basename "$URUQUIM_DOC") still promises recovery as a future default; ADR-020 says it will NEVER exist (G-08)"
+  fi
+done
+
+# The positive half. Three documents carry the statement, each for its own
+# audience: the error reference, the middleware contract, and the agent
+# reference. A reader who lands on any one of them must learn the truth without
+# needing the other two.
+for URUQUIM_PAIR in \
+  "$URUQUIM_DOCS/errors.md" \
+  "$URUQUIM_DOCS/middleware.md" \
+  "$URUQUIM_DOCS/ai-context.md"; do
+  grep -qiE 'abort(s|ed)? the process|process abort' "$URUQUIM_PAIR" ||
+    fail "$(basename "$URUQUIM_PAIR") does not state plainly that a faulting handler aborts the process (ADR-020, G-08)"
+  grep -qiE 'ADR-020' "$URUQUIM_PAIR" ||
+    fail "$(basename "$URUQUIM_PAIR") states the fault behaviour without citing ADR-020, so a reader cannot check it"
+done
+
+# The other half of the guarantee — the one that IS delivered — must be stated
+# where a reader looks up a 500. A document that says only "a panic aborts"
+# would leave them believing an unanswered request produces nothing at all.
+grep -qiE 'commits? no response|without responding|no response is committed' "$URUQUIM_DOCS/errors.md" ||
+  fail "docs/errors.md does not document the driver guarantee (a dispatch that commits no response becomes the standardized 500)"
+
+# The name is banned as vocabulary, not only as a symbol. "Last-gasp
+# responder" is Phase-4 vocabulary and ADR-020 is explicit that it must never
+# be shortened to "recovery" — the shortening is how an accepted limitation
+# turns back into an unkept promise.
+for URUQUIM_DOC in "${URUQUIM_ACTIVE_DOCS[@]}"; do
+  if grep -niE 'last.gasp' "$URUQUIM_DOC" | grep -iE 'recovery|recover' |
+    grep -viE 'never|not called|must not'; then
+    fail "$(basename "$URUQUIM_DOC") calls the Phase-4 last-gasp responder a form of recovery (ADR-020 forbids the shortening)"
+  fi
+done
+echo "docs: the fault-behaviour statement is present and no document promises recovery (ADR-020)"
+
+# ---------------------------------------------------------------------------
 # 7. No GitHub Actions workflow (owner decision; the gate is local/VPS).
 # ---------------------------------------------------------------------------
 if test -d "$URUQUIM_ROOT/.github/workflows"; then

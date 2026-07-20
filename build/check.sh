@@ -56,6 +56,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp17_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp18_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp19_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp20_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp21_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -671,6 +672,58 @@ timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp20-socket" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp20-socket" ||
   fail "the WP20 socket observer contract did not pass within the timeout"
+
+# ---------------------------------------------------------------------------
+# WP21 — THE FAULT-BEHAVIOUR GUARANTEE (ADR-020; zero public symbols).
+#
+# `driver_run`, the private Response and `ERROR_BODY_INTERNAL` are all
+# package-private, so the internal half runs in a THROWAWAY package exactly
+# like WP2-WP20.
+# ---------------------------------------------------------------------------
+echo "--- WP21 fault behaviour, internal (throwaway package) ---"
+URUQUIM_WP21_TMP="$(mktemp -d -t uruquim-wp21-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP21_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP21_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp21-internal/*.odin "$URUQUIM_WP21_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP21_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp21-internal"
+rm -rf "$URUQUIM_WP21_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP21_TMP" || fail "the throwaway WP21 internal-test package was not removed"
+echo "PASS: WP21 internal tests ran against the real sources; throwaway package removed"
+
+# The consumer-visible half. It imports nothing from the machinery on purpose:
+# ADR-020's whole point is that an application relies on this guarantee WITHOUT
+# a symbol to call, so the suite that proves it must have nothing to call.
+#
+# IT RUNS TWICE — default and `-o:speed`. The Phase-2 Test Gate item names both
+# build modes, and it names them because WP13 measured that build mode changes
+# which faults exist at all: `-o:speed` elides bounds checks that `-o:none`
+# performs. A guarantee proven only at the default optimization level is not
+# the guarantee the phases doc records.
+echo "--- WP21 fault-behaviour contract, default build (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp21-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp21-public-surface"
+
+echo "--- WP21 fault-behaviour contract, -o:speed build (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp21-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -o:speed \
+  -out:"$URUQUIM_BIN_TMP/wp21-public-surface-speed" ||
+  fail "the WP21 fault-behaviour contract does not hold at -o:speed"
+
+# WP21 over a real socket. WP8 opened a socket but never drove a FAULTING
+# request across it, so "under BOTH web.serve and web.test_request" rested on
+# its weaker transport. A zero status has no wire representation, which is
+# exactly why this belongs on a socket. External timeout, like every socket
+# suite.
+echo "--- WP21 fault behaviour over a real socket (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp21-socket" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp21-socket" ||
+  fail "the WP21 socket fault-behaviour contract did not pass within the timeout"
 
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never

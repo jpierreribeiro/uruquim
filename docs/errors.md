@@ -210,6 +210,81 @@ each logged first:
 
 ---
 
+## Faults: what happens when a handler goes wrong
+
+There are two different failures here and they end very differently. Uruquim
+guarantees one of them and, deliberately, does not contain the other.
+
+### A handler that commits no response — GUARANTEED
+
+If a handler returns without producing a response, the **response driver**
+answers for it: it logs the mistake and commits the standardized
+`internal_error` 500 above. HTTP has no zero status, so there is nothing else a
+correct server could send.
+
+This covers the case that actually occurs — not a handler that plainly forgot
+to answer, but one that answers on the happy path and returns early on some
+error branch:
+
+<!-- fragment: phase2/fault-early-return -->
+```odin
+show_invoice :: proc(ctx: ^web.Context) {
+	id, ok := web.path_int(ctx, "id")
+	if !ok {
+		return // path_int already answered 400
+	}
+
+	invoice, found := lookup_invoice(id)
+	if !found {
+		return // BUG: nothing was committed on this branch
+	}
+
+	web.ok(ctx, invoice)
+}
+```
+
+The client gets the standardized 500, not a hung connection and not an empty
+reply. Four properties are guaranteed, and each is tested:
+
+- **Identical on both transports.** `web.serve` and `web.test_request` run the
+  same driver, so what you see in a test is what a socket sends.
+- **Identical under `web.app()` and `web.bare()`.** `bare()` means "no default
+  route policy", never "no safety". (Under `app()` an *unmatched path* is a
+  404; under `bare()` it reaches the driver and becomes this 500.)
+- **Repeatable.** The second fault is answered exactly like the first, and a
+  healthy request in between is unaffected.
+- **Silent about the cause.** The body is a compile-time constant. The path,
+  the query, the route pattern, the method and any internal message stay on the
+  server's log and never reach the client. `web.internal_error` takes no
+  message parameter precisely so that this cannot be undone by accident.
+
+It is a bug on your side either way. The guarantee exists so the bug is a
+logged 500 instead of a protocol violation.
+
+### A handler that FAULTS — the process aborts
+
+A panic, a failed assertion, an out-of-bounds index, a nil dereference or a
+divide-by-zero in a handler **aborts the process**. The connection closes
+without a reply — `curl` reports `curl: (52) Empty reply from server` — and the
+server exits for a supervisor to restart.
+
+**There is no recovery middleware and there is no `web.recovery`**, in this
+phase or any later one (ADR-020). This is not an omission, and stating it
+plainly is the point: Odin has no recoverable panic. `context` is an implicit
+by-value parameter, so `web.app()` cannot install a fault hook on its caller's
+behalf; and most real faults never reach a hook at all, because
+`bounds_check_error` is `proc "contextless"` and cannot consult one even in
+principle. A "recovery" default would therefore have been a claim the framework
+could not keep.
+
+**Run Uruquim under a supervisor** — systemd, a container restart policy, or
+equivalent. That is the intended deployment, not a workaround.
+
+Evidence for every statement in this section:
+`planning/phase-2-prototype-recovery.md`.
+
+---
+
 ## Protocol errors (before a request exists)
 
 These are **not** application errors and do **not** use the envelope above. When
