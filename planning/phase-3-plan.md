@@ -717,6 +717,33 @@ at the same depth before anything reads it.
   generational wrapper around storage that is never reused is complexity with no
   defect to catch.
 
+**WP35 DONE, 2026-07-20 — `planning/arena-policy.md`. The decision is to change
+NOTHING, and that is the finding rather than an absence of one.**
+
+Measured: a 3 MiB body moved retained memory by ~325 bytes — about 0.01% of the
+body — and a SECOND oversize request added no more. Retained capacity does not
+follow peak body size, and the residual does not accumulate, which is the
+sharper question a single measurement cannot answer.
+
+**Nothing is pooled.** The arena is created lazily per request and destroyed in
+`driver_cleanup`; every other request-local buffer is a fixed array on a
+`Context` that is a fresh stack value. The register's own fallback — release
+oversize allocations at request end — is not a change to make, it is the shipped
+behaviour, now measured rather than assumed.
+
+**No generational token was built**, per this work package's own discipline:
+while nothing is pooled, do not build the abstraction. The stale-reference test
+comes WITH the reuse and not before, and both must land in one commit so they
+revert as one.
+
+**The suite is a TRIPWIRE, not documentation of a happy state.** WP36's timeouts
+are the likeliest thing to pool something, and if these assertions go red they
+have done their job and must not be weakened.
+
+**Named gap:** process RSS was not measured. An allocator that returns memory to
+its free list without returning it to the OS satisfies every assertion here and
+still raises RSS. That belongs to the allocator, not the framework.
+
 ### WP36 — Configurable limits and timeouts
 
 **Type: SPEC + IMPLEMENTATION. Requires owner approval — public surface and a
