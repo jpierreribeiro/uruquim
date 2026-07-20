@@ -167,10 +167,44 @@ bound it. Representation decisions are conditioned on measurement.
 
 | # | Gate | Question | Output |
 |---|---|---|---|
-| RG-1 | Benchmark harness | What is the methodology? Recorded hardware, warm-up, route distribution, concurrency levels, p50/p95/p99, allocations, binary size, build time, peak and retained memory | a harness in the gate, plus a recorded Phase-1 baseline to regress against |
-| RG-2 | Router shootout | Pointer-based radix, index-based radix, hybrid, and improved linear — measured on Uruquim's own workloads at 5, 50 and 500 routes | a representation chosen from data, with **the losing candidates and their numbers recorded** |
+| RG-1 | Benchmark harness | What is the methodology? Recorded hardware, warm-up, route distribution, concurrency levels, p50/p95/p99, allocations, binary size, build time, peak and retained memory. **Plus semantic equivalence — see below** | a harness in the gate, plus a recorded Phase-1 baseline to regress against |
+| RG-2 | Router shootout | Pointer-based radix, index-based radix, hybrid, improved linear, **and class-bucketed linear** — measured on Uruquim's own workloads at 5, 50, 500 **and 5,000** routes | a representation chosen from data, with **the losing candidates and their numbers recorded** |
 | RG-3 | Allocation audit | Where does per-request allocation actually go? Includes audit A-8 (inbound headers built and never read), A-12 (static headers cloned) and A-13 (the `Header_Pair` ↔ `transport.Header` conversions) | a measured list, and a decision per item |
 | RG-4 | Arena policy | What happens to a request arena after an unusually large body? Retain, trim or release (risk R-16) | a policy with numbers behind it |
+
+#### RG-1 amendment (2026-07-20) — a benchmark must compare the same thing
+
+Add to the methodology, as a gate condition rather than advice: **every
+candidate must answer the same protocol version, and produce equivalent
+status, headers and body.** Record the protocol, keep-alive setting, warm-up,
+alternating order, core affinity and build mode alongside the numbers.
+
+This is not pedantry, it is a measured failure. The Tina study attempted an
+ApacheBench comparison and had to throw the whole run away: `ab` speaks
+HTTP/1.0, the strict HTTP/1.1 server rejected it, and the tool cheerfully
+reported 100% non-2xx as *throughput*. **A load generator that gets rejected
+still reports a number.** A benchmark whose candidates disagree about the
+protocol measures error rate and calls it performance — and the number will be
+believed, because it looks like a number.
+
+#### RG-2 amendment (2026-07-20) — a fifth candidate, and a warning that survives it
+
+Add **class-bucketed linear**: routes split into static / `:param` /
+`*wildcard` buckets at registration, with a linear scan inside the matching
+bucket. It is worth measuring for a reason that has nothing to do with speed —
+it makes the precedence rule between the three classes structural instead of
+being re-derived by comparison order.
+
+The candidate arrives with its own disclaimer, and C-5 governs it exactly as it
+governs the others: **the bucketed design also scans linearly inside each
+bucket.** It is a hypothesis to measure, not a result to adopt. "A real,
+validated system does it this way" is not evidence about Uruquim's route
+cardinalities, and this project chooses representations from its own numbers.
+
+Extend the cardinality sweep to 5,000 routes if the harness cost allows: the
+only property a tree uniquely owns is scaling, so the sweep must reach far
+enough for scaling to be visible or the shootout cannot answer the question it
+exists to answer.
 
 ### Work packages
 
@@ -186,9 +220,39 @@ bound it. Representation decisions are conditioned on measurement.
 | P3-8 | Precomputed middleware chains | IMPLEMENTATION | must preserve Phase 2's zero-allocation dispatch (C-7) |
 | P3-9 | Route identity accessor | SPEC + IMPLEMENTATION | C-2; the smallest change that unblocks observability. **Adds public surface — owner approval** |
 | P3-10 | Arena, buffer reuse and oversize policy | IMPLEMENTATION | RG-4, risk R-16 |
-| P3-11 | Configurable limits and timeouts | SPEC + IMPLEMENTATION | options struct with a package default constant, on `core:net`'s `DEFAULT_TCP_OPTIONS` precedent — **not** a builder. **Owner approval** |
+| P3-11 | Configurable limits and timeouts | SPEC + IMPLEMENTATION | options struct with a package default constant, on `core:net`'s `DEFAULT_TCP_OPTIONS` precedent — **not** a builder. **Derive an immutable runtime at boot, see below.** **Owner approval** |
 | P3-12 | Typed application state | PROTOTYPE + IMPLEMENTATION | ADR-004; must not become a context extension bag (G-03). **Owner approval** |
 | P3-13 | Phase-3 freeze | FREEZE | ledger, evidence, regression benchmark in the gate |
+
+### P3-8 / P3-11 amendment (2026-07-20) — validate once at boot, read on the hot path
+
+Two work packages share one shape, and naming it once keeps them consistent.
+
+**The pattern.** Configuration the user writes is friendly, permissive and
+validated *once*, at `serve`, producing a private immutable structure the
+request path only ever READS. Nothing on the hot path re-interprets a limit,
+re-derives a relationship between two limits, or discovers at request time that
+a configuration was contradictory.
+
+**P3-11 — a derived `Server_Runtime`.** The user-facing options struct stays
+small and pleasant. From it, `serve` derives a private, validated value holding
+the resolved budgets — request line, header block, body, response bytes,
+timeouts, arena policy — with every cross-limit relationship checked once and
+diagnosed at boot rather than at 3 a.m. under load. Keep it the smallest struct
+HTTP actually needs; do **not** import a general system-specification concept
+from a runtime that sizes shards, pools and rings, because Uruquim sizes none of
+those.
+
+**P3-8 — a route/chain snapshot.** Compile the final table and the flattened
+chains before serving begins; dispatch reads offsets and counts only.
+Registration *during* serving is then either rejected or made impossible,
+depending on the concurrency decision — and that choice must be recorded, not
+left to whichever happens to be true.
+
+**Why it belongs to Phase 3 and not earlier.** Boot-time derivation is only
+worth its complexity once limits are configurable at all, which is P3-11
+itself. Doing it in Phase 2, where every limit is a fixed constant, would add
+a layer with nothing to validate.
 
 ### Change classification, to be applied per work package
 
@@ -210,6 +274,52 @@ not interchangeable and the gate obligations differ:
 **Theme:** make deployment defensible. This phase carries the most absolute
 risk, because its mistakes are remotely exploitable rather than merely
 inconvenient.
+
+### Research gates (added 2026-07-20; must complete before the capabilities they govern)
+
+Phase 4 already lists the right capabilities. What it lacked was a *method* for
+proving them, and the Tina study is most useful here, because a runtime that
+supervises faults for a living has to answer these questions explicitly rather
+than by hoping. These three gates produce the methodology; they add no public
+surface and no capability of their own.
+
+| # | Gate | Question | Output | Governs |
+|---|---|---|---|---|
+| RG-P4-A | Lifecycle state machine | What are the legal states and transitions, written as data rather than as a set of booleans? | `Configuring → Serving → Draining → Stopped`, plus `→ Failed`; proof of admission stop, close-after-send, an absolute deadline, and cleanup running exactly once | P4-2, P4-3, P4-4 |
+| RG-P4-B | Capacity and overload | For every bounded resource, what happens when it is full? | one row per resource — connections, accept queue, ingress, response buffers, timers — each stating capacity, behaviour when full, the diagnostic, who owns cleanup, and **the minimum reserved for stop/close** | P4-5, P4-6 |
+| RG-P4-C | Deterministic fault plan | Can a transport failure be reproduced from a seed instead of from luck? | a seeded transport laboratory: fragmentation, slow reader/writer, timeout before and after completion, concurrent close, failure after N bytes, slot reuse, artificially small pool. Final checker: no retained buffer, no double response, no request admitted after the admission stop | P4-16, P4-17, P4-18 |
+
+Three notes on why these are gates and not just tests.
+
+**RG-P4-A — a state machine, not flags.** The failure mode this prevents is the
+one every server eventually has: `stopping`, `draining` and `failed` as separate
+booleans, admitting combinations that were never intended and that no reviewer
+can enumerate. A small enum makes the impossible states unrepresentable, which
+is the same reasoning that already gave Uruquim a closed `Framework_Error`
+instead of an `any`.
+
+**RG-P4-B — the reservation is the point.** The subtle failure is not running
+out of capacity; it is running out of capacity *and then having none left to
+shut down cleanly*. A server that cannot close connections because closing
+needs a slot it already gave to a request will not recover under exactly the
+load where recovery matters. Reserve the control path first, then serve.
+
+**RG-P4-C — reproducibility is the deliverable.** The success criterion is
+explicit and testable: replay the same seed and get the same trail, and find at
+least one mutation the current tests do not catch. A fault laboratory that
+cannot demonstrate a missed mutation has not yet earned its complexity.
+
+**Generational tokens** become relevant only once RG-P4-A and RG-P4-B introduce
+slot reuse. When a connection slot or timer is recycled, every timeout and
+completion must carry `{slot, generation}` and be discarded if the generation no
+longer matches — otherwise a stale timeout from request A closes request B on
+the reused slot. Do not build the abstraction before the reuse exists.
+
+**Body policy is separate from framing.** HEAD, 1xx, 204 and 304 decide whether
+a body exists; fixed length, chunked and close-delimited decide how it is
+framed. Keeping them separate internally is what makes the combinations
+enumerable and the raw-wire corpus extensible to responses. Neither concept
+needs to become public API.
 
 ### Capabilities and their gates
 
@@ -279,6 +389,30 @@ Runs alongside the phases (roadmap M0 to M5), not after them.
 | Retire `planning/`, `experiments/`, knowledge base from the public tree | M5 | per the local cleanup plan's Stage 4 |
 | Issue triage and regression policy | M4 | |
 | Vendor maintenance policy | P4-15 | |
+| `uruquim dev` — watch and rebuild tool | M4 | added 2026-07-20. Separate track, see below |
+
+### `uruquim dev` — a tool, deliberately outside the framework
+
+Watch sources, debounce, run a configurable build/check, restart the child
+process, shut the tree down cleanly before killing it, exclude `.git` and
+binaries, and keep build logs separate from application logs. A `--check-only`
+mode makes it useful to agents as well as to people.
+
+Three constraints make this a track rather than a work package:
+
+- **It must not import `uruquim:web`.** A development tool that links the
+  framework starts making decisions for the framework, and every one of them
+  would land inside the ledger.
+- **It is not on the Phase-2 or Phase-3 critical path.** Productivity is a real
+  benefit and not a reason to move work forward; the plan's own rule against
+  scope creep applies to pleasant ideas most of all.
+- **The reference is Air (the Go tool), not Tina.** Hot reload is not something
+  a concurrency runtime provides, and the Tina study is explicit that this idea
+  came from elsewhere. Recording that keeps the study's attribution honest.
+
+A companion `uruquim doctor` — printing the Odin version, the Uruquim commit,
+the backend, the effective limits and no secrets — is worth the same track: it
+makes a bug report reproducible without a conversation.
 
 ---
 
