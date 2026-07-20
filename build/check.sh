@@ -790,6 +790,31 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp23-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp23-public-surface"
 
+# WP27 — the allocation audit. Where per-request allocation actually goes, for
+# the three items the post-Phase-1 audit named (A-8, A-12, A-13).
+#
+# It runs as a THROWAWAY internal package because two of the three procedures
+# under measurement — `inbound_header_pairs` and
+# `response_headers_neutral_transport` — are `@(private)`. Measuring them
+# through a public surface would be measuring something else and calling it
+# these.
+#
+# WP27 measures and decides; it changes no behaviour. The decisions are recorded
+# in planning/allocation-audit.md, and the fixes belong to WP29 and WP35 where
+# they can be regression-tested against the WP26 baseline.
+echo "--- WP27 allocation audit: A-8, A-12, A-13, measured (throwaway package) ---"
+URUQUIM_WP27_TMP="$(mktemp -d -t uruquim-wp27-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP27_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP27_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp27-internal/*.odin "$URUQUIM_WP27_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP27_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp27-internal"
+rm -rf "$URUQUIM_WP27_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP27_TMP" || fail "the throwaway WP27 internal-test package was not removed"
+echo "PASS: WP27 allocation audit ran against the real sources; throwaway package removed"
+
 # WP26 — the benchmark harness. Phase 3 may not start without one (entry
 # condition E-3), and this step is what makes the instrument trustworthy.
 #

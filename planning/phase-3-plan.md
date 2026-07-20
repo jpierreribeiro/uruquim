@@ -268,6 +268,32 @@ see §4.
 * **Out of scope.** Fixing them. This work package measures and decides; the
   fixes land in WP29 and WP35 where they can be regression-tested.
 
+**DONE, 2026-07-20 — `planning/allocation-audit.md`, measured by
+`tests/wp27-internal` in the gate.** A typical JSON 200 costs five allocations
+on the socket path; a 405 with a request ID costs nine. Three outcomes, and one
+of them is a correction rather than a schedule:
+
+* **A-12 as filed is WITHDRAWN.** "They are static strings, so the clone is
+  waste" is false for two of the three headers this framework emits. `Allow` and
+  `X-Request-Id` carry values living in `Context_Internal` buffers that die at
+  `driver_cleanup`, and aliasing them would hand the transport a view into freed
+  memory. What survives is narrower and certain: every response header *name* is
+  a package constant, so cloning names is unambiguous waste — **1 allocation per
+  header per request, owner WP29**. The values must keep being cloned.
+* **A-8 is half wrong in the direction that matters.** One `temp_allocator`
+  slice per request, and the strings are **views, not copies**. Also stale: "no
+  Phase-1 path can read them" stopped being true when WP19 shipped
+  `web.header`. Handed to **WP35**, because the fix is a fixed-capacity buffer
+  question the arena policy owns.
+* **A-13 is confirmed exactly as filed and is being kept.** Two allocations per
+  request, no string copying — the price of ADR-009's one-way boundary, now a
+  number instead of an adjective. Reclassified from "cost to remove" to "cost
+  accepted, with a number".
+
+**Consequence for the sequence: WP28 inherits nothing from this.** None of the
+three sits on the route-matching path; all three are request/response edges. The
+shootout is not blocked by any decision here.
+
 ### WP28 — Route representation shootout
 
 **Type: PROTOTYPE.** RG-2. **It must not choose before measuring.**
