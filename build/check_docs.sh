@@ -332,6 +332,17 @@ for URUQUIM_DOC in "${URUQUIM_ACTIVE_DOCS[@]}"; do
     grep -viE 'never|not called|must not'; then
     fail "$(basename "$URUQUIM_DOC") calls the Phase-4 last-gasp responder a form of recovery (ADR-020 forbids the shortening)"
   fi
+  # The adjacent vocabulary falls with it. "Fault isolation" and "crash
+  # recovery" describe a containment boundary Uruquim does not have: a fault
+  # takes the process, so there is nothing to isolate it from. Banning the
+  # PROMISE while leaving the words that imply it would let the promise back in
+  # through the phrasing.
+  for URUQUIM_FAULT_WORD in 'fault isolation' 'crash recovery' 'panic recovery'; do
+    if grep -niE "$URUQUIM_FAULT_WORD" "$URUQUIM_DOC" |
+      grep -viE 'no |never|not |ADR-020|does not exist'; then
+      fail "$(basename "$URUQUIM_DOC") uses the phrase '$URUQUIM_FAULT_WORD' affirmatively; a fault aborts the process and nothing is isolated (ADR-020)"
+    fi
+  done
 done
 echo "docs: the fault-behaviour statement is present and no document promises recovery (ADR-020)"
 
