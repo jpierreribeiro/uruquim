@@ -815,6 +815,26 @@ trap - EXIT
 test ! -d "$URUQUIM_WP27_TMP" || fail "the throwaway WP27 internal-test package was not removed"
 echo "PASS: WP27 allocation audit ran against the real sources; throwaway package removed"
 
+# WP28 — the route representation shootout, correctness half.
+#
+# It asserts that six representations return byte-identical answers, and that a
+# disagreement is CONSTRUCTIBLE — because "the candidates agree" would otherwise
+# be true of a harness that called the same matcher six times. A representation
+# that misses a route looks magnificent in a benchmark; a scan that stops early
+# is exactly what fast looks like from outside.
+#
+# No timing is asserted (FINDING-E). The numbers come from tests/wp28-runner,
+# run by hand, and are recorded in planning/router-shootout.md.
+echo "--- WP28 route shootout: six representations must agree (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp28-shootout" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp28-shootout"
+
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" build "$URUQUIM_ROOT/tests/wp28-runner" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp28-runner"
+echo "PASS: the WP28 shootout runner still builds"
+
 # WP26 — the benchmark harness. Phase 3 may not start without one (entry
 # condition E-3), and this step is what makes the instrument trustworthy.
 #

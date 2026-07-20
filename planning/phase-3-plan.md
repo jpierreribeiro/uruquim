@@ -336,6 +336,39 @@ shootout is not blocked by any decision here.
 * **Deliverable.** A representation chosen from data, with the data — or a
   recorded decision to keep the current one, with the same data.
 
+**DONE, 2026-07-20 — `planning/router-shootout.md`.** Six representations
+measured; correctness proven in the gate by `tests/wp28-shootout`, which holds
+all six to byte-identical answers and includes a constructible-disagreement
+control.
+
+**Chosen: `radix_idx`** — segment-keyed tree, nodes in a flat array, children by
+index, static child before parametric at every level. At 5,000 mixed routes:
+**1.4 us against linear's 191 us, about 136x**, and flat from 5 routes to 5,000.
+Two orders of magnitude clear of FINDING-E's noise floor.
+
+**The timing did NOT choose between `radix_idx` and `radix_ptr`** — same
+algorithm, two layouts, medians differing by less than either cell's own spread.
+Reading a winner there would be reading noise. The choice was made on ownership:
+one free instead of N at teardown, and no pointer that can dangle when the node
+array grows. That is the same class of hazard as P8, which the middleware pool's
+index pairs already exist to prevent — the project has chosen indices over
+pointers once before, for this reason.
+
+**Losers, with the instructive ones named.** `linear_improved` HURT parametric
+tables (290 us vs 245 us, the worst number measured): when the discriminating
+byte falls inside the parameter segment the prefilter rejects nothing and every
+route pays for it. `bucketed` matched linear exactly, as RG-2's own disclaimer
+predicted, but its structural-precedence argument survives and the radix tree
+gets that property for free. `hybrid` was the fastest single cell measured
+(838 ns, flat) and degenerates to a scan the moment a parameter appears.
+
+**THE CAVEAT WP29 MUST CARRY.** The shootout measures matchers in isolation.
+Against WP26's end-to-end baseline, route matching is roughly **10% of
+end-to-end p95** at 5,000 routes. WP29 may not promise an end-to-end speedup
+proportional to 136x; the claim it can defend is about the matcher, and it must
+name that perimeter. **Where the other ~90% goes has not been measured, and on
+this evidence that is worth more than further router work.**
+
 ### WP29 — Router implementation
 
 **Type: IMPLEMENTATION. Change classification: internal only.**
