@@ -38,8 +38,7 @@ a standardized JSON envelope.
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available yet** — do not emit any of it: the
-request-ID middleware (a later Phase-2 work package);
+**Not available yet** — do not emit any of it:
 configurable limits and read/write timeouts (Phase 3); graceful shutdown with
 a deadline (Phase 4). Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
@@ -57,11 +56,12 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **43** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **44** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
-`header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error` and
-`logger` from Phase 2). The test-support API is a separate ledger of exactly
-**2**. Union: **45**. Do not fold them together and do not invent a third form.
+`header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
+`logger` and `request_id` from Phase 2). The test-support API is a separate
+ledger of exactly **2**. Union: **46**. Do not fold them together and do not
+invent a third form.
 
 ## Application
 
@@ -400,6 +400,22 @@ captured parameter value. A too-long route field is cut and marked
 `...[truncated]`, never grown and never silently dropped. Do not tell a user to
 configure its level, sink or format: it has none, by design.
 
+**`web.request_id` is the other built-in.** Opt-in, registered FIRST so later
+middleware see the ID:
+
+<!-- fragment: phase2/request-id-use -->
+```odin
+web.use(&app, web.request_id)
+web.use(&app, web.logger)
+```
+
+A handler reads it through the ordinary accessor — there is no second name:
+`web.header(ctx, "X-Request-Id")`. An inbound ID is honoured ONLY if it matches
+`[A-Za-z0-9._-]` and length 1..64; anything else (a space, a control byte, and
+above all CR/LF) is DISCARDED and replaced — never echoed, never logged. The ID
+appears on every committed response including a 404, a 405 and the standardized
+500. **It is unique but NOT unguessable: never present it as authentication.**
+
 ## Routers
 
 ```text
@@ -491,7 +507,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-43 application symbols.
+44 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
@@ -567,12 +583,6 @@ See `examples/02-json-api` for a CRUD-shaped API and
 **Everything below is UNAVAILABLE in Phase 1. Do not emit it.** It is listed
 only so an agent recognizes the names and refuses them.
 
-<!-- phase: 2; unavailable -->
-```odin
-// A later Phase-2 work package — unavailable today.
-web.use(&app, web.request_id)  // the request-ID middleware does not exist yet
-```
-
 <!-- phase: 3; unavailable -->
 ```odin
 // Phase 3 — unavailable today. (web.group is NOT here: it is rejected
@@ -595,9 +605,8 @@ Other names reserved for later phases, none of which exist today:
 Phase boundaries in one line each:
 
 - **Phase 2** — middleware, route organisation, header lookup, the typed
-  error observer and the built-in `logger` (all delivered); still to come: the
-  request-ID middleware. No panic recovery — Odin has no recoverable panic
-  (ADR-020).
+  error observer, the built-in `logger` and `request_id` (all delivered). No
+  panic recovery — Odin has no recoverable panic (ADR-020).
 - **Phase 3** — route groups, typed application state, configurable limits and
   read/write timeouts.
 - **Phase 4** — graceful shutdown with a deadline, security hardening.

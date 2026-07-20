@@ -290,6 +290,17 @@ show_order :: proc(ctx: ^web.Context) {
 	web.ok(ctx, User{id = 1, name = "Ada"})
 }
 
+// fragment: phase2/request-id-use
+// WP23: correlation IDs. Registered FIRST so every later middleware — the
+// logger included — runs with the effective ID already assigned.
+correlated_app :: proc() -> web.App {
+	app := web.app()
+	web.use(&app, web.request_id)
+	web.use(&app, web.logger)
+	web.get(&app, "/orders/:id", show_order)
+	return app
+}
+
 // The fixtures are compiled as a test package, so one live assertion keeps the
 // runner honest about actually having built them.
 @(test)
@@ -310,4 +321,11 @@ wp10_fixtures_compile_and_run :: proc(t: ^testing.T) {
 	defer web.destroy(&logging)
 	logged := web.test_request(&logging, .GET, "/orders/7")
 	testing.expect_value(t, logged.status, web.Status.OK)
+
+	// The documented request-ID fragment does too, and the handler can read
+	// the effective ID through the documented accessor.
+	correlated := correlated_app()
+	defer web.destroy(&correlated)
+	tagged := web.test_request(&correlated, .GET, "/orders/7")
+	testing.expect_value(t, tagged.status, web.Status.OK)
 }

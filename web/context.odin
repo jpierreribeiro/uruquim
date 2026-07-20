@@ -151,6 +151,22 @@ Context_Internal :: struct {
 	overlay:     Header_Pair,
 	overlay_set: bool,
 
+	// WP23 — request-local storage for the EFFECTIVE request ID (ADR-027).
+	//
+	// It lives here, and is a FIXED array, for exactly the reasons
+	// `allow_buffer` above is: the committed response holds a VIEW over it
+	// through the `X-Request-Id` header and reads it after `dispatch` returns,
+	// so a local would hand back a view into a dead frame — and an allocation
+	// would sit on a path any unauthenticated client can trigger at will.
+	//
+	// The ID is ALWAYS copied in here, whether it was generated or accepted from
+	// the client. Keeping a view over the inbound header in the accept branch
+	// would work today, and would make the value's lifetime depend on which
+	// branch produced it; one owner and one lifetime is worth the 64-byte copy.
+	request_id_buffer: [REQUEST_ID_MAX]u8,
+	request_id_value:  string,
+	request_id_set:    bool,
+
 	// WP7 — the single-consumer body capability (ADR-012 A). `.Fresh` is the
 	// zero value, so a new Context begins with the body available. `web.body`
 	// moves it to `.Consumed` on its first call, before the limit and parse.

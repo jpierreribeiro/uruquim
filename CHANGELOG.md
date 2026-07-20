@@ -36,6 +36,23 @@ freeze amendments.
 
 ### Added
 
+- **The `request_id` middleware** (Phase 2, WP23): `web.request_id`, a
+  `Handler` value, **opt-in**. Every request gets a correlation ID; a
+  client-supplied `X-Request-Id` is honoured **only** if it matches charset
+  `[A-Za-z0-9._-]` and length 1..64. Anything else — too long, empty, a space,
+  a semicolon, a control byte, non-ASCII, and above all **CR or LF** — is
+  **discarded** and replaced with a generated ID: never echoed, never logged,
+  never readable by a handler, and never repaired. This closes CR/LF response
+  header injection **by construction** rather than by a sanitiser. The
+  effective ID is read through the existing `web.header(ctx, "X-Request-Id")`
+  — no second symbol, per ADR-027, which closed the `request_id_value`
+  contingency — and appears on **every** committed response including a 404, a
+  405 and the standardized 500, exactly once. The ID is unique but
+  **deliberately not unguessable** (a per-process ASLR-derived seed plus a
+  counter) and must never be used for authentication. No allocation and **no
+  new dependency**: `web`'s five pinned direct imports are unchanged, because a
+  cycle counter or a clock would each have added one for a value that is
+  explicitly not a secret. Application ledger 43 → 44 (freeze Amendment 9).
 - **The `logger` middleware** (Phase 2, WP22): `web.logger`, a `Handler` value,
   **opt-in** — `web.use(&app, web.logger)`; there is no default-on logging
   (G-08). One `.Info` line per request, written through `context.logger` after

@@ -194,6 +194,69 @@ measurement. Those are Phase-4 observability. A log ring, queue or drop policy
 is specifically **not** here: building one now would put an unbounded queue
 behind a bounded-buffer claim.
 
+## `web.request_id` — correlation IDs, with a stated trust policy
+
+`web.request_id` gives every request an ID, honours a well-formed one supplied
+by a client, and puts the result on the response. Opt-in, like everything here:
+
+<!-- fragment: phase2/request-id-use -->
+```odin
+app := web.app()
+web.use(&app, web.request_id)   // register FIRST, so later middleware see the ID
+web.use(&app, web.logger)
+web.get(&app, "/orders/:id", show_order)
+```
+
+A handler reads it through the ordinary header accessor — there is no second
+name for it:
+
+<!-- pseudocode: reading the effective request ID -->
+```odin
+id, _ := web.header(ctx, "X-Request-Id")
+```
+
+### The trust policy (this is a security boundary)
+
+The inbound `X-Request-Id` is **attacker-controlled**. It is honoured **only**
+if it matches:
+
+- charset `[A-Za-z0-9._-]`, and
+- length 1..64.
+
+Anything else — too long, empty, a space, a semicolon, a control byte,
+non-ASCII, and above all **CR or LF** — is **discarded**, and a fresh ID is
+generated. Discarded means discarded: the rejected value is never echoed to the
+client, never readable by your handler, and **never logged**. There is no
+sanitising step, because a repaired attacker value is still an attacker value.
+
+The attack this closes is CR/LF header injection: a value carrying `\r\n`
+would forge extra response headers. The charset makes that impossible by
+construction.
+
+### The ID is not a secret
+
+It is generated from a per-process seed plus a counter. It is **unique**, and
+it is deliberately **not unguessable**. Never use a request ID for
+authentication, authorization, or anything an attacker benefits from
+predicting. It is a correlation handle for logs and traces, nothing more.
+
+### Where it appears
+
+On **every** response the framework commits — including a `404`, a `405`, and
+the standardized `500` for a handler that forgot to respond. That last one is
+the point: the response you most need to correlate is the one that went wrong.
+The header is emitted exactly once.
+
+Without the middleware, nothing changes: no header is added, and
+`web.header(ctx, "X-Request-Id")` returns whatever arrived, unvalidated —
+validation is the middleware's job, not the accessor's.
+
+### Cost
+
+No allocation: the ID lives in a fixed 64-byte buffer on the request context.
+No new dependency — a cycle counter or a clock would each have added one for a
+value that is explicitly not a secret.
+
 ## Costs, stated plainly
 
 - Dispatch through a middleware chain allocates **zero** bytes; chains are

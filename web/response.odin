@@ -167,10 +167,11 @@ response_destroy :: proc(res: ^Response) {
 // nothing here is torn down.
 // ---------------------------------------------------------------------------
 
-// RESPONSE_HEADER_MAX is the Phase-1 worst case: a 405 carries `Allow` and
-// `Content-Type`, and nothing carries more.
+// RESPONSE_HEADER_MAX is the worst case: a 405 carries `Allow` and
+// `Content-Type`, and WP23 appends `X-Request-Id` when the request-ID
+// middleware is in use. Nothing carries more.
 @(private)
-RESPONSE_HEADER_MAX :: 2
+RESPONSE_HEADER_MAX :: 3
 
 @(private)
 CONTENT_TYPE_HEADER_NAME :: "Content-Type"
@@ -197,7 +198,7 @@ response_json_headers :: proc(ctx: ^Context) -> []Header_Pair {
 		name  = CONTENT_TYPE_HEADER_NAME,
 		value = CONTENT_TYPE_JSON,
 	}
-	return ctx.private.response_headers[:1]
+	return response_headers_finish(ctx, 1)
 }
 
 // response_text_headers is the `text/plain` counterpart.
@@ -207,7 +208,42 @@ response_text_headers :: proc(ctx: ^Context) -> []Header_Pair {
 		name  = CONTENT_TYPE_HEADER_NAME,
 		value = CONTENT_TYPE_TEXT,
 	}
-	return ctx.private.response_headers[:1]
+	return response_headers_finish(ctx, 1)
+}
+
+// response_headers_finish APPENDS the framework-owned trailing headers after
+// the `n` pairs the caller has already written, and returns the finished slice.
+//
+// Today that is exactly one header, WP23's `X-Request-Id`, present only when
+// the request-ID middleware set an effective ID for this request.
+//
+// IT APPENDS, and the position is contract rather than taste: WP4 ratified
+// `Allow` FIRST and `Content-Type` second for a 405, and a merged WP17 test
+// pins both by INDEX. Seeding a header at slot 0 would renumber them and break
+// a contract this work package has no business touching.
+//
+// EVERY response path funnels through the three builders above, so this is the
+// single place the ID is attached — which is what puts it on a 404, a 405 and
+// the driver's standardized 500 alike. The alternative, having the middleware
+// stamp the response as the chain unwinds, would miss the 500 entirely: WP22
+// measured that the driver finalizes a missing response AFTER the chain has
+// unwound, and that is precisely the response an operator most wants to
+// correlate.
+//
+// The value is a VIEW over `ctx.private.request_id_buffer`, request-local
+// storage on the same Context as `allow_buffer` and for the same reason: the
+// committed response holds the view and is read after `dispatch` returns.
+@(private)
+response_headers_finish :: proc(ctx: ^Context, n: int) -> []Header_Pair {
+	count := n
+	if ctx.private.request_id_set {
+		ctx.private.response_headers[count] = Header_Pair {
+			name  = REQUEST_ID_HEADER,
+			value = ctx.private.request_id_value,
+		}
+		count += 1
+	}
+	return ctx.private.response_headers[:count]
 }
 
 // response_allow_headers returns `Allow` FIRST and `Content-Type` second, in
@@ -226,5 +262,5 @@ response_allow_headers :: proc(ctx: ^Context, allow: string) -> []Header_Pair {
 		name  = CONTENT_TYPE_HEADER_NAME,
 		value = CONTENT_TYPE_JSON,
 	}
-	return ctx.private.response_headers[:2]
+	return response_headers_finish(ctx, 2)
 }
