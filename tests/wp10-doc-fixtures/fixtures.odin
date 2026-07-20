@@ -235,6 +235,17 @@ stats :: proc(ctx: ^web.Context) {
 	web.ok(ctx, []User{})
 }
 
+// fragment: phase2/observe
+// The canonical observer (WP20): a plain procedure taking the event BY VALUE.
+// It receives no Context, so it cannot respond and cannot read request bytes.
+report_failure :: proc(event: web.Framework_Event) {
+	metrics_increment(event.kind, event.route, event.status)
+}
+
+metrics_increment :: proc(kind: web.Framework_Error, route: string, status: web.Status) {
+	// Application code: export to metrics, tracing, or an alerting pipeline.
+}
+
 // The fixtures are compiled as a test package, so one live assertion keeps the
 // runner honest about actually having built them.
 @(test)

@@ -749,3 +749,55 @@ approval, and §9.3 said avoid if expressible); alternating name/value strings
 (silently truncatable on an odd count, teaches nothing about wire form). The
 header lines travel the SHARED driver pipeline as neutral pairs, so nothing
 downstream can tell the two transports apart (R-10).
+
+## Amendment 7 — WP20: the typed framework-error observer
+
+**Date:** 2026-07-19. **Authority:** owner — ADR-026 (ACCEPTED, option A) and
+the approved Phase-2 ledger (`planning/phase-2-spec.md` §6, §9.2).
+**Ledger effect: application 39 → 42.** 42 application + 2 test-support = 44.
+The snapshot diff for this amendment was exactly three added lines.
+
+The three recorded lines:
+
+```
+application	proc	observe :: proc(a: ^App, observer: proc(event: Framework_Event))
+application	type	Framework_Error :: enum {None, Response_Marshal_Failed, Body_Decode_Failed, Body_Consumed_Twice, No_Response_Committed, Invalid_Serve_Port, Serve_Listen_Failed, Use_After_Route}
+application	type	Framework_Event :: struct {kind: Framework_Error, method: Method, route: string, status: Status, payload_type: typeid}
+```
+
+`Framework_Error` is the pre-existing private closed enum made public
+unchanged. It carries **eight** members, not the seven §6.1 listed: WP17
+ratified `Use_After_Route` after that section was written, and the spec's own
+rule is that the enum "grows only when a work package ratifies a new member" —
+so the eighth member is recorded here rather than silently absorbed.
+
+**The redaction constraint is enforced by the gate, not by convention**
+(§6.2, HARD). `build/check_public_api.sh` now asserts, on every run: the
+event's field set is exactly the ratified five; **no field whose type mentions
+`string` may be named anything but `route`** (so `path: string`,
+`message: string` or `headers: []string` each fail the build); `observe` keeps
+its exact signature; and the number of `framework_report` call sites equals
+the number of observer emissions, so a future failure cannot be reported
+without being observable. All four assertions were verified to FAIL against a
+deliberate mutation before being trusted.
+
+Two properties are stronger than the specification anticipated, and are
+recorded as such rather than restated loosely:
+
+* §6.3 says an observer that attempts to respond is stopped by the
+  single-commit guard. With the accepted signature an observer receives the
+  **event by value and nothing else** — no `^Context` — so responding is
+  impossible **by type**; the guard is never reached because there is nothing
+  to write through.
+* `status` is read **after** the framework commits its answer, so it is the
+  status actually sent rather than a prediction. Failures outside a request
+  (the `serve` path) carry `method = .UNKNOWN`, `route = ""` and the zero
+  `Status`: the event declines to invent values it cannot supply.
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `observe` | A | WP20 | `tests/wp20-public-surface/contract_test.odin::wp20_public_signatures_are_pinned` | `tests/wp20-internal/wp20_internal_test.odin::wp20_last_observer_wins` | `docs/ai-context.md::observe` | one procedure pointer on the App; last wins; owns no storage |
+| `Framework_Event` | A | WP20 | `tests/wp20-public-surface/contract_test.odin::wp20_public_signatures_are_pinned` | `tests/wp20-internal/wp20_internal_test.odin::wp20_the_event_survives_the_request_by_value` | `docs/ai-context.md::Framework_Event` | passed by value; `route` is an App-owned pattern valid until `destroy` |
+| `Framework_Error` | A | WP20 | `tests/wp20-public-surface/contract_test.odin::wp20_public_signatures_are_pinned` | `tests/wp20-internal/wp20_internal_test.odin::wp20_marshal_failure_is_observed_once` | `docs/ai-context.md::Framework_Error` | closed enum, value type; grows only by ratification |

@@ -15,6 +15,7 @@ application	proc	mount :: proc(a: ^App, prefix: string, r: ^Router)
 application	proc	next :: proc(ctx: ^Context)
 application	proc	no_content :: proc(ctx: ^Context)
 application	proc	not_found :: proc(ctx: ^Context, resource: string)
+application	proc	observe :: proc(a: ^App, observer: proc(event: Framework_Event))
 application	proc	ok :: proc(ctx: ^Context, value: $T)
 application	proc	patch :: proc(a: ^App, pattern: string, handler: Handler)
 application	proc	path :: proc(ctx: ^Context, name: string) -> string
@@ -31,6 +32,8 @@ application	proc	unauthorized :: proc(ctx: ^Context, message: string)
 application	proc	use :: proc(a: ^App, middleware: Handler)
 application	type	App :: struct {private: App_Internal}
 application	type	Context :: struct {request: Request, private: Context_Internal}
+application	type	Framework_Error :: enum {None, Response_Marshal_Failed, Body_Decode_Failed, Body_Consumed_Twice, No_Response_Committed, Invalid_Serve_Port, Serve_Listen_Failed, Use_After_Route}
+application	type	Framework_Event :: struct {kind: Framework_Error, method: Method, route: string, status: Status, payload_type: typeid}
 application	type	Handler :: proc(ctx: ^Context)
 application	type	Header_View :: struct {private: Header_View_Internal}
 application	type	Method :: enum u8 {UNKNOWN, GET, POST, PUT, PATCH, DELETE}

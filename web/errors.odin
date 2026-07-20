@@ -568,9 +568,15 @@ error_compose_not_found :: proc(
 // transport ADR-011 forbids.
 // ---------------------------------------------------------------------------
 
-// Framework_Error is the closed set of framework-detected failures Phase 1
-// reports. It grows only when a work package ratifies a new one.
-@(private)
+// Framework_Error is the closed set of framework-detected failures the
+// framework reports. It grows only when a work package ratifies a new one.
+//
+// PUBLIC since WP20 (ADR-026): it is the `kind` field of `Framework_Event`, so
+// an observer must be able to name its members. Making it public changes
+// nothing about how the framework uses it — the enum was already closed, and
+// the report path is unchanged — but it does mean a new member is now a PUBLIC
+// surface change, which is exactly the review pressure a ratified-only growth
+// rule wants.
 Framework_Error :: enum {
 	None,
 	Response_Marshal_Failed,

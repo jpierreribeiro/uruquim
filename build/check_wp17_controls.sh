@@ -140,7 +140,11 @@ sed -z -i 's/\tchain_start: int,\n\tchain_len:   int,\n}/\tchain_start: int,\n\t
   "$T/dispatch_table.odin"
 sed -z -i 's/\t\t\tchain_start = chain_start,\n\t\t\tchain_len = chain_len,\n\t\t},/\t\t\tchain_start = chain_start,\n\t\t\tchain_len = chain_len,\n\t\t\tchain_view = a.private.mw_pool[chain_start:chain_start + chain_len],\n\t\t},/' \
   "$T/dispatch_table.odin"
-sed -z -i 's/\t\tctx.private.param = param\n\t\tchain_enter(a, ctx, entry.chain_start, entry.chain_len)\n\t\treturn/\t\tctx.private.param = param\n\t\tctx.private.chain = entry.chain_view\n\t\tctx.private.chain_index = 0\n\t\tnext(ctx)\n\t\treturn/' \
+# Matches ONLY the chain-entry line it replaces. Anchoring on the surrounding
+# statements made this probe brittle: WP20's route-identity assignment landed
+# between them and the probe reported BROKEN PROBE — correctly refusing a
+# verdict rather than faking one, which is why it is written narrowly now.
+sed -z -i 's/\t\tchain_enter(a, ctx, entry.chain_start, entry.chain_len)\n\t\treturn/\t\tctx.private.chain = entry.chain_view\n\t\tctx.private.chain_index = 0\n\t\tnext(ctx)\n\t\treturn/' \
   "$T/dispatch_match.odin"
 assert_mutated "slice storage (entry)" "$T/dispatch_table.odin" "$H"
 assert_mutated "slice storage (dispatch)" "$T/dispatch_match.odin" "$H2"

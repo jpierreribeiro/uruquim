@@ -78,6 +78,8 @@ URUQUIM_MACHINERY_MARKER='// uruquim:file test-machinery'
 # ---------------------------------------------------------------------------
 URUQUIM_EXPECTED_EXPORTS="App
 Context
+Framework_Error
+Framework_Event
 Handler
 Header_View
 Method
@@ -101,6 +103,7 @@ mount
 next
 no_content
 not_found
+observe
 ok
 patch
 path
@@ -441,7 +444,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 39 symbols (32 Phase-1 + WP17 + WP18 + WP19 header/bearer_token)"
+echo "public API contract: application ledger is exactly 42 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -485,16 +488,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 39; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 39 (32 Phase-1 + use/next WP17 + Router/router/mount WP18 + header/bearer_token WP19)"
+if test "$URUQUIM_APP_COUNT" -ne 42; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 42 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 41; then
-  fail "exported union is $URUQUIM_UNION, not 41 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 44; then
+  fail "exported union is $URUQUIM_UNION, not 44 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 41"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 44"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -779,6 +782,60 @@ grep -qxF 'header :: proc(ctx: ^Context, name: string) -> (value: string, ok: bo
 grep -qxF 'bearer_token :: proc(ctx: ^Context) -> (value: string, ok: bool) {' \
   <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
   fail "the ratified web.bearer_token signature changed (WP19; freeze Amendment 5)"
+
+# ---------------------------------------------------------------------------
+# 8h. WP20 — the typed framework-error observer (ADR-026, spec §6.2).
+#
+# THE REDACTION CONSTRAINT IS A GATE ASSERTION, not a convention. The event is
+# the one thing an observer ever receives, so its FIELD TYPES are what bound
+# what an observer can learn. Two assertions, both exact:
+#
+#   * the field set is exactly the ratified five, in order — so a new field
+#     cannot appear without this line changing;
+#   * NO field whose type mentions `string` may be named anything but `route`.
+#     `route` is a registered pattern (low-cardinality, App-owned); a
+#     `path: string`, a `message: string` or a `headers: []string` would each
+#     put request-derived, attacker-influenced bytes into an observer, and
+#     each fails here. The spec calls this HARD; this is where it is enforced.
+URUQUIM_EVENT_BODY="$(awk '/^Framework_Event :: struct \{/{f=1;next} /^\}/{f=0} f' \
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" | grep -vE '^[[:space:]]*$')"
+URUQUIM_EVENT_FIELDS="$(sed -E 's/^[[:space:]]*([a-z_]+):.*/\1/' <<<"$URUQUIM_EVENT_BODY")"
+URUQUIM_EVENT_EXPECTED="$(printf 'kind\nmethod\nroute\nstatus\npayload_type\n')"
+if test "$URUQUIM_EVENT_FIELDS" != "$URUQUIM_EVENT_EXPECTED"; then
+  echo "--- expected Framework_Event fields ---" >&2
+  echo "$URUQUIM_EVENT_EXPECTED" >&2
+  echo "--- actual ---" >&2
+  echo "$URUQUIM_EVENT_FIELDS" >&2
+  fail "Framework_Event must carry exactly kind, method, route, status, payload_type (ADR-026 / spec §6.1)"
+fi
+
+URUQUIM_EVENT_STRING_FIELDS="$(grep -E 'string' <<<"$URUQUIM_EVENT_BODY" |
+  sed -E 's/^[[:space:]]*([a-z_]+):.*/\1/' | grep -vE '^[[:space:]]*$' || true)"
+if test "$URUQUIM_EVENT_STRING_FIELDS" != "route"; then
+  echo "--- string-typed Framework_Event fields (only 'route' is permitted) ---" >&2
+  echo "${URUQUIM_EVENT_STRING_FIELDS:-<none>}" >&2
+  fail "a Framework_Event field other than 'route' carries string data. The event MUST NOT expose request-derived bytes: route identity is the registered pattern and is low-cardinality, while a path/message/header field would hand attacker-controlled text to an observer (spec §6.2, HARD)."
+fi
+
+# The observer registration keeps its ratified shape: the observer takes the
+# event BY VALUE and takes nothing else. A `^Context` parameter here would let
+# an observer respond, which the accepted design forbids by type.
+grep -qxF 'observe :: proc(a: ^App, observer: proc(event: Framework_Event)) {' \
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "the ratified web.observe signature changed; an observer must receive the event by value and nothing else (ADR-026)"
+
+# EVERY framework-detected failure is observed exactly once (spec §6.3). The
+# invariant that keeps that true as the package grows: one emission per report
+# site. A future work package that adds a `framework_report` and forgets the
+# emission fails here rather than shipping a silently unobservable failure.
+URUQUIM_REPORT_CALLS="$(grep -oE 'framework_report\(' <<<"$URUQUIM_WEB_CODE" | grep -c . || true)"
+URUQUIM_OBSERVE_CALLS="$(grep -oE 'framework_observe_(request|app)\(' <<<"$URUQUIM_WEB_CODE" | grep -c . || true)"
+if test "$URUQUIM_REPORT_CALLS" -ne "$URUQUIM_OBSERVE_CALLS"; then
+  fail "web/ has $URUQUIM_REPORT_CALLS framework_report call(s) but $URUQUIM_OBSERVE_CALLS observer emission(s). Every framework-detected failure is observed exactly once (spec §6.3): a reported failure with no emission is invisible to every observer."
+fi
+test "$URUQUIM_REPORT_CALLS" -gt 0 ||
+  fail "no framework_report call sites were found; the report/observe pairing check would be vacuous"
+echo "public API contract: Framework_Event admits no request-derived string; $URUQUIM_REPORT_CALLS reports, $URUQUIM_OBSERVE_CALLS emissions"
 
 # ---------------------------------------------------------------------------
 # 9. WP4 route registration and dispatch (planning/phase-1-plan.md §WP4 D1-D5)
@@ -1126,7 +1183,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 39 + test-support ledger 2 = union 41"
+echo "public API contract: application ledger 42 + test-support ledger 2 = union 44"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"

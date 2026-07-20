@@ -83,6 +83,9 @@ json :: proc(ctx: ^Context, status: Status, value: $T) {
 
 		framework_report(T, .Response_Marshal_Failed)
 		internal_error(ctx)
+		// Emitted AFTER the commit, so the event's `status` is the status the
+		// framework actually sent rather than a prediction (WP20).
+		framework_observe_request(T, ctx, .Response_Marshal_Failed)
 		return
 	}
 

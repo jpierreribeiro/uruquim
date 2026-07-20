@@ -121,14 +121,6 @@ wp20_contains :: proc(haystack: string, needle: string) -> bool {
 	return false
 }
 
-// wp20_arm installs the sink as BOTH the observer's channel and the log
-// capture, in one line per test.
-@(private = "file")
-wp20_arm :: proc(sink: ^Wp20_Sink) {
-	context.user_ptr = sink
-	context.logger = wp20_capture_logger(sink)
-}
-
 @(private = "file")
 wp20_run :: proc(a: ^App, ctx: ^Context, method: Method, path: string, body_bytes: string = "") {
 	driver_run(
@@ -200,7 +192,8 @@ wp20_h_ok :: proc(ctx: ^Context) {
 @(test)
 wp20_marshal_failure_is_observed_once :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -224,7 +217,8 @@ wp20_marshal_failure_is_observed_once :: proc(t: ^testing.T) {
 @(test)
 wp20_decode_failure_is_observed_once :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -246,7 +240,8 @@ wp20_decode_failure_is_observed_once :: proc(t: ^testing.T) {
 @(test)
 wp20_double_body_is_observed_once :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -265,7 +260,8 @@ wp20_double_body_is_observed_once :: proc(t: ^testing.T) {
 @(test)
 wp20_missing_response_is_observed_once :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -287,7 +283,8 @@ wp20_missing_response_is_observed_once :: proc(t: ^testing.T) {
 @(test)
 wp20_invalid_serve_port_is_observed_once :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -309,7 +306,8 @@ wp20_invalid_serve_port_is_observed_once :: proc(t: ^testing.T) {
 @(test)
 wp20_use_after_route_is_observed_once :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -337,7 +335,8 @@ wp20_mw_noop :: proc(ctx: ^Context) {
 @(test)
 wp20_a_miss_carries_no_route :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	// `bare()` commits nothing on a miss, so the driver finalizes a 500 — a
 	// framework failure on a request that matched NO route.
@@ -365,7 +364,8 @@ wp20_a_miss_carries_no_route :: proc(t: ^testing.T) {
 @(test)
 wp20_route_is_the_pattern_for_every_parametric_path :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -389,7 +389,8 @@ wp20_route_is_the_pattern_for_every_parametric_path :: proc(t: ^testing.T) {
 @(test)
 wp20_the_event_survives_the_request_by_value :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -414,7 +415,8 @@ wp20_the_event_survives_the_request_by_value :: proc(t: ^testing.T) {
 @(test)
 wp20_last_observer_wins :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)
@@ -434,7 +436,8 @@ wp20_last_observer_wins :: proc(t: ^testing.T) {
 @(test)
 wp20_no_observer_behaves_exactly_as_before :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	// No `observe` call at all: the failure is still logged and still answered
 	// identically, and nothing is emitted.
@@ -465,7 +468,8 @@ wp20_logged :: proc(sink: ^Wp20_Sink) -> string {
 @(test)
 wp20_bare_installs_no_observer :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	// `bare()` installs nothing, observer included; a failure under it is
 	// logged and finalized exactly as always, with no emission.
@@ -483,7 +487,8 @@ wp20_bare_installs_no_observer :: proc(t: ^testing.T) {
 @(test)
 wp20_an_observed_response_is_byte_identical_to_an_unobserved_one :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	// The response a client receives must not depend on whether an observer is
 	// installed — observation is a side channel, never a response writer.
@@ -520,7 +525,8 @@ wp20_an_observed_response_is_byte_identical_to_an_unobserved_one :: proc(t: ^tes
 @(test)
 wp20_observing_allocates_zero :: proc(t: ^testing.T) {
 	sink: Wp20_Sink
-	wp20_arm(&sink)
+	context.user_ptr = &sink
+	context.logger = wp20_capture_logger(&sink)
 
 	a := app()
 	defer destroy(&a)

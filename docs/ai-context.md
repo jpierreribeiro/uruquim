@@ -29,23 +29,26 @@ a standardized JSON envelope.
 - **Request headers:** `web.header` (case-insensitive, first occurrence wins)
   and `web.bearer_token` (strict RFC 6750). Pure lookups — no automatic
   response, nothing logged, values are request-lifetime views.
+- **Observability:** `web.observe` registers one observer that receives a
+  typed `web.Framework_Event` for every framework-detected failure — kind,
+  method, route pattern, status, payload type. Never a message, never a path.
 - **Testing:** `web.test_request` runs a request through real routing without a
   socket.
 - **HTTP/1 safety:** ambiguous or malformed framing (`CL`+`TE`, duplicate
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available yet** — do not emit any of it: the error observer, the
-built-in logger and request-ID middleware (later Phase-2 work packages);
+**Not available yet** — do not emit any of it: the built-in logger and
+request-ID middleware (later Phase-2 work packages);
 configurable limits and read/write timeouts (Phase 3); graceful shutdown with
 a deadline (Phase 4). Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
 
-**Two ledgers.** The application API is exactly **39** symbols (32 frozen in
-Phase 1, plus `use`/`next`, `Router`/`router`/`mount`, and
-`header`/`bearer_token` from Phase 2). The test-support API is a separate
-ledger of exactly **2**. Union: **41**. Do not fold them together and do not
-invent a third form.
+**Two ledgers.** The application API is exactly **42** symbols (32 frozen in
+Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
+`header`/`bearer_token` and `observe`/`Framework_Event`/`Framework_Error`
+from Phase 2). The test-support API is a separate ledger of exactly **2**.
+Union: **44**. Do not fold them together and do not invent a third form.
 
 ## Application
 
@@ -422,10 +425,40 @@ require_auth :: proc(ctx: ^web.Context) {
 }
 ```
 
+## Observability
+
+```text
+observe(&app, observer)   register ONE observer; a later call replaces it
+Framework_Event{kind, method, route, status, payload_type}
+Framework_Error           closed enum: the framework failure kinds
+```
+
+An observer is a plain procedure taking the event **by value**:
+
+<!-- fragment: phase2/observe -->
+```odin
+report_failure :: proc(event: web.Framework_Event) {
+	metrics_increment(event.kind, event.route, event.status)
+}
+```
+
+It receives the event and **nothing else** — no `ctx`, no body, no headers —
+so it cannot respond and cannot read request bytes. `route` is the REGISTERED
+PATTERN (`/users/:id`), never the request path, and is `""` when no route
+matched; no field carries a message. `status` is what the framework actually
+committed; a failure outside a request (`serve` could not bind) carries no
+method, route or status.
+
+It fires for framework-detected FAILURES only — a marshal failure, an
+undecodable body, a double `web.body`, a handler that committed nothing, an
+invalid or unavailable `serve` port, a fail-closed application. A `404` or a
+`400` from an extractor is a normal outcome, not a failure, and emits nothing.
+Installing an observer changes no response.
+
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-39 application symbols.
+42 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
@@ -529,10 +562,10 @@ Other names reserved for later phases, none of which exist today:
 
 Phase boundaries in one line each:
 
-- **Phase 2** — middleware, route organisation and header lookup (all
-  delivered); still to come: the typed error observer, the built-in logger
-  and request-ID middleware. No panic recovery — Odin has no recoverable
-  panic (ADR-020).
+- **Phase 2** — middleware, route organisation, header lookup and the typed
+  error observer (all delivered); still to come: the built-in logger and
+  request-ID middleware. No panic recovery — Odin has no recoverable panic
+  (ADR-020).
 - **Phase 3** — route groups, typed application state, configurable limits and
   read/write timeouts.
 - **Phase 4** — graceful shutdown with a deadline, security hardening.

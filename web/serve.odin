@@ -31,11 +31,13 @@ serve :: proc(a: ^App, port: int) {
 	// worse operator experience than one that refuses with the diagnostic.
 	if a.private.poisoned {
 		framework_report(App, .Use_After_Route)
+		framework_observe_app(App, a, .Use_After_Route)
 		return
 	}
 
 	if port < 1 || port > 65535 {
 		framework_report(App, .Invalid_Serve_Port)
+		framework_observe_app(App, a, .Invalid_Serve_Port)
 		return
 	}
 
@@ -47,6 +49,7 @@ serve :: proc(a: ^App, port: int) {
 	}
 	if err := transport.serve(cfg); err != .None {
 		framework_report(App, .Serve_Listen_Failed)
+		framework_observe_app(App, a, .Serve_Listen_Failed)
 	}
 }
 
@@ -101,6 +104,12 @@ serve_dispatch :: proc(
 // come from the transport itself.
 @(private)
 driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
+	// WP20: the request carries the App's observer for its whole lifetime, set
+	// before anything can fail. Both drivers call this one procedure, which is
+	// what makes "observed identically on both transports" structural rather
+	// than a claim (R-10).
+	ctx.private.observer = a.private.observer
+
 	if inbound.over_limit {
 		// The adapter rejected the body for length BEFORE the handler. The core
 		// authors the WP7 413 envelope; the handler never runs (WP8 D3).
@@ -177,4 +186,5 @@ driver_finalize :: proc(ctx: ^Context) {
 	}
 	framework_report(App, .No_Response_Committed)
 	error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
+	framework_observe_request(App, ctx, .No_Response_Committed)
 }

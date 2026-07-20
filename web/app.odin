@@ -75,6 +75,13 @@ App_Internal :: struct {
 	closed:      bool,
 	has_mounted: bool,
 
+	// WP20 — the application's framework-error observer (ADR-026), or nil.
+	// ONE slot: `observe` replaces rather than appends (last wins), so no
+	// storage is owned and nothing needs teardown. The driver copies this
+	// pointer onto each request's Context, which is how a failure inside a
+	// handler reaches the observer without the Context holding an `^App`.
+	observer: proc(event: Framework_Event),
+
 	// WP3 test-support state (the in-memory `web.test_request` transport). It is
 	// LAZY: this zero value holds no allocation, so `app()`/`bare()` allocate
 	// nothing and an application that never calls `test_request` never creates a
