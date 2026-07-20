@@ -340,6 +340,15 @@ wp10_fixtures_compile_and_run :: proc(t: ^testing.T) {
 	testing.expect_value(t, labelled.status, web.Status.OK)
 	testing.expect_value(t, route_hits, 1)
 	testing.expect_value(t, route_last, "/users/:id")
+
+	// The documented application-state fragment compiles AND the value it
+	// reads is the caller's own — which is the claim the fragment makes.
+	config := Doc_App_State{greeting = "hi"}
+	stateful := state_app(&config)
+	defer web.destroy(&stateful)
+	configured := web.test_request(&stateful, .GET, "/config")
+	testing.expect_value(t, configured.status, web.Status.OK)
+	testing.expect_value(t, configured.body, `{"greeting":"hi"}`)
 }
 
 // fragment: phase3/route-identity
@@ -364,5 +373,25 @@ metrics_app :: proc() -> web.App {
 	app := web.app()
 	web.use(&app, by_route)
 	web.get(&app, "/users/:id", ping)
+	return app
+}
+
+// fragment: phase3/app-state
+// WP37. The lifetime rule is the LAYOUT: the state and the App are both locals
+// of the same procedure, so the value outlives every request the App serves.
+// This fixture returns the App instead of serving, because the gate compiles
+// and runs it — the shape is otherwise the documented one.
+Doc_App_State :: struct {
+	greeting: string,
+}
+
+show_config :: proc(ctx: ^web.Context) {
+	s := web.state(ctx, Doc_App_State)
+	web.ok(ctx, s^)
+}
+
+state_app :: proc(state: ^Doc_App_State) -> web.App {
+	app := web.app_with_state(state)
+	web.get(&app, "/config", show_config)
 	return app
 }

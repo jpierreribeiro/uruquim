@@ -11,7 +11,7 @@
 #   3  the ownership table deleted          -> the docs gate MUST reject it
 #   4  an ownership COLUMN dropped          -> the docs gate MUST reject it
 #   5  the single-server rule (R-10) deleted-> the docs gate MUST reject it
-#   6  POSITIVE: all six examples still build and the docs gate is green
+#   6  POSITIVE: all seven examples still build and the docs gate is green
 #
 # CONTROL 2 IS THE ONE THAT MATTERS MOST. WP12 D-12.5 measured a mis-ordered
 # auth program answering `200 OK` with the secret body to an unauthenticated
@@ -238,7 +238,7 @@ T="$(tree_copy positive)"
 bash "$T/build/check_docs.sh" >/dev/null 2>&1 ||
   fail "POSITIVE control failed: the docs gate does not pass on the real tree"
 env URUQUIM_COMPILER="$URUQUIM_W24_ODIN" bash "$T/build/check_examples.sh" >/dev/null 2>&1 ||
-  fail "POSITIVE control failed: the six examples do not build"
+  fail "POSITIVE control failed: the seven examples do not build"
 
 for URUQUIM_NAME in 04-middleware 05-route-groups 06-authentication; do
   test -f "$URUQUIM_ROOT/examples/$URUQUIM_NAME/main.odin" ||
@@ -250,6 +250,6 @@ done
 grep -qiE 'REVALIDATES|revalidat' "$URUQUIM_ROOT/examples/06-authentication/main.odin" ||
   fail "POSITIVE control failed: example 06 no longer states that current_user revalidates the token"
 
-echo "CONTROL 6: docs gate green, six examples build, example 06 still states its cost -> GREEN as required [positive control]"
+echo "CONTROL 6: docs gate green, seven examples build, example 06 still states its cost -> GREEN as required [positive control]"
 
 echo "PASS: all six WP24 documentation controls behaved as required"

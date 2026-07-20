@@ -1,4 +1,5 @@
 application	proc	app :: proc() -> App
+application	proc	app_with_state :: proc(state: ^$T) -> App
 application	proc	bad_request :: proc(ctx: ^Context, message: string)
 application	proc	bare :: proc() -> App
 application	proc	bearer_token :: proc(ctx: ^Context) -> (value: string, ok: bool)
@@ -30,6 +31,7 @@ application	proc	request_id :: proc(ctx: ^Context)
 application	proc	route :: proc(ctx: ^Context) -> string
 application	proc	router :: proc() -> Router
 application	proc	serve :: proc(a: ^App, port: int)
+application	proc	state :: proc(ctx: ^Context, $T: typeid) -> ^T
 application	proc	text :: proc(ctx: ^Context, status: Status, s: string)
 application	proc	unauthorized :: proc(ctx: ^Context, message: string)
 application	proc	use :: proc(a: ^App, middleware: Handler)

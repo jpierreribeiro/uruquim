@@ -16,6 +16,37 @@ freeze amendment, never as a snapshot refresh.
 
 ### Documented
 
+- **Typed application state** (Phase 3, WP37): **+2 symbols**, application
+  ledger **45 → 47** (union 49), recorded as Amendment 11 of
+  `planning/phase-1-freeze.md`. `web.app_with_state(&state)` attaches ONE value
+  to an application — a database pool, a config struct, a cache — and
+  `web.state(ctx, App_State)` reads it back typed inside any handler or
+  middleware. ADR-004 option A, delivered.
+  **The call site has no type arguments,** which is what option A was chosen
+  for: option B — a parametric `App(S)`/`Context(S)` — would have put a type
+  parameter on every handler signature in every program. The declared price is
+  a runtime assert instead of a compile error, and it is paid in the open:
+  `state` asserts registration and then **exact `typeid` equality** before the
+  cast. No subtyping walk, no "close enough" — casting a `^Config` to a
+  `^Database` because both are pointers is the defect the `typeid` exists to
+  make impossible. A failing assert aborts, which is the documented fault model
+  (ADR-020), so you meet it on your first request rather than in production.
+  **A nil state rejects the application fail-closed** (AMEND-1), through the
+  ADR-019 mechanism rather than a new one. The App stores the **pointer**, so a
+  handler mutates your value — and the value must outlive the App;
+  `examples/07-app-state` teaches that as layout, both being locals of `main`.
+  The `rawptr` is private: neither exported signature carries an untyped
+  pointer, which is the narrowing G-03's own comment anticipated by name.
+  Enforcing it exposed a hole in the check itself, closed in the same change —
+  the exported-declaration scan never read a **multi-line** signature at all,
+  so a `rawptr` parameter there would have passed.
+  **There is no request-scoped state, and there will not be one** (ADR-028,
+  option 1, ACCEPTED). C-6 found that Go's `context.WithValue` and Rust's
+  `http::Extensions` exist for type-erased, dynamically-keyed state crossing
+  library boundaries — which Uruquim does not have — so the finding *supports*
+  G-03. The consequence is recorded rather than softened: the canonical auth
+  pattern's revalidation cost stands until an ADR decides otherwise.
+
 - **Route identity is public** (Phase 3, WP34): **+1 symbol**, application
   ledger **44 → 45** (union 47), recorded as Amendment 10 of
   `planning/phase-1-freeze.md` — the first amendment whose authority is the

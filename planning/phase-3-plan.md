@@ -965,6 +965,50 @@ written cleanly today — never a hypothetical — and option 1 is the only
 reversible one: adding a mechanism later is a pure strengthening, while
 shipping one and withdrawing it breaks applications.
 
+**WP37 DONE, 2026-07-20 — `web/state.odin`, `tests/wp37-public-surface`,
+`examples/07-app-state`, `build/check_wp37_controls.sh`, Amendment 11 of
+`planning/phase-1-freeze.md`.** **+2 symbols, ledger 45 → 47** (union 49).
+ADR-004 option A only; ADR-028 ships nothing, as decided.
+
+**No back-pointer to the App.** The driver copies the pointer and the `typeid`
+onto the Context at the start of the request, exactly as it copies the WP20
+observer — one line on the shared pipeline, so both transports behave
+identically (R-10) and the WP4 D3 decision stands.
+
+**The `rawptr` ban was enforced, and enforcing it found a hole in the check.**
+The exported-declaration extractor treated any declaration line not ending in
+`{` as complete, so a MULTI-LINE exported signature was never scanned — a
+`rawptr` parameter there would have passed. It now follows a signature to its
+closing parenthesis and stops at a procedure's opening brace: a body is
+implementation, a signature is surface, which is what G-03 always said in
+words. Both halves were positively controlled: a `rawptr` planted in an
+exported struct field is caught, and one planted in a multi-line ratified
+signature is caught only after the fix.
+
+**Two of the three guarantees are not testable from a test suite, and the
+controls say so instead of pretending.** `state` asserts, and a failing assert
+ABORTS — a test that could observe one and continue would be evidence the
+assert was not an assert. `build/check_wp37_controls.sh` therefore compiles and
+RUNS probe programs and reads their exit status.
+
+**Control 3 produced a better result than it was written to expect, and the
+finding is recorded.** Deleting only the registration assert does not stop the
+abort: an App from `web.app()` has a ZERO `state_type`, which never equals
+`typeid_of(T)`, so the typeid assert already catches the unregistered case.
+Through the public API the registration assert is **not independently
+load-bearing** — it exists for its DIAGNOSTIC, and "you built this with
+web.app()" is a far more useful sentence than "the type does not match". With
+BOTH asserts removed the program does not quietly succeed either: it dies from
+a segmentation fault (139) instead of the assert trap (132). So the asserts do
+not turn a crash into a non-crash — **they turn an undiagnosed memory fault
+into a diagnosed refusal that names the mistake**, and that is what the control
+now pins.
+
+**The ritual took ten files this time**, two more than WP34 predicted:
+the eight, plus `build/check_examples.sh` (the AMEND-4 ban list, the example
+inventory and the "six examples" count in two scripts) and `README.md`. WP36
+should budget for ten.
+
 ### WP38 — Phase-3 freeze
 
 **Type: FREEZE. Requires owner approval.**

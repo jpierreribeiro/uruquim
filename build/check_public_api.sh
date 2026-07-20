@@ -87,6 +87,7 @@ Request
 Router
 Status
 app
+app_with_state
 bad_request
 bare
 bearer_token
@@ -118,6 +119,7 @@ request_id
 route
 router
 serve
+state
 text
 unauthorized
 use"
@@ -447,7 +449,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 45 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id + WP34 route)"
+echo "public API contract: application ledger is exactly 47 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -491,16 +493,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 45; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 45 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error + WP22 logger + WP23 request_id + WP34 route)"
+if test "$URUQUIM_APP_COUNT" -ne 47; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 47 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 47; then
-  fail "exported union is $URUQUIM_UNION, not 47 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 49; then
+  fail "exported union is $URUQUIM_UNION, not 49 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 47"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 49"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -547,7 +549,7 @@ echo "public API contract: web/testing bridge exports match the locked minimal s
 # The application ledger scanned here excludes test_support.odin, so the two
 # ratified test-support names never reach this loop.
 # ---------------------------------------------------------------------------
-for URUQUIM_FUTURE in group state app_with_state \
+for URUQUIM_FUTURE in group \
   serve_with serve_transport app_init \
   redirect conflict bytes recovery cors \
   Response Header Header_Pair Header_View_Internal Params Route_Info \
@@ -618,15 +620,54 @@ for URUQUIM_BACKEND in 'odin[-_]http' 'nbio' 'laytan'; do
   fi
 done
 
+# WHAT COUNTS AS AN EXPORTED DECLARATION, and WP37 sharpened this in both
+# directions.
+#
+# For a TYPE, the declaration is the whole block: an exported struct's fields
+# are surface, so `Context :: struct { x: rawptr }` must be caught.
+#
+# For a PROCEDURE, the declaration is the SIGNATURE and stops at the opening
+# brace. The body is implementation. That is what G-03 has always said in
+# words — "it never appears in a public signature" — and until WP37 nothing
+# tested the difference, because no exported body had needed an untyped
+# pointer. `app_with_state` does: it converts `^$T` to the private `rawptr`
+# field the App stores, which is precisely the typeid-validated narrowing the
+# ban's own comment above anticipates by name.
+#
+# The parenthesis count is not decoration either. The previous version treated
+# any declaration line that did not end in `{` as complete, so a MULTI-LINE
+# exported signature — `test_request :: proc(` and its four parameter lines —
+# was never scanned at all. A `rawptr` parameter there would have passed. That
+# hole is closed here: the signature is followed to its closing paren whether it
+# spans one line or five.
 uruquim_exported_blocks() {
   awk '
+    function paren_delta(line,   i, c, d, n) {
+      d = 0; n = length(line)
+      for (i = 1; i <= n; i++) { c = substr(line, i, 1)
+        if (c == "(") d++
+        else if (c == ")") d-- }
+      return d
+    }
     /^[[:space:]]*$/ { next }
     /^\/\// { next }
     /^@\(/ { if ($0 ~ /^@\(private/) { pending_private = 1 } next }
     /^[A-Za-z_][A-Za-z0-9_]*[[:space:]]*::/ {
       if (pending_private) { pending_private = 0; skipping = ($0 ~ /\{[[:space:]]*$/); next }
       print
-      emitting = ($0 ~ /\{[[:space:]]*$/)
+      if ($0 ~ /::[[:space:]]*proc/) {
+        depth = paren_delta($0)
+        if (depth > 0) { in_signature = 1; emitting = 0 }
+        else { in_signature = 0; emitting = 0; skipping = ($0 ~ /\{[[:space:]]*$/) }
+      } else {
+        emitting = ($0 ~ /\{[[:space:]]*$/)
+      }
+      next
+    }
+    in_signature {
+      print
+      depth += paren_delta($0)
+      if (depth <= 0) { in_signature = 0; skipping = ($0 ~ /\{[[:space:]]*$/) }
       next
     }
     /^\}/ { emitting = 0; skipping = 0; next }
@@ -1238,7 +1279,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 45 + test-support ledger 2 = union 47"
+echo "public API contract: application ledger 47 + test-support ledger 2 = union 49"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"
