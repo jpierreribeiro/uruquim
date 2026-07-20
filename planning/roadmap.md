@@ -6,10 +6,13 @@ in [`post-phase1-audit.md`](post-phase1-audit.md) and
 
 Detail is deliberately **proportional to distance**. Phase 2 is complete
 ([`phase-2-plan.md`](phase-2-plan.md), [`phase-2-freeze.md`](phase-2-freeze.md)).
-Phase 3 is planned to hand-off depth ([`phase-3-plan.md`](phase-3-plan.md));
-Phases 4 and 5 have defined work packages and research gates but no frozen
-signatures ([`later-phases-plan.md`](later-phases-plan.md)). Precision about
-work that is two years away would be false precision.
+Phase 3 is planned to hand-off depth ([`phase-3-plan.md`](phase-3-plan.md)).
+Phase 4 has a contract-level draft ([`phase-4-plan.md`](phase-4-plan.md)) that
+must be refreshed against Phase 3's outputs before it starts — its own E-4
+makes that an entry condition. Phase 5 keeps defined work packages and
+research gates but no frozen signatures
+([`later-phases-plan.md`](later-phases-plan.md)). Precision about work that is
+two years away would be false precision.
 
 ## Where the project is
 

@@ -860,7 +860,9 @@ application looks like today, and it touches four Phase-3 questions:
 ## 7. What an implementation agent should read first
 
 1. This document, for the work package it is doing — **including §0**, because
-   three of the four findings there contradict the older skeleton.
+   three of the four findings there contradict the older skeleton, **and §2b**,
+   because every approval the §2 table marks is already resolved there
+   (ADR-029): no work package waits for a review.
 2. `planning/later-phases-plan.md` §Phase 3 — the research gates and the C-1…C-8
    findings, which remain authoritative for the questions they cover.
 3. `planning/phase-2-freeze.md` — the three ledgers it will have to amend, and

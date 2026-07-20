@@ -275,6 +275,12 @@ not interchangeable and the gate obligations differ:
 risk, because its mistakes are remotely exploitable rather than merely
 inconvenient.
 
+> **Work-package plan:** [`phase-4-plan.md`](phase-4-plan.md) (drafted
+> 2026-07-20 under the ADR-029 delegation) supersedes this section's table for
+> sequencing and scope; the findings and gates below remain authoritative for
+> the questions they cover. The draft must be refreshed against Phase 3's
+> outputs before Phase 4 starts (its §0 / E-4).
+
 ### Research gates (added 2026-07-20; must complete before the capabilities they govern)
 
 Phase 4 already lists the right capabilities. What it lacked was a *method* for

@@ -48,6 +48,7 @@ sessão resolve.
 | **ADR-013** — proxies confiáveis | Por padrão, vale o endereço da conexão; confiar em proxy é configuração explícita do operador. Detalhes de API ficam para a Fase 4. |
 | **CI no GitHub** | **Continua sem CI** — o gate roda local/VPS, decisão reconfirmada pelo dono em 2026-07-20. |
 | **Fase 3, todas as aprovações** | Resolvidas de antemão no plano (§2b do `phase-3-plan.md`): diagnóstico de conflito com poison (WP30); nenhuma normalização de caminho, permanente, params crus (WP31a); HEAD e OPTIONS automáticos, sem 501 (WP32a); acessor de rota aprovado (WP34); limites configuráveis com runtime derivado no boot e registro-durante-serving rejeitado (WP36); WP37 só implementa o ADR-004; o freeze (WP38) é aprovado pelo próprio gate — e qualquer violação para e volta ao dono. |
+| **Fase 4, escopo** | Plano rascunhado (`phase-4-plan.md`, §2b): CORS, uploads e arquivos estáticos ficam **fora do núcleo** (pacotes opcionais futuros); TLS é terminado no proxy reverso — esse é o jeito suportado de rodar; a decisão de concorrência fica **deliberadamente aberta** até haver protótipos e medição (ADR-030, procedimento já escrito). O rascunho é obrigatoriamente re-revisado contra os resultados da Fase 3 antes de começar. |
 
 Toda pré-aprovação é condicional: se o trabalho de especificação de um pacote
 contradisser o que foi decidido, o agente **para e registra o achado** em vez
