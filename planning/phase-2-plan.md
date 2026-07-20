@@ -589,8 +589,11 @@ variadic.**
 
 ### Amendment 1 (2026-07-20) — `mount` is fail-OPEN on allocation failure
 
-**Status: OPEN DEFECT in merged code. Owner decision required (docket D-1 in
-`tina/docs/evidence/uruquim-tina-impact-assessment.md`).**
+**Status: RESOLVED. Owner accepted option (A) — poison on failure — on
+2026-07-20 (docket D-1). Implemented in the same change as this status update;
+`web/router.odin` now checks every allocation and rejects the application
+fail-closed, with `build/check_wp18_controls.sh` control 6 proving a
+regression goes red.**
 
 `mount` validates the prefix, the poisoned flag and the closed flag **before**
 the publication loop, which is correct. The loop itself, however, publishes with
@@ -622,9 +625,21 @@ being observable — full transactional rollback buys atomicity the poison
 already renders moot. RED proof: the arena probe above, asserting
 `poisoned = true` and a `serve` refusal.
 
-**This amendment records the defect; it does not authorise the code change.**
-The fix belongs to its own branch, before WP22, because WP22 reads the same
-poison mechanism.
+**Delivered.** `mount` now checks `make`, `strings.concatenate` and every
+`append` — including the ones inside `mount_chain_flatten`, where a missing
+step would run a protected route with an auth guard silently absent, which is
+the security face of the same bug. Any failure rejects the application through
+the existing WP17/WP18 poison. RED evidence, recorded before the fix:
+`/api/a12` answered **404** — a route the developer wrote, indistinguishable
+from one that never existed. After: 500 on every path, and `serve` refuses.
+
+Two follow-ups this amendment deliberately does NOT do:
+
+* it does not add a `Framework_Error` member for the failure. Poison
+  diagnostics are logged and not observed today (WP17/WP18 precedent), and a
+  new enum member is a public-surface change requiring its own approval;
+* it does not make the failure recoverable. The application is rejected, not
+  repaired — consistent with every other member of the ADR-019 family.
 
 ---
 
@@ -893,7 +908,9 @@ Output: `planning/phase-2-freeze.md`, mirroring `phase-1-freeze.md`.
 
 ### Amendment 1 (2026-07-20) — freeze the CLAIMS, not only the API
 
-**Scope growth on an approved work package; owner decision D-2.**
+**Status: ACCEPTED (owner, 2026-07-20, docket D-2) — all three ledgers, with
+the scope limit below.** This is now part of WP25's definition of done: the
+freeze does not pass without them.
 
 Phase 1 froze symbols, signatures and dependencies. It did not freeze the
 project's own *sentences*. The Tina study is the argument for closing that gap,

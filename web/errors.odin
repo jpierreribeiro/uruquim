@@ -724,6 +724,21 @@ FRAMEWORK_MESSAGE_ROUTER_CLOSED ::
 	"before mounting it. This Router is rejected fail-closed: every request " +
 	"dispatched to it directly will answer 500."
 
+// WP18 Amendment 1 — the fail-closed member for a mount that could not
+// allocate. Odin's `append` does NOT panic when it runs out of memory: it
+// returns `num_appended = 0` and reports through `#optional_allocator_error`.
+// Discarding that made routes disappear with no diagnostic while the
+// application still looked healthy, which is fail-OPEN — the exact failure
+// ADR-019 exists to refuse. The application is now rejected instead.
+@(private)
+FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED ::
+	"uruquim: web.mount could not allocate storage for the routes it was " +
+	"copying, so the application would have served only part of the Router. " +
+	"Registration allocates from context.allocator; a bounded allocator that " +
+	"runs out here would otherwise drop routes SILENTLY and answer 404 for " +
+	"them. This application is rejected fail-closed: every request will " +
+	"answer 500 and web.serve will refuse to start."
+
 @(private)
 FRAMEWORK_MESSAGE_MOUNT_INVALID_PREFIX ::
 	"uruquim: web.mount was given an invalid prefix; a prefix must begin with " +
