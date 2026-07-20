@@ -138,20 +138,21 @@ nothing and vagueness costs a bug report nobody can reproduce.
 
 ---
 
-## Druses
+## Combinations that are known to work
 
-A Druse is a **compatibility statement plus examples**. It ships no code.
+**There is no artifact for this, and there should not be one.** A set of
+Crystals verified together against one Uruquim commit and one toolchain is a
+**tag on the Crystals repository** — nothing more. "At this tag, these Crystals
+were tested together against that Uruquim commit, and these examples compile."
 
-The minimum useful form is a tag on the Crystals repository: "at this commit,
-these Crystals were tested together against that Uruquim commit on this
-toolchain, and here are three programs that compile."
-
-A separate `uruquim-druse-*` repository — submodules, a matrix, examples, a
-check script — only earns its existence once Crystals live in several
-repositories and something has to state that a particular *combination* works.
-Before that it is a directory pretending to be a project.
-
-The failure mode to watch: a Druse that starts exporting a convenience
-procedure. At that moment it stops being a curated list and becomes a framework
-wrapping a framework, and the ecosystem has grown the layer it was built to
+This section previously proposed a `uruquim-druse-*` repository with
+submodules, a matrix and a check script. That was wrong, and
+[`glossary.md`](glossary.md) records why: "Druse" names the philosophy — small
+crystals lining a cavity another rock deliberately left empty — and turning a
+metaphor into a deliverable is precisely the accretion this ecosystem exists to
 avoid.
+
+The failure mode to watch is the same one either way: the moment a curated
+combination starts exporting a convenience procedure, it has become a framework
+wrapping a framework, and the layer the whole design was built to prevent has
+appeared anyway — this time from the outside.

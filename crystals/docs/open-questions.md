@@ -96,19 +96,26 @@ implementations rather than designed in advance.
 
 ---
 
-## Q-6 — Is "Druse" worth the word?
+## Q-6 — Is "Druse" worth the word? — **CLOSED, 2026-07-20**
 
-**The problem.** A Druse ships no code. It is a compatibility statement plus
-examples — and a compatibility statement plus examples is a **tag on the
-Crystals repository**. A concept that adds a word and no mechanism is a concept
-that should probably not exist.
+**How it was asked.** A Druse ships no code, so a concept that adds a word and
+no mechanism looked like a concept that should not exist.
 
-**Who decides.** The owner; it is partly an identity question, not only a
-technical one.
+**The answer, from the owner: the question was wrong.** A druse is the
+formation where small crystals line a cavity in another rock — the application
+is the rock, the cavity is the space the framework deliberately leaves empty,
+and the crystals are what the developer chooses to put there. It is an
+**exemplification of the philosophy**, not a deliverable.
 
-**What would settle it.** Whether, at five Crystals in more than one repository,
-anyone actually needs to name a *combination* rather than a commit. If a tag
-suffices, drop the word and reclaim the concept.
+**What this closed, and what it corrected.** The earlier draft had turned the
+metaphor into a technical artifact: a named, tested combination with a
+compatibility matrix and a promotion process. That was accretion of exactly the
+kind this project refuses, committed in the ecosystem's own documentation. A
+tested combination of Crystals is a **tag on a repository** and needs no
+vocabulary at all.
+
+The word stays, naming the idea. It carries no mechanism, and asking it to
+carry one is the failure mode to watch for.
 
 ---
 

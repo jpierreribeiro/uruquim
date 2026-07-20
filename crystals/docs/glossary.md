@@ -18,13 +18,34 @@ hand-written SQL through a pool.
 
 ### Druse
 
-A named, tested combination of Crystals that are known to work together on one
-Odin toolchain and one Uruquim commit.
+**Not a technical artifact. The image of the whole idea.**
 
-A druse is the mineral formation where many crystals grow on a shared surface,
-which is close enough to the intended meaning: a Druse adds no code. It is a
-compatibility statement and a set of examples. If a "Druse" ever ships a
-procedure, it has become a framework and the name is wrong.
+A druse is the geological formation where small crystals line the surface or
+the interior of a cavity in another rock. The metaphor is exact, and it is the
+metaphor that explains the architecture:
+
+* **The rock is the application.** It is the thing being built, and it is the
+  only thing that has a shape of its own.
+* **The cavity is the space the framework deliberately leaves empty.** Uruquim
+  does not fill it — no ORM, no CLI, no config loader, no reload. The emptiness
+  is a decision, enforced by G-07, not an omission waiting to be corrected.
+* **The crystals are what the developer chooses to line it with**, one at a
+  time, visibly, each one optional.
+
+What follows from taking the image seriously: crystals grow *into* the cavity
+from its walls. They do not grow into the rock, they do not restructure it, and
+removing one leaves the cavity — not a hole in the rock. That is the dependency
+direction and the deletability property, stated as a picture instead of a rule.
+
+**An earlier draft of this document made "Druse" a deliverable** — a named,
+tested combination with a compatibility matrix and a governance process. That
+was a mistake, and an instructive one: it took a metaphor and manufactured an
+artifact from it, which is the exact accretion this project exists to refuse.
+A combination of Crystals that are known to work together is a **tag on a
+repository**. It does not need a word, a document, or a promotion process.
+
+The word stays because it names the philosophy, and philosophy is worth naming.
+It buys no mechanism, and it should never be asked to.
 
 ### Crystal Tool
 
