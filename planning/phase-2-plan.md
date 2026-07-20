@@ -779,7 +779,7 @@ symbols.**
   would defeat the fixed buffer and re-import the allocation the buffer exists
   to avoid) and never dropped without a signal (which would make a logger
   quietly lie about traffic it saw). Pick one, write it down, and prove it.
-  This is the Tina discipline "a bounded resource states what it does when
+  This is the reference discipline "a bounded resource states what it does when
   full" applied at the smallest scale the framework has.
 * **Out of scope.** Structured logging, sinks, sampling, levels (Phase 4). No
   log ring, queue, drop policy or non-blocking sink in the framework now: those
@@ -915,10 +915,10 @@ requirement the plan itself had asserted.
   | `Framework_Event` | the value itself | unbounded | **yes**, by value | none needed |
   | middleware pool | App | `destroy(&app)` | no | App |
 
-  This is the single most transferable idea from the Tina study: a framework
+  This is the single most transferable idea from the reference study: a framework
   that hands out borrowed memory owes its users a table, not a habit of
   mentioning it. Teach ownership, limits and the failure model — never the
-  Tina concepts that produced the discipline.
+  external concepts that produced the discipline.
 
 ---
 
@@ -947,7 +947,7 @@ the scope limit below.** This is now part of WP25's definition of done: the
 freeze does not pass without them.
 
 Phase 1 froze symbols, signatures and dependencies. It did not freeze the
-project's own *sentences*. The Tina study is the argument for closing that gap,
+project's own *sentences*. The reference study is the argument for closing that gap,
 and the argument is empirical rather than theoretical: an equally careful
 project was measured against its own README and **six of its public claims came
 back "imprecisa" or "não demonstrada"** — not because anyone was dishonest, but
