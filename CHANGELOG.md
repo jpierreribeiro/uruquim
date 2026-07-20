@@ -15,6 +15,30 @@ freeze amendments.
 
 ### Documented
 
+- **Examples, the canonical auth pattern, and the ownership table** (Phase 2,
+  WP24): **zero new symbols**. Three new examples — `04-middleware`,
+  `05-route-groups`, `06-authentication` — bring the compiled example set to
+  six; all six are part of the compatibility contract and build in the gate.
+  `require_auth` and `current_user` are **application code in the example**,
+  not framework symbols: the framework supplies `web.bearer_token` and the
+  application supplies its own typed gate and typed lookup. The example states
+  its cost plainly rather than hiding it — **`current_user` revalidates the
+  token on every call**, because a middleware cannot hand a typed value to a
+  handler while `Context` is deliberately not an extension bag (G-03) and
+  typed request-local state is Phase 3. The workaround (call it once, pass the
+  value down) is documented with it.
+  A single canonical **ownership table** now answers the same four questions —
+  owner, valid until, may it escape, who cleans up — for every value an
+  application can touch, replacing the same rule restated across a dozen doc
+  comments; the docs gate requires the table, its four columns, and a row for
+  each Phase-2 borrowed value. Audit recommendations **R-3** (never copy an
+  `App` or `Router` — the `strings.Builder` analogy), **R-4** (the zero-value
+  `App` is not usable) and **R-10** (exactly one server per process, no stop
+  until Phase 4) are stated and gate-enforced. The pay-for-what-you-use table
+  is extended with measured Phase-2 costs, including a stated ~100-byte noise
+  floor: `header`/`bearer_token` are free (+152), `request_id` nearly so
+  (+456), and the middleware mechanism is the one real cost (+8,448), paid
+  only by applications that call `use`.
 - **Fault behaviour** (Phase 2, WP21): **zero new symbols** (ADR-020). Two
   different failures are now documented as the two different things they are.
   A handler that returns **without committing a response** is finalized by the

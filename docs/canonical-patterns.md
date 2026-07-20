@@ -80,6 +80,64 @@ application and the framework share one program, and code that deliberately
 reaches into framework internals bypasses it (ADR-008, "Scope of the
 guarantee").
 
+## Who owns what (the ownership table)
+
+Phase 2 handed you five new borrowed things, and "copy it if it must outlive
+the request" was spread across a dozen comments. This is the single canonical
+answer. Every row answers the same four questions.
+
+| Value | Owner | Valid until | May it escape? | Who cleans up |
+|---|---|---|---|---|
+| route pattern (`/users/:id`) | App | `web.destroy(&app)` | only as a documented view | App |
+| `ctx.request.path` / `query` / `body` | transport | end of the request | **no** — copy first | transport |
+| inbound header name and value (`web.header`) | transport | end of the request | **no** — copy first | transport |
+| `web.bearer_token` result | transport | end of the request | **no** — copy first | transport |
+| path / query parameter (`web.path`, `web.query`) | request storage | end of the request | **no** — copy first | driver |
+| decoded JSON body (`web.body`) | request arena | end of the request | **no** — copy first | driver |
+| effective request ID (`web.header(ctx, "X-Request-Id")`) | Context | end of the request | **no** — copy first | driver |
+| `web.Framework_Event` (and every field but `route`) | the value itself | unbounded | **yes**, it is a value | nobody |
+| `Framework_Event.route` | App | `web.destroy(&app)` | only while the App lives | App |
+| middleware list and chain pool | App | `web.destroy(&app)` | **no** | App |
+| `web.Router` after `web.mount` | App (routes were copied) | `web.destroy(&app)` | **no** | App |
+| `web.Recorded_Response` (`status`, `body`) | the recorder | until the next `test_request` | copy to keep | App teardown |
+
+Read the table as one rule: **only `Framework_Event` may escape a request.**
+Everything else is a view, and a view outlives nothing.
+
+## An App and a Router are never copied
+
+Treat `web.App` and `web.Router` exactly as you treat a `strings.Builder`: they
+own storage, so you pass `&app`, never `app`.
+
+<!-- pseudocode: pass the App by pointer, never by value -->
+```odin
+app := web.app()
+defer web.destroy(&app)
+
+configure(&app)          // correct
+// configure(app)        // WRONG: a copy that registers into nothing
+```
+
+A copy shares the original's dynamic arrays. Registering on the copy grows a
+table the original will never see, and destroying both is a double free. There
+is no copy constructor to protect you — this is Odin, and the compiler will let
+you do it.
+
+The **zero value is not a usable App.** `app := web.App{}` gives you no default
+responses and no initialised storage; `web.app()` and `web.bare()` are the two
+constructors, and there are no others.
+
+## Exactly one server per process
+
+`web.serve` is blocking, and the transport keeps per-process state. Running two
+servers in one process is **not supported**: they cross-wire dispatch. One
+process, one `web.serve`.
+
+There is also no stop procedure. `web.serve` returns when the process ends.
+Graceful shutdown with a deadline is Phase 4, and it will add public API — so
+today, run under a supervisor that can restart the process, and do not build a
+control plane that assumes it can stop the server from inside.
+
 ## Reading the request
 
 <!-- pseudocode: the request field list -->

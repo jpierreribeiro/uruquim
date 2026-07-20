@@ -257,6 +257,36 @@ grep -qiE 'phase 2' "$URUQUIM_AI" ||
 grep -qiE '4 MiB' "$URUQUIM_AI" ||
   fail "docs/ai-context.md does not state the fixed 4 MiB body cap (AMEND-3)"
 
+# 6b-2. WP24 — the ownership table is REQUIRED, not optional.
+#
+# Phase 2 handed users five new borrowed values, and the rule for each was
+# spread across a dozen doc comments. A framework that hands out borrowed
+# memory owes its users a table, not a habit of mentioning it. The gate
+# requires the table AND its four questions, so a future edit cannot quietly
+# drop a column and leave rows that answer less than they claim to.
+URUQUIM_OWNERSHIP="$URUQUIM_DOCS/canonical-patterns.md"
+grep -qiE '^## Who owns what' "$URUQUIM_OWNERSHIP" ||
+  fail "docs/canonical-patterns.md has no ownership table (WP24); borrowed values must be answered in ONE place"
+for URUQUIM_COLUMN in 'Owner' 'Valid until' 'May it escape' 'Who cleans up'; do
+  grep -qF "$URUQUIM_COLUMN" "$URUQUIM_OWNERSHIP" ||
+    fail "the ownership table is missing the '$URUQUIM_COLUMN' question; every row answers the same four (WP24)"
+done
+# Every Phase-2 borrowed value earns a row. A symbol that hands out a view and
+# is absent here is exactly the gap the table exists to close.
+for URUQUIM_BORROWED in 'web.header' 'bearer_token' 'X-Request-Id' 'Framework_Event' 'Router'; do
+  grep -qF "$URUQUIM_BORROWED" "$URUQUIM_OWNERSHIP" ||
+    fail "the ownership table has no row covering '$URUQUIM_BORROWED' (WP24)"
+done
+# R-3 and R-4: an App/Router is never copied, and the zero value is not usable.
+grep -qiE 'strings\.Builder' "$URUQUIM_OWNERSHIP" ||
+  fail "docs/canonical-patterns.md does not give the strings.Builder analogy for App/Router copying (audit R-3)"
+grep -qiE 'zero value is not a usable App|zero value.*not.*usable' "$URUQUIM_OWNERSHIP" ||
+  fail "docs/canonical-patterns.md does not state the zero-value App contract (audit R-4)"
+# R-10: exactly one server per process, and no stop until Phase 4.
+grep -qiE 'one server per process|Exactly one server' "$URUQUIM_OWNERSHIP" ||
+  fail "docs/canonical-patterns.md does not state the single-server constraint (audit R-10)"
+echo "docs: the ownership table is present with all four questions; R-3, R-4 and R-10 are stated"
+
 # 6c. The Quick Start must be real, not the WP10 placeholder.
 grep -qiE '^> Placeholder' "$URUQUIM_DOCS/quick-start.md" &&
   fail "docs/quick-start.md is still the placeholder (WP10 must replace it)"

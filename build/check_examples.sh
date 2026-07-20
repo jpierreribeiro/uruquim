@@ -36,13 +36,16 @@ URUQUIM_COMPILER_DIR="$(cd "$(dirname "$URUQUIM_COMPILER")" && pwd)"
 # ---------------------------------------------------------------------------
 URUQUIM_EXPECTED_EXAMPLES="01-hello-world
 02-json-api
-03-route-params"
+03-route-params
+04-middleware
+05-route-groups
+06-authentication"
 
 test -d "$URUQUIM_EXAMPLES" || fail "examples/ does not exist"
 
 for URUQUIM_NAME in $URUQUIM_EXPECTED_EXAMPLES; do
   test -d "$URUQUIM_EXAMPLES/$URUQUIM_NAME" ||
-    fail "examples/$URUQUIM_NAME/ is missing; the three Phase-1 examples are a contract (WP10 D3)"
+    fail "examples/$URUQUIM_NAME/ is missing; the six examples are a contract (WP10 D3, extended by WP24)"
   test -f "$URUQUIM_EXAMPLES/$URUQUIM_NAME/main.odin" ||
     fail "examples/$URUQUIM_NAME/main.odin is missing; each example is a self-contained program"
 done
@@ -63,8 +66,13 @@ for URUQUIM_NAME in $URUQUIM_EXPECTED_EXAMPLES; do
   fi
 
   # Future-phase vocabulary must not appear in a Phase-1 example (AMEND-4).
-  for URUQUIM_FUTURE in 'web\.use' 'web\.next' 'web\.router' 'web\.group' 'web\.mount' \
-    'web\.header\(' 'web\.bearer_token' 'web\.state' 'web\.app_with_state' \
+  # WP24: `use`/`next` (WP17), `router`/`mount` (WP18), `header`/`bearer_token`
+  # (WP19), `logger` (WP22) and `request_id` (WP23) are RATIFIED application
+  # symbols and left this list as they shipped — examples 04-06 exist to teach
+  # them. `web.group` stays FOREVER: ADR-024 rejects it in every phase, so it is
+  # not deferred API, it is refused API.
+  for URUQUIM_FUTURE in 'web\.group' \
+    'web\.state' 'web\.app_with_state' \
     'web\.serve_with' 'web\.serve_transport' 'web\.body_limit' 'web\.bytes' \
     'web\.redirect' 'web\.conflict'; do
     if grep -nE "$URUQUIM_FUTURE" <<<"$URUQUIM_CODE"; then
@@ -119,4 +127,4 @@ fi
 rm -rf "$URUQUIM_BIN_TMP"
 trap - EXIT
 
-echo "PASS: the three Phase-1 examples compile and use only the public surface"
+echo "PASS: the six examples compile and use only the public surface"
