@@ -179,7 +179,7 @@ candidate must answer the same protocol version, and produce equivalent
 status, headers and body.** Record the protocol, keep-alive setting, warm-up,
 alternating order, core affinity and build mode alongside the numbers.
 
-This is not pedantry, it is a measured failure. The Tina study attempted an
+This is not pedantry, it is a measured failure. A reference study attempted an
 ApacheBench comparison and had to throw the whole run away: `ab` speaks
 HTTP/1.0, the strict HTTP/1.1 server rejected it, and the tool cheerfully
 reported 100% non-2xx as *throughput*. **A load generator that gets rejected
@@ -284,7 +284,7 @@ inconvenient.
 ### Research gates (added 2026-07-20; must complete before the capabilities they govern)
 
 Phase 4 already lists the right capabilities. What it lacked was a *method* for
-proving them, and the Tina study is most useful here, because a runtime that
+proving them, and the reference study is most useful here, because a runtime that
 supervises faults for a living has to answer these questions explicitly rather
 than by hoping. These three gates produce the methodology; they add no public
 surface and no capability of their own.
@@ -412,8 +412,8 @@ Three constraints make this a track rather than a work package:
 - **It is not on the Phase-2 or Phase-3 critical path.** Productivity is a real
   benefit and not a reason to move work forward; the plan's own rule against
   scope creep applies to pleasant ideas most of all.
-- **The reference is Air (the Go tool), not Tina.** Hot reload is not something
-  a concurrency runtime provides, and the Tina study is explicit that this idea
+- **The reference is Air (the Go tool), not a concurrency runtime.** Hot reload
+  is not something such a runtime provides, and the reference study is explicit that this idea
   came from elsewhere. Recording that keeps the study's attribution honest.
 
 A companion `uruquim doctor` — printing the Odin version, the Uruquim commit,

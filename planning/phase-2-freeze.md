@@ -342,7 +342,7 @@ Freezing claims means checking them, and two did not survive contact.
    Amendment 1 and replaced by the symbol-count claim (C-6). Recorded here so a
    future work package does not reintroduce it.
 
-Both are the same failure mode the Tina study predicted — prose has no
+Both are the same failure mode the reference study predicted — prose has no
 compiler, and drifts while every test stays green.
 
 ---

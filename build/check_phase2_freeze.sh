@@ -3,7 +3,7 @@
 #
 # `check_phase1_freeze.sh` freezes symbols, signatures and dependencies. This
 # script freezes the project's own SENTENCES, which Phase 1 did not, and which
-# the Tina study argues is the gap that closes last: prose has no compiler, so
+# the reference study argues is the gap that closes last: prose has no compiler, so
 # it drifts while every test stays green. Uruquim has already lived a small
 # version of that — WP21 found three documents still promising a "panic
 # recovery (Phase 2)" that ADR-020 had made impossible.
