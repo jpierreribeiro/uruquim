@@ -164,7 +164,7 @@ NAMES="web.wp17_use_after_a_registered_route_poisons_the_app_fail_closed"
 T="$(internal_tree unguarded)"
 assert_green_baseline "$T" "$NAMES" "6: fail-closed guard removed"
 H="$(md5sum "$T/middleware.odin" | cut -d' ' -f1)"
-sed -z -i 's/\tif len(a.private.routes) > 0 {\n\t\tmw_poison_use_after_route(a)\n\t\treturn\n\t}/\t_ = len(a.private.routes)/' \
+sed -z -i 's/\tif len(a.private.routes) > 0 || a.private.has_mounted {/\tif false {/' \
   "$T/middleware.odin"
 assert_mutated "fail-closed guard removed" "$T/middleware.odin" "$H"
 must_go_red "$T" "$NAMES" "6: fail-closed guard removed -> mis-ordered auth program test"
