@@ -86,13 +86,17 @@ docs/                    User- and agent-facing documentation
 ├── quick-start.md          Start here
 ├── canonical-patterns.md   The one blessed way to do each common task
 ├── ai-context.md           Compact API reference for coding agents
-├── errors.md               The error envelope and every Phase-1 code
+├── errors.md               The error envelope and every error code
+├── middleware.md           The onion, its ordering rule, and its costs
 └── transport-conformance.md  How transports are proven correct
 
-examples/                Compiling Phase-1 programs (built by the gate)
+examples/                Compiling programs (all built by the gate)
 ├── 01-hello-world/
 ├── 02-json-api/
-└── 03-route-params/
+├── 03-route-params/
+├── 04-middleware/
+├── 05-route-groups/
+└── 06-authentication/
 ```
 
 ## Status
@@ -126,6 +130,18 @@ capacities. Phase 3 (the performance core) is planned in
 - JSON, text and no-content responses, and the five error responders.
 - Standardized error envelopes, including the automatic `404` and the `405`
   with an exact `Allow` header.
+- Middleware: `web.use` and `web.next`, an onion that unwinds in exact reverse
+  order and allocates nothing through the chain. Registration order is
+  *enforced*, not documented — `use` after a route rejects the whole
+  application and `serve` refuses to bind.
+- Detached route collections: `web.router`, `web.mount`, and per-router
+  middleware scope.
+- Request header lookup (`web.header`) and a strict RFC 6750
+  `web.bearer_token`.
+- Framework-failure observability: `web.observe` with a typed
+  `Framework_Event`, emitted exactly once per failure, identically on both
+  transports.
+- Two opt-in middlewares: `web.logger` and `web.request_id`.
 - In-memory testing with `web.test_request` — real routing, no socket.
 - HTTP/1 conformance: ambiguous or malformed framing is rejected and the
   connection closed, proven by a raw-wire corpus (see
@@ -137,6 +153,14 @@ struct field, enum member and enum backing type, against
 `build/phase1-public-signatures.txt`, and the direct import set against
 `build/phase1-direct-dependencies.txt`. Changing any of it now requires a spec
 amendment, not a snapshot refresh.
+
+**Phase 2 froze more than the API.** It added three ledgers the symbol count
+cannot express, and the gate enforces all three: a **claim ledger**, where every
+guarantee the documentation makes carries a positive test, a negative control
+and a stated non-guarantee; a **lifetime ledger**, which answers who owns each
+value and until when; and a **capacity ledger**, which forbids the word
+"bounded" anywhere a perimeter is not named — including for the limits this
+framework does *not* impose.
 
 Internals stay replaceable: the linear route table, the request arena and the
 vendored backend are implementation, and may be rewritten as long as the
@@ -155,11 +179,19 @@ observable contracts hold.
   guarantee it *does* make is narrower and real: a handler that commits no
   response is finalized to a standardized 500, identically in tests and over a
   socket. `docs/errors.md` documents both halves.
+- A closure-based `web.group`, now or in any future phase. Refused rather than
+  deferred (ADR-024): a closure cannot be returned from a procedure in Odin,
+  and `web.Router` plus `web.mount` do the job with visible ownership.
 
-Phase 1 is usable for building and testing a JSON API, and `web.serve` is a
-working bootstrap server. It is not hardened for unattended production
-exposure. A frozen contract is not a released one: the semantic version, the
-tag and any release remain the owner's decision.
+What exists today is usable for building and testing a JSON API, and
+`web.serve` is a working bootstrap server. It is not hardened for unattended
+production exposure — that is Phase 4's job, and the honest gap is named above
+rather than implied. A frozen contract is not a released one: the semantic
+version, the tag and any release remain the owner's decision.
+
+Phase 3 — performance core, configurable limits and typed application state —
+is planned in [`planning/phase-3-plan.md`](planning/phase-3-plan.md) and has
+not started.
 
 ## Supported platform and toolchain
 

@@ -192,27 +192,27 @@ route_lookup :: proc(
 	param: Route_Param,
 	found: bool,
 ) {
-	// Pass 1 — static routes.
-	for &candidate in a.private.routes {
-		if !candidate.valid || candidate.method != method || candidate.has_param {
-			continue
-		}
-		if _, _, ok := route_match(candidate.pattern, path); ok {
-			return &candidate, Route_Param{}, true
-		}
+	// WP29: the two-pass scan became a radix walk. The PRECEDENCE RULE IS
+	// UNCHANGED and is now structural rather than re-derived — the walk tries a
+	// node's static child before its parametric one at every level, so
+	// `/users/me` still wins over `/users/:id` regardless of registration
+	// order. The observable contract is identical; only the representation
+	// moved, which is exactly the freedom the old comment here reserved.
+	if len(a.private.route_index.nodes) == 0 {
+		return nil, Route_Param{}, false
+	}
+	if len(path) == 0 || path[0] != '/' {
+		return nil, Route_Param{}, false
 	}
 
-	// Pass 2 — parametric routes.
-	for &candidate in a.private.routes {
-		if !candidate.valid || candidate.method != method || !candidate.has_param {
-			continue
-		}
-		if name, value, ok := route_match(candidate.pattern, path); ok {
-			return &candidate, Route_Param{name = name, value = value, found = true}, true
-		}
+	idx, name, value, ok := index_walk(a, 0, path, 1, method, "", "")
+	if !ok {
+		return nil, Route_Param{}, false
 	}
-
-	return nil, Route_Param{}, false
+	if value == "" {
+		return &a.private.routes[idx], Route_Param{}, true
+	}
+	return &a.private.routes[idx], Route_Param{name = name, value = value, found = true}, true
 }
 
 // allow_value builds the `Allow` header value for a path, into `buffer`.
@@ -238,13 +238,14 @@ route_lookup :: proc(
 allow_value :: proc(a: ^App, path: string, buffer: []u8) -> (value: string, allowed: bool) {
 	methods: bit_set[Method]
 
-	for entry in a.private.routes {
-		if !entry.valid {
-			continue
-		}
-		if _, _, ok := route_match(entry.pattern, path); ok {
-			methods += {entry.method}
-		}
+	// WP29: the same set, collected from the index instead of by scanning the
+	// whole table. `index_collect` explores BOTH branches rather than stopping
+	// at the first terminal, because a path can be served by a static route
+	// under one method and a parametric route under another and `Allow` must
+	// name both. Invalid patterns were never indexed, so they are skipped here
+	// by construction rather than by a `continue`.
+	if len(a.private.route_index.nodes) > 0 && len(path) > 0 && path[0] == '/' {
+		index_collect(a, 0, path, 1, &methods)
 	}
 
 	if methods == {} {
@@ -311,6 +312,23 @@ dispatch :: proc(a: ^App, ctx: ^Context) {
 	a.private.dispatched = true
 
 	if mw_poison_intercept(a, ctx) {
+		return
+	}
+
+	// WP31b — the path policy, BEFORE matching and before the chain. A path
+	// whose meaning depends on who is normalising is refused once, at the
+	// boundary, so no route and no middleware ever acts on an ambiguous one
+	// (`planning/phase-3-spec.md` §1). It is not a framework failure and emits
+	// no event, exactly like a 404.
+	if path_rejected(ctx.request.path) {
+		bad_request(ctx, PATH_REJECT_MESSAGE)
+		return
+	}
+
+	// WP32b: OPTIONS is answered from the Allow machinery, before lookup. A
+	// path matching no route falls through to the ordinary miss, so a path that
+	// does not exist does not acquire an options list.
+	if ctx.private.implicit == .Options && options_answer(a, ctx) {
 		return
 	}
 

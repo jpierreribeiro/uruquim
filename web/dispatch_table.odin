@@ -168,6 +168,12 @@ route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handle
 			chain_len = chain_len,
 		},
 	)
+
+	// WP29: index at REGISTRATION, never at dispatch. A tree built lazily on
+	// the first request would allocate inside that request, and claim C-5's
+	// perimeter would start to include a one-off cost only the first caller
+	// pays.
+	_ = index_insert(a, len(a.private.routes) - 1)
 }
 
 // routes_destroy releases the table exactly once and returns it to its zero
@@ -180,6 +186,11 @@ route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handle
 // simply does nothing.
 @(private)
 routes_destroy :: proc(a: ^App) {
+	// The index first: its maps key on views into the patterns freed below, so
+	// freeing it afterwards would be reading storage this procedure had already
+	// released. Order is the contract, not a preference.
+	index_destroy(a)
+
 	if a.private.routes == nil {
 		return
 	}

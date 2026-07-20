@@ -93,6 +93,33 @@ that adds a symbol: `check_public_api.sh`, `check_phase1_freeze.sh`,
 plus `docs/ai-context.md`, and `CHANGELOG.md` — in ONE change, or the gate
 fails with a misleading cause.
 
+### FINDING-E — the timing noise floor is ±57.6%, and WP28 must plan around it
+
+**Added by WP26, 2026-07-20.** FINDING-A predicted the shape of this; it did not
+supply the magnitude, and the magnitude is worse than this plan assumed.
+
+Ten alternating repetitions of the **unchanged** Phase-2 dispatch path gave a
+derived p95 spread of **5,763 basis points — ±57.6%** at 5 routes. The full
+table is in [`planning/phase-2-baseline.md`](phase-2-baseline.md).
+
+Consequences, none of them optional:
+
+* **No timing-based regression gate is available at small cardinalities.** A
+  change would have to make dispatch more than half again as slow before this
+  machine could distinguish it from running the same binary twice. `WP26`'s gate
+  step therefore asserts **allocations and instrument soundness, and no timing
+  at all** — a consequence of the measurement, not a shortcut around it.
+* **Noise falls as cardinality rises**: 5,763 bp at 5 routes, 1,302 bp at
+  5,000, because the work grows while the jitter does not.
+* **WP28 may not be decided on 5- or 50-route timings.** A candidate that wins
+  at 5 routes by 20% has won nothing measurable. The cardinalities where this
+  instrument discriminates are **500 and 5,000**, and the shootout's conclusions
+  must come from there or be recorded as undecided. That is a stopping rule, and
+  it is now derived from data rather than asserted.
+* **The Phase-2 scan is linear and now has a number**: ~165 ns per registered
+  route, 1.8 µs at 5 routes rising to 826 µs at 5,000. WP28's candidates have
+  something concrete to beat.
+
 ### FINDING-D — the concept budget is now a measured number, and Phase 3 spends it
 
 WP25 re-ran the usage laboratory:
@@ -133,7 +160,7 @@ table.
 |---|---|---|
 | E-1 | Phase 2 frozen — ledger 46, `check_phase2_freeze.sh` green | ✅ met (`planning/phase-2-freeze.md`) |
 | E-2 | The full gate exits 0 on `main` | ✅ verified after the Phase-2 merges |
-| E-3 | A benchmark harness exists | ❌ **this is WP26 itself** — nothing else may start first |
+| E-3 | A benchmark harness exists | ✅ **met by WP26** — `tests/support/bench`, gate step, `planning/benchmark-methodology.md`, `planning/phase-2-baseline.md` |
 
 E-3 is the real gate. The skeleton lists "a benchmark harness exists" as an
 entry condition *and* as P3-1; it is a work package, and treating it as a
@@ -290,6 +317,32 @@ stops and records the finding instead of proceeding.**
 * **Out of scope.** Fixing them. This work package measures and decides; the
   fixes land in WP29 and WP35 where they can be regression-tested.
 
+**DONE, 2026-07-20 — `planning/allocation-audit.md`, measured by
+`tests/wp27-internal` in the gate.** A typical JSON 200 costs five allocations
+on the socket path; a 405 with a request ID costs nine. Three outcomes, and one
+of them is a correction rather than a schedule:
+
+* **A-12 as filed is WITHDRAWN.** "They are static strings, so the clone is
+  waste" is false for two of the three headers this framework emits. `Allow` and
+  `X-Request-Id` carry values living in `Context_Internal` buffers that die at
+  `driver_cleanup`, and aliasing them would hand the transport a view into freed
+  memory. What survives is narrower and certain: every response header *name* is
+  a package constant, so cloning names is unambiguous waste — **1 allocation per
+  header per request, owner WP29**. The values must keep being cloned.
+* **A-8 is half wrong in the direction that matters.** One `temp_allocator`
+  slice per request, and the strings are **views, not copies**. Also stale: "no
+  Phase-1 path can read them" stopped being true when WP19 shipped
+  `web.header`. Handed to **WP35**, because the fix is a fixed-capacity buffer
+  question the arena policy owns.
+* **A-13 is confirmed exactly as filed and is being kept.** Two allocations per
+  request, no string copying — the price of ADR-009's one-way boundary, now a
+  number instead of an adjective. Reclassified from "cost to remove" to "cost
+  accepted, with a number".
+
+**Consequence for the sequence: WP28 inherits nothing from this.** None of the
+three sits on the route-matching path; all three are request/response edges. The
+shootout is not blocked by any decision here.
+
 ### WP28 — Route representation shootout
 
 **Type: PROTOTYPE.** RG-2. **It must not choose before measuring.**
@@ -332,6 +385,39 @@ stops and records the finding instead of proceeding.**
 * **Deliverable.** A representation chosen from data, with the data — or a
   recorded decision to keep the current one, with the same data.
 
+**DONE, 2026-07-20 — `planning/router-shootout.md`.** Six representations
+measured; correctness proven in the gate by `tests/wp28-shootout`, which holds
+all six to byte-identical answers and includes a constructible-disagreement
+control.
+
+**Chosen: `radix_idx`** — segment-keyed tree, nodes in a flat array, children by
+index, static child before parametric at every level. At 5,000 mixed routes:
+**1.4 us against linear's 191 us, about 136x**, and flat from 5 routes to 5,000.
+Two orders of magnitude clear of FINDING-E's noise floor.
+
+**The timing did NOT choose between `radix_idx` and `radix_ptr`** — same
+algorithm, two layouts, medians differing by less than either cell's own spread.
+Reading a winner there would be reading noise. The choice was made on ownership:
+one free instead of N at teardown, and no pointer that can dangle when the node
+array grows. That is the same class of hazard as P8, which the middleware pool's
+index pairs already exist to prevent — the project has chosen indices over
+pointers once before, for this reason.
+
+**Losers, with the instructive ones named.** `linear_improved` HURT parametric
+tables (290 us vs 245 us, the worst number measured): when the discriminating
+byte falls inside the parameter segment the prefilter rejects nothing and every
+route pays for it. `bucketed` matched linear exactly, as RG-2's own disclaimer
+predicted, but its structural-precedence argument survives and the radix tree
+gets that property for free. `hybrid` was the fastest single cell measured
+(838 ns, flat) and degenerates to a scan the moment a parameter appears.
+
+**THE CAVEAT WP29 MUST CARRY.** The shootout measures matchers in isolation.
+Against WP26's end-to-end baseline, route matching is roughly **10% of
+end-to-end p95** at 5,000 routes. WP29 may not promise an end-to-end speedup
+proportional to 136x; the claim it can defend is about the matcher, and it must
+name that perimeter. **Where the other ~90% goes has not been measured, and on
+this evidence that is worth more than further router work.**
+
 ### WP29 — Router implementation
 
 **Type: IMPLEMENTATION. Change classification: internal only.**
@@ -364,6 +450,30 @@ stops and records the finding instead of proceeding.**
   worth defending — the moment a representation change drags an observable
   difference with it, this stops being revertible and becomes a behaviour
   change that applications may already depend on.
+
+**WP29 DONE, 2026-07-20 — `planning/router-implementation.md`.** The flat scan
+is replaced by the radix index; the flat array remains the single owner of every
+pattern, handler and chain index pair, and the tree stores integers into it.
+Built at registration, never at dispatch, so C-5's perimeter does not silently
+acquire a first-request cost. Precedence is now structural rather than enforced
+by loop order.
+
+**End to end at 5,000 mixed routes: 883 us -> 1.5 us on p50, about 594x. And
+dispatch is now FLAT** — 1,341 ns at 5 routes against 1,486 ns at 5,000, an 11%
+difference that sits inside the noise floor. The framework no longer cares how
+many routes an application registers.
+
+**WP28's "matching is only ~10% of end-to-end" caveat is WITHDRAWN.** It was
+approximately 99%. The shootout's `linear` entrant pre-split its patterns at
+build time; the shipped `route_lookup` re-parsed the pattern string on every
+comparison, so the real baseline was ~10x slower than the one measured. **A
+baseline must be the shipped code, or it is a different program** — and the
+correction runs in the flattering direction, which is exactly when a project is
+least likely to check.
+
+**Still owed:** registration cost was not measured, and the tree allocates a node
+per distinct segment plus a map per node. That is now the largest unmeasured
+thing in the router.
 
 ### WP30 — Registration conflict diagnostics
 
@@ -418,6 +528,34 @@ semantics.**
   Ratifying the absence ships nothing and remains fully reversible — an
   asymmetry the decision must weigh, not a reason to pre-empt it here.
 
+**31a DECIDED, owner, 2026-07-20 — `planning/phase-3-spec.md` §1: REJECT, do
+not transform.** A dot segment, an interior empty segment, a percent-encoded
+slash or a percent-encoded NUL is answered `400` before route matching;
+everything else passes through byte-exact and undecoded, as today. Normalising
+was rejected as maximising the ways Uruquim's view of a path can differ from a
+proxy's; ratifying the silent absence was rejected because it leaves that
+disagreement invisible — a 404 is not a diagnosis. **The trailing slash keeps
+its Phase-1 meaning:** it is not an interior empty segment, and `/users/`
+remains a legal distinct pattern. 31b implements it after WP29.
+
+**31b DONE, 2026-07-20 — `web/path_policy.odin`, `tests/wp31-public-surface`.**
+Four rules, exhaustive: a dot segment, an interior empty segment, a
+percent-encoded slash, a percent-encoded NUL. The check sits on the shared
+dispatch path BEFORE matching and before the chain, uses the existing
+`bad_request` envelope, allocates nothing, and emits no `Framework_Event` —
+a rejected path is a client error, like a 404.
+
+**The trailing slash has its own test, because the obvious implementation of the
+interior-empty-segment rule breaks it.** `/users/` ends with an empty segment,
+and "reject any empty segment" would answer 400 to a legal, distinct Phase-1
+pattern. `/users` and `/users/` remain two different paths.
+
+**The other half is tested just as hard:** ordinary percent-encoding is neither
+decoded nor refused, `a.txt` and `a..b` are ordinary segments rather than dot
+segments, and a trailing slash on an unregistered path is still a 404 and not a
+400. A rejection policy that quietly grew would break applications whose paths
+were legal the day they were written.
+
 ### WP32 — HEAD, OPTIONS, and the 501 decision
 
 **Type: SPEC + IMPLEMENTATION. Requires owner approval — observable HTTP
@@ -438,6 +576,47 @@ semantics.**
   within days of a deployment. Withdrawing either turns a 200 into a 404/405
   for traffic that never appears in a test suite. The 501 decision is the
   reversible part — declining it ships nothing.
+
+**32a DECIDED, owner, 2026-07-20 — `planning/phase-3-spec.md` §2: automatic
+HEAD and OPTIONS, no 501, and the `Method` enum does not change.** HEAD matches
+as GET with the body suppressed at commit; OPTIONS answers `204` with the
+existing `Allow`, and `404` where no route matches. An unrecognised method keeps
+`405` with the exact `Allow`, which tells a client what it *can* do where 501
+only says the server will not. Since both are resolved before a `Method` value
+reaches a handler, the six-member enum stays byte-for-byte as the freeze pins
+it: no public symbol, no freeze amendment, none of FINDING-D's concept budget.
+**One consequence recorded rather than discovered later:** an application cannot
+override OPTIONS through the route table, and the case that will meet that is
+CORS preflight. 32b must VERIFY that a middleware can short-circuit the
+automatic answer through the single-commit guard — stated as a requirement, not
+assumed.
+
+**32b DONE, 2026-07-20 — `web/head_options.odin`, `tests/wp32-internal`.**
+HEAD matches as GET with the body suppressed on the way out; OPTIONS answers
+`204` with the `Allow` the 405 already builds; an unrecognised method keeps its
+405. **The `Method` enum did not change** — both are resolved from the raw token
+before a `Method` value exists.
+
+**The suite is INTERNAL, and that is the design showing through:**
+`web.test_request` takes a `Method`, and `Method` has no HEAD and no OPTIONS. A
+public-surface suite that COULD send either method would be evidence the enum
+had grown.
+
+**Suppression happens on the way out, not at commit**, via a driver-side view.
+Blanking `response.body` would leak an allocation the Response owns and
+`response_destroy` must free — so the handler's body stays intact underneath,
+and a test pins that.
+
+**The WP9 conformance matrix had to be amended, and the gate caught it.** Two
+scenarios ratified the OLD behaviour — "HEAD is not silently converted to GET
+(WP9 D7)" and "OPTIONS gains no early public behavior", both expecting 405.
+Those expectations were Phase 1's and are deliberately reversed by the owner's
+decision, not accidentally broken. Both rows stay in the matrix, rewritten,
+because the property is exactly the kind that must hold identically on both
+transports.
+
+**`bare()` answers no OPTIONS**, because it installs no miss policy and
+automatic OPTIONS *is* miss policy.
 
 ### WP33 — Multi-param routes without a map
 

@@ -61,6 +61,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp22_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp23_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp24_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp25_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp26_bench.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
@@ -788,6 +789,110 @@ echo "--- WP23 public surface contract: request_id trust policy (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp23-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp23-public-surface"
+
+# WP27 — the allocation audit. Where per-request allocation actually goes, for
+# the three items the post-Phase-1 audit named (A-8, A-12, A-13).
+#
+# It runs as a THROWAWAY internal package because two of the three procedures
+# under measurement — `inbound_header_pairs` and
+# `response_headers_neutral_transport` — are `@(private)`. Measuring them
+# through a public surface would be measuring something else and calling it
+# these.
+#
+# WP27 measures and decides; it changes no behaviour. The decisions are recorded
+# in planning/allocation-audit.md, and the fixes belong to WP29 and WP35 where
+# they can be regression-tested against the WP26 baseline.
+echo "--- WP27 allocation audit: A-8, A-12, A-13, measured (throwaway package) ---"
+URUQUIM_WP27_TMP="$(mktemp -d -t uruquim-wp27-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP27_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP27_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp27-internal/*.odin "$URUQUIM_WP27_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP27_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp27-internal"
+rm -rf "$URUQUIM_WP27_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP27_TMP" || fail "the throwaway WP27 internal-test package was not removed"
+echo "PASS: WP27 allocation audit ran against the real sources; throwaway package removed"
+
+# WP32b — automatic HEAD and OPTIONS.
+#
+# It runs as a THROWAWAY internal package for a reason that is itself the
+# design: `web.test_request` takes a `Method`, and `Method` has no HEAD and no
+# OPTIONS. Both are resolved from the raw token before a `Method` value exists,
+# so the frozen six-member enum stays byte-for-byte as the gate pins it — and a
+# public-surface suite that COULD send either method would be evidence the enum
+# had grown.
+echo "--- WP32b automatic HEAD and OPTIONS (throwaway package) ---"
+URUQUIM_WP32_TMP="$(mktemp -d -t uruquim-wp32-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP32_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP32_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp32-internal/*.odin "$URUQUIM_WP32_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP32_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp32-internal"
+rm -rf "$URUQUIM_WP32_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP32_TMP" || fail "the throwaway WP32 internal-test package was not removed"
+echo "PASS: WP32b HEAD/OPTIONS ran against the real sources; throwaway package removed"
+
+# WP31b — the path policy. Rejection rules, and the much larger set that is NOT
+# rejected: a policy that quietly grew would break applications whose paths were
+# legal the day they were written. The trailing-slash case has its own test
+# because the obvious implementation of the interior-empty-segment rule breaks
+# `/users/`, a legal Phase-1 pattern.
+echo "--- WP31b path policy: reject, do not transform (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp31-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp31-public-surface"
+
+# WP28 — the route representation shootout, correctness half.
+#
+# It asserts that seven representations return byte-identical answers, and that a
+# disagreement is CONSTRUCTIBLE — because "the candidates agree" would otherwise
+# be true of a harness that called the same matcher seven times. A representation
+# that misses a route looks magnificent in a benchmark; a scan that stops early
+# is exactly what fast looks like from outside.
+#
+# No timing is asserted (FINDING-E). The numbers come from tests/wp28-runner,
+# run by hand, and are recorded in planning/router-shootout.md.
+echo "--- WP28 route shootout: seven representations must agree (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp28-shootout" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp28-shootout"
+
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" build "$URUQUIM_ROOT/tests/wp28-runner" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp28-runner"
+echo "PASS: the WP28 shootout runner still builds"
+
+# WP26 — the benchmark harness. Phase 3 may not start without one (entry
+# condition E-3), and this step is what makes the instrument trustworthy.
+#
+# It asserts NO TIMING, on purpose. FINDING-A measured five different binaries
+# from an identical source tree, so code layout — and therefore branch
+# prediction and cache behaviour — varies between builds. A gate that failed on
+# a timing delta would fail randomly, and a gate that fails randomly gets
+# switched off. What it asserts is that the instrument is sound: percentiles
+# return observed values, the tolerance derivation is relative and needs more
+# than one run, the sweep covers the whole route table rather than route 0
+# forever, every benchmarked response is verified AND the verification is able
+# to fail, and per-dispatch allocation is exactly deterministic.
+#
+# The timings themselves come from `build/check_wp26_bench.sh`, which is run by
+# hand — it takes ~15 minutes — and recorded in planning/phase-2-baseline.md.
+echo "--- WP26 benchmark harness: the instrument, not the numbers (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp26-bench" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp26-bench"
+
+# The baseline runner must keep COMPILING even though the gate never runs it.
+# A measurement program that silently stopped building would be discovered at
+# the moment someone needed a baseline, which is the worst possible moment.
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" build "$URUQUIM_ROOT/tests/wp26-runner" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp26-runner"
+echo "PASS: the WP26 baseline runner still builds"
 
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never
