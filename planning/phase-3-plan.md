@@ -24,8 +24,9 @@ invalidate something the skeleton plan in `later-phases-plan.md` assumed.
 
 Five builds of an **identical, unmodified** source tree produced five different
 binaries: 876,304 / 876,352 / 876,352 / 876,368 / 876,360 bytes, five distinct
-md5 sums. The vendored `nbio` emits polymorphic instantiations whose mangled
-parameter names vary between runs.
+md5 sums. The vendored backend's use of `core:nbio` — the event loop comes from
+the pinned toolchain, not the vendor tree — emits polymorphic instantiations
+whose mangled parameter names vary between runs.
 
 **Consequences for Phase 3, which is the phase that lives on measurement:**
 
@@ -57,11 +58,14 @@ Phase 3 needs a clock in two places, and they are **not** the same problem:
   application ever links it. This is not a preference; importing `core:time`
   into `web` to benchmark it would change the thing being benchmarked.
 * **Timeouts (WP36)** need a clock **on the serving path**. But that path is
-  `web/internal/transport`, which already imports `core:net` — so the cost
-  question there is entirely different from the cost question in `web`, and it
-  must be measured rather than assumed either way. **A work package that adds
-  a `core:time` import to `web` itself needs owner approval and a measured
-  justification.**
+  `web/internal/transport`, which already imports `core:net` — and the vendored
+  backend behind it (`vendor/odin-http/server.odin`) already imports `core:time`
+  and `core:nbio`, so the serving path links a clock today whether or not any
+  Uruquim package names one. The open cost question is what an *additional*
+  `core:time` import into Uruquim's own packages costs — entirely different from
+  the cost question in `web`, and it must be measured rather than assumed either
+  way. **A work package that adds a `core:time` import to `web` itself needs
+  owner approval and a measured justification.**
 
 The skeleton plan did not distinguish these two. It must.
 
@@ -210,6 +214,26 @@ see §4.
 
 ---
 
+## 2b. Approvals resolved in advance (ADR-029 delegation, 2026-07-20)
+
+The owner delegated the pending decisions (ADR-029), so the approval points in
+the table above are **resolved now** and no work package stalls waiting for a
+review. Every resolution is conditional in the same way: **if the work
+package's own spec or prototype work contradicts the decided arm, the agent
+stops and records the finding instead of proceeding.**
+
+| WP | Decided arm | Grounds |
+|---|---|---|
+| **WP30** | **Diagnose-and-poison** at registration. | Fail-closed is the project default and the mechanism (ADR-019) exists and is proven. Go's precedent panics at registration; Uruquim poisons instead. Observable change — the spec and tests are still owed. |
+| **WP31a** | **Ratify the absence of normalisation, permanently.** Bytes received are bytes matched; `/users` and `/users/` stay distinct; `web.path` params are **raw, undecoded views** — decoding is the application's explicit choice. | The security arm and the reversible arm coincide: every normalisation rule is an opportunity for two components to disagree about what a path means. The negative-control corpus is still owed and proves the mismatch behaviour. |
+| **WP32a** | **Automatic HEAD** (respond as GET, suppress the body); **automatic OPTIONS** (reuse the `Allow` machinery); **no 501** — the SHOULD-deviation is ratified: an unknown method stays on the 404/405 path (WP9 D7). | HEAD is the RFC's MUST-support; OPTIONS costs no second machinery; 501 would open the method vocabulary with no demonstrated demand. |
+| **WP34** | **Approved: +1 symbol.** | C-2's constraint is a MUST and the framework already holds the value. The redaction rule — the pattern, never the path — becomes a gate assertion in the same change. |
+| **WP36** | **Approved**: options struct + package default **constant**; boot-derived immutable runtime. Concurrency arm: registration after `serve` begins is **REJECTED via the existing poison mechanism** — the snapshot sits beside ADR-019/023 and does not replace them. | The shape was already amended in; the vendored backend's mutable-global default (§6b) is the counter-example that confirms the constant. |
+| **WP37** | Implements **ADR-004 only**. The request-scope question is closed: **ADR-028 is ACCEPTED, option A.** | See ADR-028; reopening requires a real program measured in this tree. |
+| **WP38** | **Approval delegated to the gate**: the freeze proceeds if and only if every gate is green, every ledger amended, and the guarded lab program holds at ≤ 25 concepts. Any breach stops the freeze and goes to the owner. | A freeze that needs a human yes when every recorded criterion is met is ceremony; one that proceeds despite a breach is a lie. |
+
+---
+
 ## 3. The work packages
 
 ### WP26 — Benchmark harness and Phase-2 baseline
@@ -228,11 +252,32 @@ see §4.
   and build mode.
 * **Semantic equivalence is a GATE CONDITION, not advice.** Every candidate
   must answer the same protocol version and produce equivalent status, headers
-  and body. This is a measured failure, not a hypothetical: a benchmark run was
-  once thrown away entirely because the load generator spoke HTTP/1.0, the
-  strict server rejected every request, and the tool cheerfully reported 100%
-  non-2xx **as throughput**. A load generator that gets rejected still reports a
-  number, and the number looks like a number.
+  and body. The Tina study threw away an entire ApacheBench run because `ab`
+  speaks HTTP/1.0, the strict server rejected it, and the tool reported 100%
+  non-2xx **as throughput**. A load generator that gets rejected still reports
+  a number, and the number looks like a number.
+* **The status distribution is DATA, not hygiene.** Every run reports its
+  status counts next to its latencies, and a run containing any status the
+  scenario did not predict is **discarded as invalid, never averaged in**. The
+  ApacheBench failure was not caught by reading the throughput number — the
+  number looked fine; it was caught by reading the error column. Make the
+  error column impossible to omit.
+* **The harness is TWO instruments, and they are named separately.** An
+  **in-process dispatch benchmark** drives the in-memory transport and owns
+  every allocation count — C-5's zero-allocation claim is measured here, where
+  the allocator can be instrumented and the run is deterministic. A
+  **socket-level load run** owns latency and throughput distributions
+  (FINDING-A). Neither can produce the other's numbers: a load generator
+  cannot count allocations, and an in-process loop cannot see the kernel. The
+  load generator itself is named in the methodology, and its HTTP/1.1 and
+  keep-alive conformance is asserted before any of its numbers count.
+* **Baselines are keyed to the hardware that produced them.** The recorded
+  baseline states its machine identity — CPU model, core count, frequency
+  governor, OS — and a regression comparison is valid only against a baseline
+  from the same identity. On a machine with no baseline — a new CI runner, a
+  different laptop — the gate re-derives baseline and tolerance first and says
+  so; it never fails a build by comparing numbers from two different machines,
+  which would manufacture a regression out of a hardware change.
 * **FINDING-A applies directly.** Report distributions from repeated
   alternating runs, never a single figure. State the ~100-byte binary-size
   noise floor. A benchmark that cannot distinguish its own noise from a change
@@ -265,6 +310,10 @@ see §4.
   `driver_run`/`driver_cleanup` and explicitly **not** around `test_request`.
   Any change here must keep that measurement valid and must not quietly widen
   the perimeter the claim names.
+* **The instrument is named so nobody invents one:** `core:mem`'s
+  `Tracking_Allocator` around the request path, plus the temp-allocator probes
+  WP17 already uses — the same instruments that produced C-5's measurement, so
+  the audit's numbers and the claim they protect come from the same ruler.
 * **Out of scope.** Fixing them. This work package measures and decides; the
   fixes land in WP29 and WP35 where they can be regression-tested.
 
@@ -314,7 +363,7 @@ shootout is not blocked by any decision here.
   and a **405** (which scans everything and then builds `Allow`). Route
   composition — the static / `:param` / wildcard proportions — is stated with
   the numbers, because a bucketed candidate's advantage is a function of exactly
-  that ratio. See §6 — it is the difference
+  that ratio. This is P-T8 in the Tina dossier (§6), and it is the difference
   between a shootout and a demo.
 * **C-5 governs this work package** (`later-phases-plan.md`): the radix-router
   justification is not what folklore says. "A real, validated system does it
@@ -441,6 +490,11 @@ changes observably.
 * **Note the interaction with WP29:** a bucketed or tree representation makes
   some conflicts *structurally* detectable that a linear scan never noticed.
   Do not let a representation change silently become a behaviour change.
+* **Rollback.** Depends on the arm chosen, and the deciding ADR must say so:
+  ratifying the silence ships nothing and stays HIGH; diagnose-and-poison is
+  MEDIUM and decays — withdrawing a shipped diagnostic un-breaks the programs
+  it poisoned, but re-hides the conflicts it existed to surface, and programs
+  written after it shipped will rely on registration failing loudly.
 
 ### WP31 — Path normalisation policy
 
@@ -455,6 +509,24 @@ semantics.**
   means.
 * **The output is a policy or a permanent ratification of its absence** — and
   either way it is written down, tested, and given a negative control.
+* **The spec half decides `web.path`'s ENCODING contract too, not only path
+  equality.** Whether a captured `:param` view arrives percent-decoded or raw
+  is currently stated nowhere, and it is the same security decision wearing a
+  different name: a decoded `%2F` inside a parameter is the classic
+  route-confusion primitive. 31a states the answer; 31b implements it; the
+  answer joins the lifetime ledger's view rules.
+* **The negative-control corpus is named now**, so the test cannot be written
+  to fit the implementation: dot segments raw and encoded (`/../`,
+  `%2e%2e%2f`), an encoded slash (`%2F`) inside a segment, NUL (`%00`),
+  doubled slashes, the trailing-slash pair (`/users` vs `/users/`), and
+  mixed-case percent escapes (`%2f` vs `%2F`). It lives beside WP9's raw-wire
+  corpus and runs against both transports (R-10).
+* **Rollback. LOW once a policy ships, HIGH if the absence is ratified.** A
+  normalisation rule is observable routing semantics: applications and the
+  clients calling them start depending on which paths are equal, and
+  withdrawing a rule later re-splits paths that had become one route.
+  Ratifying the absence ships nothing and remains fully reversible — an
+  asymmetry the decision must weigh, not a reason to pre-empt it here.
 
 **31a DECIDED, owner, 2026-07-20 — `planning/phase-3-spec.md` §1: REJECT, do
 not transform.** A dot segment, an interior empty segment, a percent-encoded
@@ -499,6 +571,11 @@ semantics.**
 * **Interaction to respect:** the `Allow` value and its byte-exact order are
   ratified (WP4 D4) and pinned by the gate. OPTIONS reuses that machinery; it
   does not grow a second one.
+* **Rollback. LOW once shipped.** Automatic HEAD and OPTIONS are visible to
+  every client and intermediary; caches and health checks will depend on them
+  within days of a deployment. Withdrawing either turns a 200 into a 404/405
+  for traffic that never appears in a test suite. The 501 decision is the
+  reversible part — declining it ships nothing.
 
 **32a DECIDED, owner, 2026-07-20 — `planning/phase-3-spec.md` §2: automatic
 HEAD and OPTIONS, no 501, and the `Method` enum does not change.** HEAD matches
@@ -576,6 +653,11 @@ automatic OPTIONS *is* miss policy.
 * **The redaction rule travels with it:** the pattern, never the path. The
   gate assertion that keeps `Framework_Event` free of request-derived strings
   has an obvious analogue here.
+* **Rollback. LOW once shipped, like every public symbol.** The accessor is a
+  promise kept for as long as the name exists — WP36's asymmetry argument
+  applies unchanged. The redaction rule is the half that must never be
+  loosened later: pattern-to-path is invisible in a type signature and
+  visible in an operator's logs.
 
 ### WP35 — Arena, buffer reuse and oversize policy
 
@@ -601,7 +683,7 @@ automatic OPTIONS *is* miss policy.
   written against the pooled lifetime — including a generational token, if one
   is introduced — has to come out with it. Keep the reuse and the token in one
   commit so they revert as one.
-* **The stale-reference test comes with the reuse, and not before** (§6).
+* **The stale-reference test comes with the reuse, and not before** (P-T7, §6).
   The moment a slot is reused, a reference held from the previous request stops
   being merely stale and starts being *wrong*. The shape of the test is already
   written down: request A arms a timeout; the slot is released; request B
@@ -619,7 +701,7 @@ capacity-ledger amendment.**
 * **The shape is already decided** by the P3-8/P3-11 amendment: an options
   struct with a package default constant, on `core:net`'s `DEFAULT_TCP_OPTIONS`
   precedent — **not** a builder.
-* **But the derivation must still be MEASURED, not assumed** (§6). Compare
+* **But the derivation must still be MEASURED, not assumed** (P-T6, §6). Compare
   the two shapes on real numbers — configuration consulted per request versus an
   immutable runtime derived once at boot — and report branch count, allocations,
   binary size and ergonomics. The amendment chose the second on reasoning; this
@@ -635,8 +717,9 @@ capacity-ledger amendment.**
   system-specification concept from a runtime that sizes shards, pools and
   rings; Uruquim sizes none of those.
 * **FINDING-B applies:** timeouts need a clock on the serving path. That path
-  is `web/internal/transport`, which already imports `core:net` — a different
-  cost question from importing into `web`, and it must be **measured**.
+  is `web/internal/transport`, which already imports `core:net`, and the
+  vendored backend behind it already links `core:time` — a different cost
+  question from importing into `web`, and it must be **measured**.
 * **FINDING-C applies:** the capacity ledger's "4 MiB, fixed, not configurable
   until Phase 3" row changes **in this commit**, and the claim ledger gains a
   row for whatever new promise the options make.
@@ -678,9 +761,10 @@ applies — registration rejects nil, and access asserts registration plus exact
 type before casting. This is for a database handle or configuration: **one
 value, app-scoped, set before serving**.
 
-**Question 2 — request-scoped typed state. UNDECIDED, and this plan does not
-assume it.** It is a different feature with a different lifetime, and the
-project's own research argues *against* it:
+**Question 2 — request-scoped typed state. DECIDED: it does not exist**
+(ADR-028, option A, ACCEPTED 2026-07-20 under the ADR-029 delegation). It is a
+different feature with a different lifetime, and the project's own research
+argued *against* it:
 
 * **C-6** finds that Go's `context.WithValue` and Rust's `http::Extensions`
   exist for type-erased, dynamically-keyed state crossing library boundaries —
@@ -696,8 +780,8 @@ cost, which no ADR had decided. They now say the cost stands until an ADR says
 otherwise, and `check_examples.sh` rejects a comment that schedules a future
 capability.
 
-**ADR-028 is now open for exactly this** (PROPOSED, 2026-07-20), with three
-live options:
+**ADR-028 decided exactly this** (ACCEPTED, option 1, 2026-07-20 under the
+ADR-029 delegation). The three options it weighed:
 
 1. **No request-scoped state, permanently.** Ratify the revalidation cost and
    the pass-it-down workaround as the answer. Costs nothing, closes the
@@ -715,11 +799,11 @@ are **LOW**: once an application stores a value per request, removing the slot
 breaks it at compile time and no deprecation window helps. That asymmetry is
 itself an argument, and it is the reason the recommendation falls where it does.
 
-**ADR-028 recommends option 1** and places the burden of proof on the others.
-The evidence for 2 or 3 must be a real program that cannot be written cleanly
-today — never a hypothetical — and option 1 is the only reversible one:
-adding a mechanism later is a pure strengthening, while shipping one and
-withdrawing it breaks applications.
+**ADR-028 accepted option 1** and places the burden of proof for reopening on
+the others. The evidence for 2 or 3 must be a real program that cannot be
+written cleanly today — never a hypothetical — and option 1 is the only
+reversible one: adding a mechanism later is a pure strengthening, while
+shipping one and withdrawing it breaks applications.
 
 ### WP38 — Phase-3 freeze
 
@@ -772,7 +856,7 @@ Eight defects were found reviewing the first draft, and all eight are applied
 above rather than left as commentary. Three changed the structure — the spec
 halves of WP31/WP32 moved ahead of the shootout, the shootout gained a stopping
 rule, and the concurrency decision gained an owner — and one, the shootout's
-workload matrix, came from the external reference dossier (§6).
+workload matrix, came from mapping in the Tina dossier (§6).
 
 The rest were precision: the budget now counts concepts rather than symbols,
 the benchmark tolerance has a procedure instead of an adjective, and every
@@ -781,6 +865,19 @@ had and the first draft of this one silently dropped.
 
 Recorded because the reasoning is the reviewable part, and because a plan that
 hides its own corrections teaches the next reader to hide theirs.
+
+A **second review pass** (2026-07-20, later the same day) applied six more, at
+the owner's request that this plan be improved rather than merely verified:
+rollback statements for the four packages the first pass missed (WP30, WP31,
+WP32, WP34 — including the two whose approval halves carry the least
+reversible decisions in the phase); the status-distribution rule and the
+hardware-identity rule in WP26, without which the regression gate would
+manufacture a failure on any new machine — including the CI runner this same
+change introduces; the two-instrument split in WP26 (allocation counts and
+latency distributions cannot come from the same tool); the named instrument in
+WP27; `web.path`'s encoding contract and the named negative-control corpus in
+WP31; and the full P-T accounting in §6. Applied in place, recorded here, same
+reasoning as before.
 
 ---
 
@@ -792,91 +889,159 @@ hides its own corrections teaches the next reader to hide theirs.
 | **Choosing a representation on a benchmark that flatters it** | WP28 records losing candidates and numbers, which makes a bad choice *visible*. It does not make it impossible. |
 | **Timing nondeterminism (FINDING-A)** | Repeated alternating runs reduce it; they do not eliminate it. A 3% difference may never be trustworthy on this toolchain, and the freeze should say so rather than report it. |
 | **Concept budget (FINDING-D)** | A budget is a constraint, not a mechanism. Only the freeze's re-run of the usage lab actually measures it, and by then the symbols are shipped. |
-| **The request-scope question (WP37)** | Whichever way it goes, it is hard to reverse: adding the mechanism later is a pure strengthening, but shipping it and withdrawing it would break applications. Option 1 is the reversible one. |
+| **The request-scope question (WP37)** | **Decided** (ADR-028: option A, the reversible arm). The residual risk is only that real programs keep paying the revalidation cost until evidence reopens it — the cheapest failure mode on this table. |
 
 ---
 
-## 6. The external reference dossier
+## 6. The Tina dossier — how to use it, and how not to
 
-Some environments supply a **reference dossier**: a close study of another
-production runtime, written up out of band. Phase 2 already took four things
-from it, and they were among the better decisions in that phase — the claim /
-lifetime / capacity ledgers, the ownership table, the load-generator trap in
-RG-1, and the rule that "bounded" must name a perimeter.
+`tina/` holds a study of **Tina**, a real runtime that was read closely and
+written up. Phase 2 already took four things from it, and they were among the
+better decisions in that phase: the claim / lifetime / capacity ledgers (docket
+D-2), the ownership table, the ApacheBench trap in RG-1, and the warning that
+"bounded" must name a perimeter.
 
-**Consult it for Phase 3 when it is available.** It is the densest source on
-exactly the problems this phase has: measurement methodology, bounded pools,
-backpressure, slot reuse and compiled configuration. A second implementation
-that has already hit these walls is worth more than a fresh guess.
+**Read it for Phase 3.** It is the densest available source on exactly the
+problems this phase has — measurement methodology, bounded pools, backpressure,
+slot reuse and compiled configuration — and a second implementation that has
+already hit these walls is worth more than a fresh guess.
 
-### The rule
+### The rule, which has not changed
 
-* **It is REFERENCE, never architecture to copy.** "That system does it this
-  way" is **never** a justification, in a commit message, an ADR or a code
-  comment.
-* **It is not a dependency and must never become one.**
+* **Tina is REFERENCE, never architecture to copy.** "Tina does it this way" is
+  **never** a justification, in a commit message, an ADR or a code comment.
+* **It is not a dependency and must never become one** (R-T2 in the dossier's
+  own rejected list).
 * Take **discipline** — how a claim is evidenced, how a bound states what it
   does when full, how a benchmark avoids measuring its own error. Do **not**
-  take structure: a concurrency runtime sizes shards, pools and rings, and
-  Uruquim sizes none of those. Importing a general system-specification concept
-  would be cargo-culting a solution to a problem this framework does not have.
-* Its ideas enter the shootout as **hypotheses, with no head start**. The
-  bucketed representation it favours also scans linearly inside each bucket;
-  authority is not evidence about Uruquim's route cardinalities.
+  take structure. Tina sizes shards, pools and rings; Uruquim sizes none of
+  those, and importing a general system-specification concept would be
+  cargo-culting a solution to a problem this framework does not have.
+* The dossier says this about its own strongest candidate, and it is the right
+  posture: *"Tina não vence por autoridade: seus buckets também fazem scan
+  linear."* Its ideas enter the shootout as hypotheses, with no head start.
 
-### It stays OUT of the repository — owner decision, 2026-07-20
+### `tina/` STAYS OUT OF THE REPOSITORY — owner decision, 2026-07-20
 
-The dossier is **deliberately never committed**. It is supplied in the working
-environment of whoever is doing the work.
+The dossier is **deliberately not versioned and will not be.** It is supplied in
+the working environment of whoever is doing the work, out of band, and it is
+never committed.
 
 Three consequences, and they are requirements rather than observations:
 
-* **No gate may check for it, ever.** A gate that did would fail on every clean
-  clone and in CI.
-* **No work package may block on it.** If it is not there, proceed —
-  everything load-bearing has already been absorbed into this plan, the ADRs
-  and the gate, which is why the list below records what was absorbed instead
-  of sending you to find it again.
-* **Nothing may cite it as evidence.** A freeze citation must resolve inside
-  the repository; the Phase-1 and Phase-2 evidence matrices are checked that
-  way and Phase 3's will be too. Read it for ideas, then prove the idea *here*,
-  with a test and a negative control that live in this tree.
+* **No gate may check for it, ever.** A gate that tests for `tina/` would fail
+  on every clean clone and in CI, which is the whole reason this is a decision
+  rather than an oversight.
+* **No work package may block on it.** If the directory is not there, proceed —
+  everything load-bearing has already been absorbed into this plan, the ADRs and
+  the gate, which is exactly why §6 lists what was absorbed instead of telling
+  you to go and find it again.
+* **Nothing may cite it as evidence.** A freeze citation must resolve inside the
+  repository; the Phase-1 and Phase-2 evidence matrices are checked that way and
+  Phase 3's will be too. Read Tina for ideas, then prove the idea *here*, with a
+  test and a negative control that live in this tree.
 
-### What has already been absorbed
+### Where to look, per work package
 
-Recorded so nobody re-derives it, and so no work package needs the dossier to
-proceed:
+Read the mapped document, not the whole folder.
 
-* **Into WP28** — the routing benchmark is specified by cardinality *and by
-  workload shape*: hit at the start, middle and end; a miss; a 405; with the
-  static / `:param` / wildcard proportions stated alongside the numbers. This is
-  what exposed the eighth defect in this plan's own review.
-* **Into WP36** — compiled limits are *measured*, not assumed: per-request
-  lookup versus a boot-derived immutable runtime, compared on branch count,
-  allocations, size and ergonomics. And no large tuning struct ships before
-  there is data for each field.
-* **Into WP35** — the stale-slot test arrives *with* the reuse and never before
-  it: request A arms a timeout, the slot is freed, request B reuses it, A's
-  timeout fires, **B must survive**. A generational token is the known answer,
-  and while nothing is pooled, the abstraction is not built.
-* **Deferred to Phase 4** — a deterministic transport fault lab (seeded
-  fragment sizes, failure at byte N, delayed completion, concurrent close,
-  artificially small pool, final checker). Named here so the Phase-4 planner
-  finds it rather than inventing it.
+| Work package | Read | What is in there |
+|---|---|---|
+| **WP26** benchmark | `docs/06-testes-portabilidade-e-maturidade.md`, `docs/11-…roadmap` §P3-1 | The evidence pyramid, test hygiene, and the ApacheBench failure written up in full |
+| **WP28** shootout | `docs/09-propostas…` **P-T8**, `docs/11-…roadmap` §P3-2 | Cardinality datasets, and the hit-position / miss / 405 matrix this plan was missing |
+| **WP29/WP30** router | `docs/07-catalogo-de-padroes.md` | Pattern catalogue, including the class-bucketed representation |
+| **WP35** arena and reuse | `docs/02-memoria-ownership-e-backpressure.md`, **P-T7** | Bounded pools, the "no malloc" claim examined, and the generational-token test for slot reuse |
+| **WP36** limits | **P-T6**, `docs/11-…roadmap` §P3-10/P3-11 | Compiled limits versus per-request lookup, and why the options struct stays small |
+| **WP37** state | `docs/08-comparacao-com-uruquim.md` | Where the two designs genuinely diverge |
+| **WP38** freeze | `docs/09-propostas…` P-T1/P-T2, `docs/10-limitacoes-e-questoes-abertas.md` | The ledger discipline Phase 2 already adopted, and how the study bounds its own claims |
 
 ### Already rejected, and staying rejected
 
-Settled, and not reopened by consulting the dossier again: recovering a panic
-inside a handler (ADR-020 proved it impossible), making the studied system a
-dependency, rewriting the HTTP server, and "zero allocation" as a slogan
-without a perimeter and a test — which the claim ledger now enforces.
+The dossier keeps its own rejected list; these are settled and are not reopened
+by reading it again: recovering a panic inside a handler (**R-T1** — ADR-020
+proved it impossible), making Tina a dependency (**R-T2**), rewriting the HTTP
+server (**R-T3**), and "zero allocation" as a slogan without a perimeter and a
+test (**R-T4** — the claim ledger now enforces exactly this).
+
+### Three items this plan has already absorbed
+
+Recorded so nobody re-derives them: **P-T6** is folded into WP36 (measure both
+shapes, do not assume the derived runtime), **P-T7** into WP35 (the stale-slot
+test arrives *with* the reuse, never before it), and **P-T8** into WP28 (the
+workload matrix — it is what exposed the eighth defect in this plan's own
+review). **P-T5**, the deterministic transport fault plan, is **not** scheduled
+here: it is a hardening lab and belongs with Phase 4, but it is named so the
+Phase-4 planner finds it rather than inventing it.
+
+The remaining P-T numbers are accounted for so nobody goes looking: **P-T1,
+P-T2 and P-T4** were absorbed by Phase 2 itself (the three ledgers, the
+ownership table, and WP18 Amendment 1 plus the single-commit invariant);
+**P-T3** lives on as WP9's raw-wire corpus and grows in Phase 4 (P4-16);
+**P-T9 and P-T10** are the product track's `uruquim dev` and `uruquim doctor`,
+deliberately outside every phase.
+
+---
+
+## 6b. External reference programs — same discipline, smaller scale (added 2026-07-20)
+
+Two further external sources were checked for this plan, and the Tina rule of
+§6 applies to both, unchanged: **reference, never architecture; never citable
+as evidence; never a dependency; absence never a blocker.** Anything taken from
+them is proven here, with a test or a measurement that lives in this tree.
+
+### `laytan/odin-http` upstream, and its documentation
+
+https://odin-http.laytan.dev/http/ documents the package whose root server
+Uruquim already vendors at a pinned commit (`vendor/odin-http/VENDOR.md`), so
+this is the one external source that is also partly *in* the tree. Two things
+are worth knowing for Phase 3:
+
+* **WP36 has an in-tree precedent to read before designing anything:**
+  `Server_Opts` with `Default_Server_Opts` (`vendor/odin-http/server.odin`) is
+  an options struct with package defaults — the same shape the P3-11 amendment
+  chose. Note the difference before taking anything from it: upstream's default
+  is a **mutable global variable**, while the precedent this plan names —
+  `core:net`'s `DEFAULT_TCP_OPTIONS` — is a constant. Keep the constant; a
+  default an application can mutate is a configuration channel nobody
+  validates.
+* The backend already imports `core:time` and `core:nbio` on the serving path
+  (FINDING-B, as stated above): the clock exists there today, and the open cost
+  question is about Uruquim's own packages.
+
+### `arturfil/coffees_odin` — a real application on the same backend
+
+https://github.com/arturfil/coffees_odin is a third-party CRUD service written
+against the same odin-http backend: coffees and users, Postgres, JWT auth,
+hand-rolled CORS. Its value is as a **specimen** of what a real Odin web
+application looks like today, and it touches four Phase-3 questions:
+
+* **WP28 — route cardinality.** It registers **13 routes**. That is context for
+  "the cardinalities this project actually targets" in the stopping rule — a
+  real application sitting exactly in the 5–50 band — and it is context only,
+  never evidence (C-5): Uruquim's numbers come from Uruquim's harness.
+* **WP37 / ADR-028 — the revalidation pattern, observed in the wild.** Its auth
+  middleware validates the JWT and **discards the claims**; its `/auth/me`
+  handler then re-validates the same token itself. A real program on this exact
+  backend pays the revalidation cost today, does not thread the user down as a
+  parameter, and does not work around the repetition. The datapoint is recorded
+  in ADR-028 as an observation; it does not move the burden of proof, which
+  stays a real program **measured in this tree**.
+* **WP32 — OPTIONS demand.** It hand-rolls a CORS middleware that answers
+  OPTIONS preflight itself, because the framework layer offers nothing.
+  Real-world demand for the automatic-OPTIONS decision, observed rather than
+  hypothesised.
+* **WP33 — a null result worth keeping.** None of its 13 routes uses more than
+  one path parameter. One specimen proves little, but it is one more reason
+  WP33 is capacity work rather than urgent demand.
 
 ---
 
 ## 7. What an implementation agent should read first
 
 1. This document, for the work package it is doing — **including §0**, because
-   three of the four findings there contradict the older skeleton.
+   three of the four findings there contradict the older skeleton, **and §2b**,
+   because every approval the §2 table marks is already resolved there
+   (ADR-029): no work package waits for a review.
 2. `planning/later-phases-plan.md` §Phase 3 — the research gates and the C-1…C-8
    findings, which remain authoritative for the questions they cover.
 3. `planning/phase-2-freeze.md` — the three ledgers it will have to amend, and
@@ -884,9 +1049,10 @@ without a perimeter and a test — which the claim ledger now enforces.
 4. `planning/public-api-guardrails.md` — G-01 through G-11 are not advice.
 5. `planning/adrs.md` — an ACCEPTED ADR supersedes plan text when they
    disagree. That is what happened in WP21, and this plan is not exempt.
-6. **The external reference dossier** (§6), when the environment supplies it.
-   Reference, never architecture; it is never committed, never cited as
-   evidence, and its absence is never a blocker.
+6. **`tina/` — the mapped document only** (§6), when the environment supplies
+   it. Reference, never architecture; "Tina does it this way" is never a
+   justification; it is never committed, never cited as evidence, and its
+   absence is never a blocker.
 7. **The code and tests of the work package before it.** Never conclude from
    documents alone: this project has now had two cases where the documentation
    described behaviour the code did not have, and one of them was introduced by

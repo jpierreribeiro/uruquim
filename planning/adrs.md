@@ -199,7 +199,10 @@ recommendation · documentation impact · reversibility.
 - **Reversibility.** HIGH (private).
 
 ## ADR-010 — Advanced API policy
-- **Status.** **PROPOSED / DEFERRED** — post-Phase-1 gate.
+- **Status.** **ACCEPTED** (2026-07-20, decided under the ADR-029 delegation) —
+  option **A**, with activation deferred: the Advanced API stays
+  designed-not-shipped until a real external user request exists, and it never
+  appears in the Quick Start. Activation is itself a recorded decision.
 - **Context.** allocators, transport injection, typed context.
 - **Options.** (A) present but undocumented in Quick Start; frozen later. (B)
   ship in Phase 1. (C) omit entirely.
@@ -298,7 +301,13 @@ recommendation · documentation impact · reversibility.
   on replay.
 
 ## ADR-013 — Trusted proxy and effective client-address policy
-- **Status.** **PROPOSED / DEFERRED** — Phase-4 security gate.
+- **Status.** **ACCEPTED IN DIRECTION** (2026-07-20, decided under the ADR-029
+  delegation) — option **A**: the default effective address is the connected
+  peer, forwarding headers are ignored until trusted proxies are explicitly
+  configured, and `Forwarded` is never echoed into a response. This is the
+  fail-closed arm, which is why deciding the direction early is safe. Exact
+  header support and public configuration signatures remain owned by the
+  Phase-4 prototype (P4-7), as the Recommendation below already states.
 - **Context.** `Forwarded` and `X-Forwarded-For` are client-controlled unless
   the connected peer belongs to an explicitly trusted deployment boundary.
 - **Options.** (A) distrust by default; configure trusted CIDRs and walk the
@@ -903,10 +912,17 @@ commands and outputs.
 
 ## ADR-028 — request-scoped typed state: does it exist at all?
 
-- **Status.** **PROPOSED** (opened 2026-07-20 by the Phase-3 planning pass).
-  Owned by WP37. **Nothing may assume an outcome until this is decided** — a
-  G-08 correction was already required because shipped documentation promised
-  one.
+- **Status.** **ACCEPTED** (2026-07-20, decided under the ADR-029 delegation) —
+  option **A**: no request-scoped state. The revalidation cost is ratified,
+  and the documented workaround — call `current_user` once and pass the `User`
+  down as an ordinary parameter — is the answer, not a mitigation. Grounds:
+  C-6's research conclusion, the observed datapoint below, and the fact that
+  (A) is the only reversible option, which a delegated decision must weigh
+  heaviest. **Reopening requires a real program measured in this tree** that
+  cannot be written cleanly; the named successor, should that evidence ever
+  arrive, is option (C). Opened 2026-07-20 by the Phase-3 planning pass; owned
+  by WP37. The G-08 history stands: a correction was already required because
+  shipped documentation promised an outcome before any decision existed.
 
 - **Question.** Can a middleware hand a typed value to a handler? Today it
   cannot, and the canonical auth pattern pays for it: `current_user`
@@ -953,9 +969,82 @@ commands and outputs.
   **Evidence for (B) or (C) must be a real program that cannot be written
   cleanly today, never a hypothetical.**
 
+- **Observed datapoint (2026-07-20, reference only).** One external real
+  program was examined: `arturfil/coffees_odin`, a third-party CRUD service
+  written against the same odin-http backend Uruquim vendors. Its auth
+  middleware validates the JWT and **discards the claims**; its `/auth/me`
+  handler then re-validates the same token itself. So a real program on this
+  exact backend pays the revalidation cost today — at string-comparison cost,
+  with no database round-trip — and its author neither threads the user down
+  as a parameter nor works around the repetition. Recorded as an observation
+  from a reference program, not as evidence for any option: the burden of
+  proof above is unchanged, and it names a real program **measured in this
+  tree**.
+
 - **Public impact.** (A) zero symbols. (B) and (C) add public surface, a
   capacity-ledger row, a lifetime-ledger row, and a claim with a negative
   control.
 
 - **Reversibility.** (A) → (B)/(C) is HIGH — a pure strengthening.
   (B)/(C) → (A) is LOW once applications store values.
+
+## ADR-029 — the mission, and how decisions are made from here
+
+- **Status.** **ACCEPTED** (owner, 2026-07-20). This ADR records a decision
+  the owner made directly, and it is the authority every later *"decided under
+  the ADR-029 delegation"* note points back to.
+
+- **Context.** The governing rule was "no decision is marked accepted without
+  the owner" (roadmap rule 6), which had produced a queue of PROPOSED matters
+  and pending approvals. On 2026-07-20 the owner delegated those decisions and
+  future work-package approvals to the executing agent, and named the value
+  that decides them: ***A web framework for the Joy of Programming*** — the
+  README's own line.
+
+- **Decision 1 — the mission is a rule, not a slogan.** Precedence is fixed
+  and explicit:
+  1. **Discipline first.** Measurement decides performance; fail-closed is the
+     default; security decisions take the distrusting arm; the guardrails
+     G-01…G-11, the ledgers and the gated words are never overruled by joy.
+  2. **Joy second.** When discipline does not decide, choose the option that
+     makes writing a program feel better: fewer concepts to hold (FINDING-D's
+     budget is joy made measurable), diagnostics at registration or boot
+     rather than at 3 a.m., less ceremony, clearer names.
+  3. **Convenience last.** A pleasant idea that grows public surface is not
+     joy; it is scope. Joy may never be cited to justify a new symbol — G-09
+     evidence still does that.
+
+- **Decision 2 — the delegation.** From 2026-07-20 the executing agent decides
+  PROPOSED matters and work-package approvals itself, under three conditions:
+  * every such decision is **recorded** where the project records decisions
+    (this file, the plan, the freeze), marked *"decided under the ADR-029
+    delegation"*, with its grounds;
+  * where the evidence does not clearly favour one arm, the agent takes the
+    **most reversible** arm;
+  * a pre-approval is **conditional**: if the work package's own spec or
+    prototype work contradicts the decided arm, the agent stops and records
+    the finding instead of proceeding.
+
+- **Decision 3 — reserved matters.** These still stop for the owner, always:
+  * cutting any release, tag or version (the roadmap already says this);
+  * changing `LICENSE`;
+  * changing the mission itself;
+  * making Tina a dependency, or committing `tina/` — owner decisions already
+    recorded, listed here so the delegation can never be read as loosening
+    them;
+  * rewriting published git history;
+  * anything the agent itself judges both hard to reverse and genuinely
+    uncertain — the delegation is a licence to decide, not an obligation to
+    guess.
+
+- **Revocation.** The owner revokes or narrows this delegation by saying so,
+  in a sentence, in any session. No ceremony.
+
+- **Consequences applied the same day.** ADR-010 (A, activation deferred),
+  ADR-013 (A, in direction) and ADR-028 (A) moved to ACCEPTED under this
+  delegation, and the Phase-3 plan's owner-approval points were resolved in
+  advance (plan §2b).
+
+- **Reversibility.** HIGH — revoking the delegation restores the previous
+  regime untouched, and every decision made under it is individually
+  revisitable by the owner at any time.

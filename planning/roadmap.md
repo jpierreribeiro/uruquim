@@ -4,20 +4,32 @@ Living document. Written after the Phase-1 freeze (`a7d2e9e`) from the evidence
 in [`post-phase1-audit.md`](post-phase1-audit.md) and
 [`odin-fit-audit.md`](odin-fit-audit.md).
 
-Detail is deliberately **proportional to distance**. Phase 2 is planned to the
-point where an agent can be handed a work package
-([`phase-2-plan.md`](phase-2-plan.md)). Phases 3 to 5 have defined work packages
-and research gates but no frozen signatures
+Detail is deliberately **proportional to distance**. Phase 2 is complete
+([`phase-2-plan.md`](phase-2-plan.md), [`phase-2-freeze.md`](phase-2-freeze.md)).
+Phase 3 is planned to hand-off depth ([`phase-3-plan.md`](phase-3-plan.md)).
+Phase 4 has a contract-level draft ([`phase-4-plan.md`](phase-4-plan.md)) that
+must be refreshed against Phase 3's outputs before it starts — its own E-4
+makes that an entry condition. Phase 5 keeps defined work packages and
+research gates but no frozen signatures
 ([`later-phases-plan.md`](later-phases-plan.md)). Precision about work that is
 two years away would be false precision.
 
 ## Where the project is
 
-Phase 1 is complete and frozen: 32 application symbols + 2 test-support symbols,
-protected by an executable gate, with a working bootstrap HTTP server, routing,
-extractors, JSON body binding, a standardized error envelope and socket-free
-testing. It is usable for building and testing a JSON API. It is not hardened
-for unattended production exposure, and no release has been made.
+*(Updated 2026-07-20, after the Phase-2 freeze.)*
+
+Phases 1 and 2 are complete and frozen: 44 application symbols + 2 test-support
+symbols, protected by an executable gate that now freezes claims, lifetimes and
+capacities as well as signatures. On top of Phase 1's server, routing,
+extractors, JSON body binding, error envelope and socket-free testing, Phase 2
+shipped middleware (onion, ADR-005), route groups (`Router`/`mount`),
+request-header lookup, correlation IDs with a tested trust policy, a
+per-request logger and a typed framework-error observer — each costing zero
+bytes when unused, proven by `nm`. Phase 3 is planned in `phase-3-plan.md`
+(reviewed twice, all corrections applied) and has not started; ADR-028 is its
+open owner decision. The project is usable for building and testing a JSON API.
+It is not hardened for unattended production exposure, and no release has been
+made.
 
 ## What each phase is for, in plain terms
 
@@ -125,7 +137,7 @@ use is not a framework.
 
 | Milestone | Contents | Gate |
 |---|---|---|
-| **M0 — usable by others** (before Phase 2) | `LICENSE`, `SECURITY.md` + reporting channel, `CONTRIBUTING.md`, `CHANGELOG.md` | files exist; licence chosen by the owner |
+| **M0 — usable by others** (before Phase 2) | `LICENSE`, `SECURITY.md` + reporting channel, `CONTRIBUTING.md`, `CHANGELOG.md` | ✅ done — all four files exist; MIT chosen by the owner |
 | **M1 — Phase 2 shipped** | middleware, groups, header lookup; docs and examples updated | Phase-2 exit criteria |
 | **M2 — honest preview** | supported-Odin-version policy; platform support stated honestly (only Linux x86-64 is tested today); upgrade guide | policy documented, not implied |
 | **M3 — Phase 4 shipped** | operations doc, security policy exercised, soak/fuzz results | Phase-4 exit criteria |
@@ -151,5 +163,13 @@ Carried forward from Phase 1 because they are why Phase 1 stayed small:
    and streaming are candidates for separate packages, not core growth.
 5. **Measurements decide performance questions**, not preference — and the
    losing options get recorded.
-6. **No decision is marked accepted without the owner.** ADR-005, ADR-010 and
-   ADR-013 remain PROPOSED.
+6. **Decisions are made under the ADR-029 delegation (owner, 2026-07-20).**
+   The executing agent decides PROPOSED matters and work-package approvals,
+   records each with its grounds, and takes the most reversible arm when
+   evidence does not clearly favour another. The mission — *A web framework
+   for the Joy of Programming* — is the tie-breaker, below discipline and
+   above convenience. Reserved matters still stop for the owner: releases,
+   tags and versions; `LICENSE`; the mission itself; Tina as a dependency or
+   in the tree; rewriting published history. ADR-010, ADR-013 and ADR-028
+   were accepted under this delegation on 2026-07-20; the plain-language
+   record is [`decisoes-do-dono.md`](decisoes-do-dono.md).

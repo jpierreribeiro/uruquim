@@ -1,5 +1,7 @@
 # Uruquim
 
+*A web framework for the Joy of Programming.*
+
 An Odin microframework for real-world JSON APIs.
 
 **Simple by default, explicit when needed, data-oriented underneath.**
@@ -8,8 +10,6 @@ An Odin microframework for real-world JSON APIs.
 productive, and predictable — for humans and for AI coding agents. No code
 generator, no mandatory CLI, no heavy metaprogramming: ergonomics come from
 extractors and canonical helpers.
-
-*A web framework for the Joy of Programming.*
 
 Uruquim is built on three equally important commitments:
 
@@ -101,17 +101,28 @@ examples/                Compiling programs (all built by the gate)
 
 ## Status
 
-WP0–WP25 are complete. **Phase 1 and Phase 2 are both finished and frozen
-behind a gate.** What "frozen" means, symbol by symbol and with the evidence
+Phases 1 and 2 are complete: implementation finished, public contracts frozen
+behind a gate. What "frozen" means, symbol by symbol and with the evidence
 behind each one, is recorded in
 [`planning/phase-1-freeze.md`](planning/phase-1-freeze.md) and
-[`planning/phase-2-freeze.md`](planning/phase-2-freeze.md).
+[`planning/phase-2-freeze.md`](planning/phase-2-freeze.md) — the Phase-2
+freeze covers not only the API but the project's claims, lifetimes and
+capacities. Phase 3 (the performance core) is planned in
+[`planning/phase-3-plan.md`](planning/phase-3-plan.md) and has not started.
 
 **What works today**
 
 - A real HTTP server: `web.serve(&app, port)` binds a port and answers.
 - Routing with static and `:param` segments; static routes win over
   parametric ones.
+- Middleware with `web.use` — onion model, so code after `web.next` sees the
+  response. Route groups under a prefix with `Router` and `mount`, and
+  route-level middleware on the five verbs.
+- Request header lookup (`web.header`, `web.bearer_token`) returning views,
+  and correlation IDs (`web.request_id`) with a tested trust policy.
+- One log line per request (`web.logger`) and a typed framework-error
+  observer (`web.observe`) — each costs zero bytes in an application that
+  does not use it, proven by `nm` in the gate.
 - Path and query extractors that respond with a standardized `400` on bad
   input, so handlers only check a bool and return.
 - JSON request bodies (`web.body`) with a fixed 4 MiB cap, decoded into a
@@ -182,16 +193,35 @@ Phase 3 — performance core, configurable limits and typed application state �
 is planned in [`planning/phase-3-plan.md`](planning/phase-3-plan.md) and has
 not started.
 
+## Supported platform and toolchain
+
+Stated honestly rather than implied:
+
+- **Tested: Linux x86-64 only.** macOS, Windows and other architectures are
+  **untested** today — they may work, and nobody has proven it.
+- **The toolchain pin is part of the contract.** Odin ships monthly `dev-`
+  releases with breaking changes and no package manager, so Uruquim pins one
+  release, one commit and one asset checksum in
+  [`odin-version.txt`](odin-version.txt), and the gate refuses any other
+  compiler. Re-pinning is a deliberate, recorded change — not an upgrade that
+  happens to you.
+- **Consumption is by vendoring or a git submodule** at a pinned commit — the
+  ecosystem's own convention, since Odin will never officially support a
+  package manager.
+
+The mandatory gate (`build/check.sh`) runs on the pinned toolchain and is the
+single source of truth for what "passing" means in this repository.
+
 ## Where to start
 
 - **`docs/quick-start.md`** — from nothing to a running API.
 - **`examples/01-hello-world`** — the smallest complete program.
 - **`examples/02-json-api`** — a CRUD-shaped JSON API.
 - **`examples/03-route-params`** — path params and query extractors.
-- **`examples/04-middleware`** — ordering, short-circuiting, and the cost.
-- **`examples/05-route-groups`** — `web.Router` and `web.mount`.
-- **`examples/06-authentication`** — the canonical auth pattern, and what it
-  costs you.
+- **`examples/04-middleware`** — the onion model, short-circuits and `next`.
+- **`examples/05-route-groups`** — `Router`, `mount` and shared prefixes.
+- **`examples/06-authentication`** — the canonical auth pattern, with its
+  revalidation cost stated instead of hidden.
 
 All six examples compile in the mandatory gate.
 
