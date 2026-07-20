@@ -815,6 +815,27 @@ trap - EXIT
 test ! -d "$URUQUIM_WP27_TMP" || fail "the throwaway WP27 internal-test package was not removed"
 echo "PASS: WP27 allocation audit ran against the real sources; throwaway package removed"
 
+# WP32b — automatic HEAD and OPTIONS.
+#
+# It runs as a THROWAWAY internal package for a reason that is itself the
+# design: `web.test_request` takes a `Method`, and `Method` has no HEAD and no
+# OPTIONS. Both are resolved from the raw token before a `Method` value exists,
+# so the frozen six-member enum stays byte-for-byte as the gate pins it — and a
+# public-surface suite that COULD send either method would be evidence the enum
+# had grown.
+echo "--- WP32b automatic HEAD and OPTIONS (throwaway package) ---"
+URUQUIM_WP32_TMP="$(mktemp -d -t uruquim-wp32-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP32_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP32_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp32-internal/*.odin "$URUQUIM_WP32_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP32_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp32-internal"
+rm -rf "$URUQUIM_WP32_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP32_TMP" || fail "the throwaway WP32 internal-test package was not removed"
+echo "PASS: WP32b HEAD/OPTIONS ran against the real sources; throwaway package removed"
+
 # WP31b — the path policy. Rejection rules, and the much larger set that is NOT
 # rejected: a policy that quietly grew would break applications whose paths were
 # legal the day they were written. The trailing-slash case has its own test

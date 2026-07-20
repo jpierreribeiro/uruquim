@@ -80,7 +80,7 @@ serve_dispatch :: proc(
 		out,
 		int(ctx.private.response.status),
 		response_headers_neutral_transport(ctx.private.response.headers, allocator),
-		ctx.private.response.body,
+		response_body_view(&ctx),
 		allocator,
 	)
 
@@ -117,8 +117,14 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 		return
 	}
 
+	// WP32b: HEAD and OPTIONS are resolved from the RAW TOKEN, before a
+	// `Method` value exists, which is what lets the frozen six-member enum stay
+	// untouched. HEAD becomes GET for every downstream purpose.
+	resolved_method, implicit := implicit_from_token(inbound.method)
+	ctx.private.implicit = implicit
+
 	ctx.request = Request {
-		method  = method_from_token(inbound.method),
+		method  = resolved_method,
 		path    = inbound.path,
 		query   = inbound.query,
 		headers = header_view_from_pairs(inbound_header_pairs(inbound, context.temp_allocator)),

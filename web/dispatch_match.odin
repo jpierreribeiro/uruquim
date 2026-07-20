@@ -325,6 +325,13 @@ dispatch :: proc(a: ^App, ctx: ^Context) {
 		return
 	}
 
+	// WP32b: OPTIONS is answered from the Allow machinery, before lookup. A
+	// path matching no route falls through to the ordinary miss, so a path that
+	// does not exist does not acquire an options list.
+	if ctx.private.implicit == .Options && options_answer(a, ctx) {
+		return
+	}
+
 	entry, param, found := route_lookup(a, ctx.request.method, ctx.request.path)
 	if found {
 		ctx.private.param = param

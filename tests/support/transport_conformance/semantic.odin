@@ -262,16 +262,34 @@ scenarios_storage := []Scenario{
 			expect_code = "not_found",
 		},
 		{
-			// HEAD must NOT be silently turned into GET (WP9 D7). With no HEAD
-			// route registered, it follows the ordinary policy.
-			name = "HEAD is not silently converted to GET",
+			// SUPERSEDED BY WP32a, owner decision 2026-07-20
+			// (`planning/phase-3-spec.md` §2).
+			//
+			// This scenario used to assert `405` under the heading "HEAD is not
+			// silently converted to GET (WP9 D7)". That expectation was Phase 1's
+			// and it has been deliberately reversed, not accidentally broken:
+			// C-1 records HEAD as effectively mandatory, and mapping it to
+			// `.UNKNOWN` meant health checkers, proxies and monitoring systems
+			// got a 405 from every Uruquim application.
+			//
+			// HEAD now matches as GET with the body suppressed at commit. The
+			// row stays in the conformance matrix because the property is
+			// exactly the kind that must hold identically on BOTH transports.
+			name = "HEAD is answered as GET",
 			request = {method = "HEAD", path = "/ping"},
-			expect_status = 405,
+			expect_status = 200,
 		},
 		{
-			name = "OPTIONS gains no early public behavior",
+			// SUPERSEDED BY WP32a, same decision. Previously "OPTIONS gains no
+			// early public behavior", expecting 405.
+			//
+			// OPTIONS is now answered `204` with the `Allow` header the 405
+			// already builds — the same machinery, not a second one. A path
+			// matching no route still falls through to the ordinary miss, so a
+			// path that does not exist does not acquire an options list.
+			name = "OPTIONS is answered from the Allow machinery",
 			request = {method = "OPTIONS", path = "/ping"},
-			expect_status = 405,
+			expect_status = 204,
 		},
 
 		// --- body ----------------------------------------------------------
