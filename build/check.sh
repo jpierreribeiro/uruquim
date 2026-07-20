@@ -817,15 +817,15 @@ echo "PASS: WP27 allocation audit ran against the real sources; throwaway packag
 
 # WP28 — the route representation shootout, correctness half.
 #
-# It asserts that six representations return byte-identical answers, and that a
+# It asserts that seven representations return byte-identical answers, and that a
 # disagreement is CONSTRUCTIBLE — because "the candidates agree" would otherwise
-# be true of a harness that called the same matcher six times. A representation
+# be true of a harness that called the same matcher seven times. A representation
 # that misses a route looks magnificent in a benchmark; a scan that stops early
 # is exactly what fast looks like from outside.
 #
 # No timing is asserted (FINDING-E). The numbers come from tests/wp28-runner,
 # run by hand, and are recorded in planning/router-shootout.md.
-echo "--- WP28 route shootout: six representations must agree (odin test) ---"
+echo "--- WP28 route shootout: seven representations must agree (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp28-shootout" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp28-shootout"

@@ -181,16 +181,78 @@ than any further router work.
 * **WP31a and WP32a are already decided**, so the router is being built against
   known semantics rather than constraining them afterwards.
 
-## 6. What this shootout did not measure
+## 6. Addendum — the node interior, measured
+
+§6 originally listed the node's interior as owed to WP29, on the grounds that
+the shootout had chosen the shape of the *table* and not the shape of a *node*.
+That gap is now closed, because WP29 cannot inherit an unmeasured choice.
+
+**Two things were added: a seventh candidate and a fourth shape.**
+
+`radix_arr` is `radix_idx` with one difference — children keyed by a **sorted
+array plus binary search** instead of a `map[string]int`. Everything else is
+identical, so the measured difference *is* the node interior.
+
+`Deep` is the shape the first three did not cover, and its absence was a real
+flaw. `All_Static`, `All_Param` and `Mixed` put every route under one prefix, so
+the node above them has **fan-out equal to the whole table** — 5,000 children.
+Real applications register narrow, deep trees. `Deep` spreads routes over digit
+segments: depth 5, fan-out at most 10. Measuring only the wide shape would have
+chosen the node interior by an accident of my own generator, and it is precisely
+the shape where a sorted array should win.
+
+### The numbers, median p95 ns
+
+| Routes | Shape | `radix_idx` (map) | `radix_arr` (sorted array) | array is slower by |
+|---:|---|---:|---:|---:|
+| 500 | All_Static | **1,344** | 2,174 | 62% |
+| 500 | All_Param | **1,478** | 2,361 | 60% |
+| 500 | Mixed | **1,493** | 2,257 | 51% |
+| 500 | Deep | **1,746** | 2,179 | 25% |
+| 5,000 | All_Static | **1,338** | 2,331 | 74% |
+| 5,000 | All_Param | **1,335** | 2,463 | 84% |
+| 5,000 | Mixed | **1,922** | 3,021 | 57% |
+| 5,000 | Deep | **1,609** | 1,918 | 19% |
+
+### The reading, and it needs care
+
+**No single cell is decisive.** Each cell's own p95 spread runs 2,400–9,800
+basis points, so a 25% gap sits inside the noise of the cell that produced it.
+Quoting any one row as proof would be exactly the mistake FINDING-E exists to
+prevent.
+
+**What is evidence is the unanimity.** The map is faster in **eight cells out of
+eight**, across two cardinalities and four shapes, by 19–84%. A direction that
+holds in every independent cell is informative even when no individual cell is
+significant on its own — and the magnitudes line up with the mechanism: one hash
+against roughly twelve string comparisons at fan-out 5,000, and the gap shrinks
+to its smallest, 19%, exactly where fan-out is smallest.
+
+**The array lost on its own home ground.** `Deep` was added because it is the
+shape where binary search over ≤10 children should beat a hash. It is the
+closest result — and it is still a loss.
+
+**DECISION: the node keeps `map[string]int`.** Measured, not assumed, and
+measured against the alternative the idiom guide's warning would have favoured.
+That warning ("avoid maps in hot dispatch paths") is not overturned; it is
+scoped. What it is right about is *per-request* maps, which allocate — and no
+candidate here allocates at lookup, proven in the gate. A map built once at
+registration and only read afterwards is a different thing from a map built per
+request, and this is the number that separates them.
+
+### `Deep` changed nothing else
+
+Worth stating, because it was the shape most likely to overturn the main result:
+at 5,000 routes `linear` costs 240,957 ns on `Deep` against 219,537 ns on
+`Mixed`. **A realistically-shaped table does not rescue the linear scan** — it
+is marginally worse on it. The main decision stands on four shapes rather than
+three.
+
+## 7. What this shootout still did not measure
 
 * **Build time and table memory.** Registration cost was not compared. A radix
   tree with a `map` per node allocates more at registration than a flat array,
   and for a 5,000-route table that is worth knowing before WP29 ships. **Owed.**
-* **The map-per-node choice itself.** Each node keys its static children by
-  `map[string]int`. It allocates nothing at lookup (proven) and was not compared
-  against a sorted array with binary search, which at typical fan-out may well
-  be faster. **WP29 should measure that before settling the node's interior** —
-  this shootout chose the *shape of the table*, not the shape of a node.
 * **Multi-parameter patterns.** Every candidate supports exactly one `:param`,
   which is what WP4's dispatcher supports today. **WP33** changes that, and it
   should re-run this harness rather than assume the ordering survives.
