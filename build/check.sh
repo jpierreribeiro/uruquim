@@ -815,6 +815,15 @@ trap - EXIT
 test ! -d "$URUQUIM_WP27_TMP" || fail "the throwaway WP27 internal-test package was not removed"
 echo "PASS: WP27 allocation audit ran against the real sources; throwaway package removed"
 
+# WP35 — R-16 measured. Not a happy-state document: this suite is the TRIPWIRE
+# for the moment a later work package pools something, and WP36's timeouts are
+# the likeliest candidate. If it goes red it has done its job and must not be
+# "fixed" by weakening it.
+echo "--- WP35 arena and oversize policy: R-16 measured (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp35-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp35-public-surface"
+
 # WP33 — more than one path parameter. No public symbol: web.path and
 # web.path_int keep their signatures and stay the one canonical accessor. The
 # suite pins the bound AND what happens past it, because the capacity ledger
