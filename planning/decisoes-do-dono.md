@@ -1,108 +1,58 @@
-# Decisões que esperam pelo dono
+# Decisões do dono — registro e delegação
 
-**Para quem é este documento:** para o dono do projeto, que não precisa ser
-técnico para decidir bem. A regra número 6 do roadmap diz que **nenhuma decisão
-é aceita sem o dono** — este arquivo é a fila dessas decisões, em linguagem
-simples, com a recomendação de quem estudou o problema e o que acontece se você
-não decidir nada.
-
-Atualizado em **2026-07-20**. Quando uma decisão for tomada, ela sai daqui e
-vira um ADR ACEITO em `adrs.md` (o registro técnico permanente).
+**O que é este documento:** o registro, em linguagem simples, de como as
+decisões deste projeto são tomadas e do que foi decidido em nome do dono.
+O registro técnico permanente de cada decisão é o `adrs.md`; este arquivo é o
+resumo legível. Atualizado em **2026-07-20**.
 
 ---
 
-## Como decidir sem ser técnico
+## A missão, e como ela decide
 
-Três perguntas que você pode fazer sobre **qualquer** proposta, e que o projeto
-se obriga a responder:
+> *A web framework for the Joy of Programming.*
 
-1. **"Qual medição sustenta isso?"** — neste projeto, performance se decide com
-   números medidos aqui dentro, nunca com "o framework X faz assim".
-2. **"O que acontece se a gente se arrepender?"** — toda proposta deve dizer o
-   custo de reverter. Desconfie de tudo que é "difícil de desfazer".
-3. **"Qual teste falharia sem essa mudança?"** — se ninguém sabe responder, a
-   mudança provavelmente não é necessária ainda.
+Em 2026-07-20 o dono definiu essa linha — que já era a do README — como o
+critério do projeto, e delegou as decisões pendentes e as aprovações futuras
+ao agente executor. O **ADR-029** registra o regime completo. Em resumo:
 
----
+1. **Disciplina primeiro.** Medição decide performance; na dúvida de
+   segurança, desconfiar; os guardrails e os ledgers nunca são atropelados.
+2. **Joy em segundo.** Quando a disciplina não decide, vence a opção que torna
+   escrever um programa mais agradável: menos conceitos, diagnóstico na hora
+   do registro/boot (nunca às 3h da manhã), menos cerimônia.
+3. **Conveniência por último.** "Joy" nunca justifica crescer a API pública —
+   isso continua exigindo evidência (G-09).
 
-## Decisões abertas AGORA
+Na dúvida entre duas opções, vale a **mais fácil de desfazer**.
 
-### 1. ADR-028 — guardar ou não um valor por requisição (a mais importante)
+## O que continua parando no dono (sempre)
 
-**O problema em linguagem simples.** Quando alguém faz login, um "porteiro"
-(middleware de autenticação) confere o crachá (o token). Hoje, o porteiro
-confere o crachá e **joga fora o resultado** — cada sala seguinte (cada função
-que precisa saber quem é o usuário) confere o crachá de novo. Com crachás
-simples isso custa quase nada; se um dia a conferência consultar o banco de
-dados, seriam várias consultas repetidas por requisição.
+- Lançar qualquer versão, tag ou release.
+- Mudar a licença (`LICENSE`).
+- Mudar a própria missão.
+- Tornar Tina uma dependência, ou commitar `tina/`.
+- Reescrever histórico já publicado no git.
+- Qualquer coisa que o agente julgue difícil de reverter **e** incerta.
 
-**As opções.**
-- **A — deixar como está, para sempre.** O custo da reconferência é aceito e
-  documentado. Não muda nada no código. É a única opção 100% reversível:
-  adicionar um mecanismo depois é fácil; retirar um mecanismo que as aplicações
-  já usam quebra todas elas.
-- **B — um pequeno "bolso" fixo por requisição** para guardar valores tipados.
-- **C — um único "escaninho" tipado** para exatamente um valor.
-
-**Recomendação registrada no ADR: opção A**, até que exista um programa real
-(não hipotético) que não consiga ser escrito de forma limpa hoje. Um dado do
-mundo real que apoia a calma: o único aplicativo Odin de terceiros que
-encontramos usando o mesmo backend (`coffees_odin`) paga esse mesmo custo de
-reconferência e funciona normalmente.
-
-**Se você não decidir nada:** vale a opção A na prática, e a Fase 3 (WP37)
-implementa só o que o ADR-004 já aprovou (estado da aplicação, não da
-requisição). Sem pressa real aqui.
-
-### 2. CI no GitHub — DECIDIDA: continua sem CI (dono, 2026-07-20)
-
-O projeto tem um "detector de mentiras" excelente (`build/check.sh`), que roda
-localmente e no VPS do dono. A pergunta era se ele deveria também rodar
-automaticamente no GitHub a cada mudança. **O dono reconfirmou em 2026-07-20 a
-decisão original: não** — o gate permanece local/VPS, `.github/workflows`
-continua proibido pelo `check_docs.sh`, e essa proibição é intencional, não um
-esquecimento. Se um dia houver colaboradores externos abrindo PRs com
-frequência, esta é a primeira decisão que vale a pena revisitar.
-
-### 3. ADR-010 — a "API avançada" (adiada, sem pressa)
-
-Existe uma proposta antiga de oferecer uma porta de entrada avançada
-(`app_init`, configuração avançada) separada da API comum. Está **adiada de
-propósito** e só precisa de decisão se/quando um usuário real pedir. Nenhuma
-ação necessária agora.
-
-### 4. ADR-013 — proxies confiáveis (só na Fase 4)
-
-Quando o servidor roda atrás de um proxy (nginx, Cloudflare…), descobrir o IP
-real do cliente é uma decisão de **segurança** — cabeçalhos podem ser
-falsificados. A regra já pesquisada: por padrão, confiar só no endereço da
-conexão; qualquer proxy confiável é configuração explícita do operador. Decida
-quando a Fase 4 começar, não antes.
+Para revogar ou ajustar a delegação, basta dizer — uma frase em qualquer
+sessão resolve.
 
 ---
 
-## O que a Fase 3 vai te pedir (prepare-se, sem decidir agora)
+## Decisões já tomadas sob a delegação (2026-07-20)
 
-O plano da Fase 3 (`phase-3-plan.md`) marca estes pontos como "aprovação do
-dono". Em ordem provável de chegada:
+| Decisão | O que ficou decidido, em uma linha |
+|---|---|
+| **ADR-028** — estado por requisição | **Não existe.** O "porteiro" valida e o valor é passado adiante como parâmetro comum; o custo de revalidação é aceito e documentado. Reabre só com um programa real, medido neste repositório, que não consiga ser escrito de forma limpa. |
+| **ADR-010** — API avançada | Fica desenhada, **não lançada**, até um usuário externo real pedir. Nunca aparece no Quick Start. |
+| **ADR-013** — proxies confiáveis | Por padrão, vale o endereço da conexão; confiar em proxy é configuração explícita do operador. Detalhes de API ficam para a Fase 4. |
+| **CI no GitHub** | **Continua sem CI** — o gate roda local/VPS, decisão reconfirmada pelo dono em 2026-07-20. |
+| **Fase 3, todas as aprovações** | Resolvidas de antemão no plano (§2b do `phase-3-plan.md`): diagnóstico de conflito com poison (WP30); nenhuma normalização de caminho, permanente, params crus (WP31a); HEAD e OPTIONS automáticos, sem 501 (WP32a); acessor de rota aprovado (WP34); limites configuráveis com runtime derivado no boot e registro-durante-serving rejeitado (WP36); WP37 só implementa o ADR-004; o freeze (WP38) é aprovado pelo próprio gate — e qualquer violação para e volta ao dono. |
 
-| Pedido | Em linguagem simples | O que exigir antes de aprovar |
-|---|---|---|
-| **WP31a — normalização de caminhos** | `/users` e `/users/` são a mesma coisa? E `%2F`? Hoje, nada é normalizado, de propósito. É decisão de **segurança** (é onde vivem bugs de path traversal). | Os testes de controle negativo já nomeados no plano (o "corpus"), passando. |
-| **WP32a — HEAD, OPTIONS e 501** | Responder automaticamente a dois tipos de requisição que todo servidor HTTP "de verdade" deveria responder. | Que o OPTIONS reutilize a máquina do `Allow` que já existe, sem criar uma segunda. |
-| **WP34 — nome da rota para métricas** | Um acessor público (+1 símbolo) para a aplicação saber "qual rota atendeu" — destrava observabilidade (OpenTelemetry exige). | A regra de redação: expor o **padrão** (`/users/:id`), nunca o caminho real (`/users/123`). |
-| **WP36 — limites configuráveis** | Hoje o limite de corpo é fixo em 4 MiB. Passa a ser configurável via struct de opções com padrão sensato. | A menor struct possível (cada campo é uma promessa eterna) e o ledger de capacidade atualizado **no mesmo commit**. |
-| **WP37 — estado tipado** | Implementa o que o ADR-004 já aprovou; a parte nova depende do ADR-028 acima. | Que nada assuma o ADR-028 antes de você decidi-lo. |
-| **WP38 — congelamento da Fase 3** | O fecho da fase: ledgers, benchmark de regressão no gate, laboratório de uso re-medido. | Se o programa-guia passar de 25 conceitos, o freeze deve **dizer isso com todas as letras**. |
+Toda pré-aprovação é condicional: se o trabalho de especificação de um pacote
+contradisser o que foi decidido, o agente **para e registra o achado** em vez
+de seguir.
 
----
+## Fila de decisões abertas
 
-## Estado do projeto em três linhas
-
-- **Fases 1 e 2: prontas e congeladas** — 46 símbolos públicos, servidor HTTP
-  funcional com middleware, grupos de rotas, IDs de correlação, logger e
-  observer; tudo atrás de um gate executável.
-- **Fase 3: planejada e revisada** (duas passadas de revisão aplicadas), não
-  iniciada. Começa por medição (WP26), nunca por implementação.
-- **Nenhuma versão foi lançada** — e lançar (tag, versão, anúncio) é decisão
-  sua, prevista para depois do marco M2 do roadmap.
+**Vazia.** Nada espera pelo dono neste momento.

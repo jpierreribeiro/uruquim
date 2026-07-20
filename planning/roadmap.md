@@ -160,7 +160,13 @@ Carried forward from Phase 1 because they are why Phase 1 stayed small:
    and streaming are candidates for separate packages, not core growth.
 5. **Measurements decide performance questions**, not preference — and the
    losing options get recorded.
-6. **No decision is marked accepted without the owner.** ADR-010, ADR-013 and
-   ADR-028 remain PROPOSED (ADR-005 was accepted by the owner on 2026-07-19).
-   The owner-facing queue, in plain language, is
-   [`decisoes-do-dono.md`](decisoes-do-dono.md).
+6. **Decisions are made under the ADR-029 delegation (owner, 2026-07-20).**
+   The executing agent decides PROPOSED matters and work-package approvals,
+   records each with its grounds, and takes the most reversible arm when
+   evidence does not clearly favour another. The mission — *A web framework
+   for the Joy of Programming* — is the tie-breaker, below discipline and
+   above convenience. Reserved matters still stop for the owner: releases,
+   tags and versions; `LICENSE`; the mission itself; Tina as a dependency or
+   in the tree; rewriting published history. ADR-010, ADR-013 and ADR-028
+   were accepted under this delegation on 2026-07-20; the plain-language
+   record is [`decisoes-do-dono.md`](decisoes-do-dono.md).
