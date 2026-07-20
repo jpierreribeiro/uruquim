@@ -424,8 +424,12 @@ Recorded so a later reader does not mistake absence for oversight:
 * **No latency measurement in `logger`.** It needs a clock, and a clock needs
   an import every application would pay for.
 * **No trusted-proxy handling or `X-Forwarded-*`.** Phase 4 (ADR-013).
-* **No typed request-local state.** Phase 3 — which is why the canonical auth
-  pattern revalidates, and why the example says so.
+* **No typed request-local state, and none is promised.** This is why the
+  canonical auth pattern revalidates. It is recorded here as an OPEN QUESTION
+  rather than a deferral: ADR-004 reserves `web.state` for application state,
+  and research finding C-6 argues a request-scoped extension mechanism solves a
+  problem this framework does not have. A later phase must DECIDE it; no
+  document may assume it.
 * **No stop procedure.** Phase 4; it will add public API.
 * **No second handler shape, no `Middleware` type, no context bag.** G-01 and
   G-03.

@@ -11,20 +11,25 @@
 // dishonest version of this example: `current_user` REVALIDATES THE TOKEN ON
 // EVERY CALL. A handler that calls it three times validates three times.
 //
-// Why: a middleware cannot hand a typed value to a handler in Phase 2. The
-// request context is deliberately not an extension bag — there is no
-// `ctx.user_data`, no `locals`, no `map[string]any`, and there never will be —
-// and typed request-local state is Phase 3 (`web.state`). Until then, the only
-// honest way for a handler to get a `User` is to derive it again.
+// Why: a middleware cannot hand a typed value to a handler. The request
+// context is deliberately not an extension bag — there is no `ctx.user_data`,
+// no `locals`, no `map[string]any`, and there never will be (guardrail G-03).
+// So the only way for a handler to get a `User` is to derive it again.
 //
-// What Phase 3 will change: typed request-local storage lets `require_auth`
-// store the `User` it already built, and `current_user` becomes a lookup
-// instead of a revalidation. The PATTERN below does not change — only its cost.
+// WILL A LATER PHASE REMOVE THE COST? UNDECIDED — and this comment will not
+// promise it. There is no accepted decision for request-scoped typed storage.
+// ADR-004 reserves `web.state` for APPLICATION state (a database handle,
+// configuration) and not for per-request values, and the research finding C-6
+// argues the opposite way: the mechanisms other frameworks use for this
+// (Go's `context.WithValue`, Rust's `http::Extensions`) exist for type-erased
+// dynamically-keyed state crossing library boundaries, which this framework
+// does not have. Treat the cost below as PERMANENT until an ADR says otherwise.
 //
-// If your validation is expensive (a database round-trip, not the string
-// comparison used here), call `current_user` ONCE at the top of the handler and
-// pass the `User` down as an ordinary parameter. That is the workaround, and it
-// is a normal Odin thing to do.
+// THE WORKAROUND, which is what you should actually do: if your validation is
+// expensive — a database round-trip, not the string comparison used here —
+// call `current_user` ONCE at the top of the handler and pass the `User` down
+// as an ordinary parameter. That is a normal Odin thing to do, it costs
+// nothing, and it does not depend on a framework feature arriving.
 //
 // Run it from the repository root:
 //
