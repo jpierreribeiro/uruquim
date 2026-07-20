@@ -900,3 +900,62 @@ commands and outputs.
   is rejected. Trust policy becomes documented, tested security behaviour.
 - **Reversibility.** Tightening the charset later is HIGH; loosening or
   switching overlay↔accessor after applications read IDs is LOW.
+
+## ADR-028 — request-scoped typed state: does it exist at all?
+
+- **Status.** **PROPOSED** (opened 2026-07-20 by the Phase-3 planning pass).
+  Owned by WP37. **Nothing may assume an outcome until this is decided** — a
+  G-08 correction was already required because shipped documentation promised
+  one.
+
+- **Question.** Can a middleware hand a typed value to a handler? Today it
+  cannot, and the canonical auth pattern pays for it: `current_user`
+  REVALIDATES the token on every call, because there is nowhere to put the
+  `User` that `require_auth` already built.
+
+  This is **not** the question ADR-004 answered. ADR-004 accepted
+  `web.state(ctx, T)` for APPLICATION state — one `rawptr` + `typeid` on the
+  `App`, set before serving, for a database handle or configuration. Per-request
+  values have a different lifetime, a different owner and a different failure
+  mode, and conflating the two is exactly the error that produced the false
+  promise this ADR now exists to prevent.
+
+- **Options.**
+  **(A) No request-scoped state, permanently.** Ratify the revalidation cost.
+  The documented workaround — call `current_user` once at the top of the
+  handler and pass the `User` down as an ordinary parameter — becomes the
+  answer rather than a mitigation.
+  **(B) A small fixed `[N]{typeid, rawptr}` array** in request storage, typed
+  at access. Bounded, no map, no allocation. This is C-6's own fallback
+  phrasing: *"if extensibility is ever genuinely required"*.
+  **(C) A single typed slot for one application value**, mirroring the
+  WP19/WP23 header-overlay design: one slot, known capacity, one writer
+  ratified per phase, no general-purpose store.
+
+- **Recommendation. (A), and the burden of proof is on anyone proposing
+  otherwise.** Research finding C-6 examined the two mainstream mechanisms —
+  Go's `context.WithValue` (one heap allocation per value, a full `Request`
+  copy per middleware, O(depth) lookup) and Rust's `http::Extensions` (a boxed
+  `HashMap<TypeId, Box<dyn Any>>`) — and concluded that both exist for
+  type-erased, dynamically-keyed state crossing library boundaries, which
+  Uruquim does not have. Its conclusion is that struct fields in request
+  storage dominate both, and that this **supports G-03 rather than challenging
+  it**. Option (A) is also the only reversible one: adding a mechanism later is
+  a pure strengthening, while shipping one and withdrawing it breaks
+  applications.
+
+- **Strongest argument against (A).** The cost is real and it is paid by the
+  most common middleware there is. An application whose validation is a
+  database round-trip pays it per call, and the workaround — threading a
+  parameter through every procedure that needs the user — is exactly the
+  boilerplate a framework is supposed to remove. If a real application is
+  measured writing that thread through five call sites, (C) becomes serious.
+  **Evidence for (B) or (C) must be a real program that cannot be written
+  cleanly today, never a hypothetical.**
+
+- **Public impact.** (A) zero symbols. (B) and (C) add public surface, a
+  capacity-ledger row, a lifetime-ledger row, and a claim with a negative
+  control.
+
+- **Reversibility.** (A) → (B)/(C) is HIGH — a pure strengthening.
+  (B)/(C) → (A) is LOW once applications store values.
