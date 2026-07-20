@@ -60,6 +60,8 @@ bash -n "$URUQUIM_ROOT/build/check_wp21_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp22_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp23_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp24_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp25_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -824,6 +826,14 @@ bash "$URUQUIM_ROOT/build/check_wp3_mutations.sh"
 # and it should only ever be reached with every behavior already proven.
 echo "--- WP11 Phase-1 spec freeze (signatures, dependencies, evidence) ---"
 env URUQUIM_ODIN_BIN="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_phase1_freeze.sh"
+
+# WP25 — the PHASE-2 freeze. Phase 1 froze symbols, signatures and dependencies;
+# this one freezes the project's own SENTENCES: the claim ledger (every strong
+# promise carries a negative control and a stated non-guarantee), the lifetime
+# ledger, and the capacity ledger — including what this framework does NOT
+# bound. Prose has no compiler, and drifts while every test stays green.
+echo "--- WP25 Phase-2 freeze (claims, lifetimes, capacities) ---"
+bash "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
