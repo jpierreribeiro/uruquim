@@ -61,6 +61,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp22_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp23_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp24_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp25_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp26_bench.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
@@ -788,6 +789,34 @@ echo "--- WP23 public surface contract: request_id trust policy (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp23-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp23-public-surface"
+
+# WP26 — the benchmark harness. Phase 3 may not start without one (entry
+# condition E-3), and this step is what makes the instrument trustworthy.
+#
+# It asserts NO TIMING, on purpose. FINDING-A measured five different binaries
+# from an identical source tree, so code layout — and therefore branch
+# prediction and cache behaviour — varies between builds. A gate that failed on
+# a timing delta would fail randomly, and a gate that fails randomly gets
+# switched off. What it asserts is that the instrument is sound: percentiles
+# return observed values, the tolerance derivation is relative and needs more
+# than one run, the sweep covers the whole route table rather than route 0
+# forever, every benchmarked response is verified AND the verification is able
+# to fail, and per-dispatch allocation is exactly deterministic.
+#
+# The timings themselves come from `build/check_wp26_bench.sh`, which is run by
+# hand — it takes ~15 minutes — and recorded in planning/phase-2-baseline.md.
+echo "--- WP26 benchmark harness: the instrument, not the numbers (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp26-bench" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp26-bench"
+
+# The baseline runner must keep COMPILING even though the gate never runs it.
+# A measurement program that silently stopped building would be discovered at
+# the moment someone needed a baseline, which is the worst possible moment.
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" build "$URUQUIM_ROOT/tests/wp26-runner" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp26-runner"
+echo "PASS: the WP26 baseline runner still builds"
 
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never

@@ -89,6 +89,33 @@ that adds a symbol: `check_public_api.sh`, `check_phase1_freeze.sh`,
 plus `docs/ai-context.md`, and `CHANGELOG.md` — in ONE change, or the gate
 fails with a misleading cause.
 
+### FINDING-E — the timing noise floor is ±57.6%, and WP28 must plan around it
+
+**Added by WP26, 2026-07-20.** FINDING-A predicted the shape of this; it did not
+supply the magnitude, and the magnitude is worse than this plan assumed.
+
+Ten alternating repetitions of the **unchanged** Phase-2 dispatch path gave a
+derived p95 spread of **5,763 basis points — ±57.6%** at 5 routes. The full
+table is in [`planning/phase-2-baseline.md`](phase-2-baseline.md).
+
+Consequences, none of them optional:
+
+* **No timing-based regression gate is available at small cardinalities.** A
+  change would have to make dispatch more than half again as slow before this
+  machine could distinguish it from running the same binary twice. `WP26`'s gate
+  step therefore asserts **allocations and instrument soundness, and no timing
+  at all** — a consequence of the measurement, not a shortcut around it.
+* **Noise falls as cardinality rises**: 5,763 bp at 5 routes, 1,302 bp at
+  5,000, because the work grows while the jitter does not.
+* **WP28 may not be decided on 5- or 50-route timings.** A candidate that wins
+  at 5 routes by 20% has won nothing measurable. The cardinalities where this
+  instrument discriminates are **500 and 5,000**, and the shootout's conclusions
+  must come from there or be recorded as undecided. That is a stopping rule, and
+  it is now derived from data rather than asserted.
+* **The Phase-2 scan is linear and now has a number**: ~165 ns per registered
+  route, 1.8 µs at 5 routes rising to 826 µs at 5,000. WP28's candidates have
+  something concrete to beat.
+
 ### FINDING-D — the concept budget is now a measured number, and Phase 3 spends it
 
 WP25 re-ran the usage laboratory:
@@ -129,7 +156,7 @@ table.
 |---|---|---|
 | E-1 | Phase 2 frozen — ledger 46, `check_phase2_freeze.sh` green | ✅ met (`planning/phase-2-freeze.md`) |
 | E-2 | The full gate exits 0 on `main` | ✅ verified after the Phase-2 merges |
-| E-3 | A benchmark harness exists | ❌ **this is WP26 itself** — nothing else may start first |
+| E-3 | A benchmark harness exists | ✅ **met by WP26** — `tests/support/bench`, gate step, `planning/benchmark-methodology.md`, `planning/phase-2-baseline.md` |
 
 E-3 is the real gate. The skeleton lists "a benchmark harness exists" as an
 entry condition *and* as P3-1; it is a work package, and treating it as a
