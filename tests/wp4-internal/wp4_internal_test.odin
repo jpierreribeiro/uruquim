@@ -27,6 +27,13 @@
 #+private
 package web
 
+// WP33 NOTE. `Context_Internal.param` became a `Route_Params` — a fixed inline
+// array of captures plus a count — when the one-parameter bound was raised to
+// eight. These assertions therefore read `param.slot[0]` and `param.count`
+// instead of `param.value` and `param.found`. The PROPERTIES they pin are
+// unchanged; only the storage shape moved, which is exactly the freedom a
+// private slot exists to have.
+
 import "core:mem"
 import "core:slice"
 import "core:testing"
@@ -180,9 +187,9 @@ wp4_param_segment_is_captured_privately :: proc(t: ^testing.T) {
 	ctx: Context
 	wp4_run(&a, &ctx, .GET, "/users/42")
 
-	testing.expect(t, ctx.private.param.found, "the parameter must have been captured")
-	testing.expect_value(t, ctx.private.param.name, "id")
-	testing.expect_value(t, ctx.private.param.value, "42")
+	testing.expect(t, ctx.private.param.count > 0, "the parameter must have been captured")
+	testing.expect_value(t, ctx.private.param.slot[0].name, "id")
+	testing.expect_value(t, ctx.private.param.slot[0].value, "42")
 }
 
 @(test)
@@ -201,12 +208,12 @@ wp4_param_value_is_a_view_over_the_request_path :: proc(t: ^testing.T) {
 
 	ctx: Context
 	wp4_run(&a, &ctx, .GET, string(path))
-	testing.expect_value(t, ctx.private.param.value, "42")
+	testing.expect_value(t, ctx.private.param.slot[0].value, "42")
 
 	slice.fill(path, '#')
 	testing.expect(
 		t,
-		ctx.private.param.value != "42",
+		ctx.private.param.slot[0].value != "42",
 		"the captured parameter must be a view over the request path, not a copy",
 	)
 }
@@ -221,9 +228,9 @@ wp4_static_route_captures_no_parameter :: proc(t: ^testing.T) {
 	ctx: Context
 	wp4_run(&a, &ctx, .GET, "/health")
 
-	testing.expect(t, !ctx.private.param.found, "a static match captures nothing")
-	testing.expect_value(t, ctx.private.param.name, "")
-	testing.expect_value(t, ctx.private.param.value, "")
+	testing.expect(t, ctx.private.param.count == 0, "a static match captures nothing")
+	testing.expect_value(t, ctx.private.param.slot[0].name, "")
+	testing.expect_value(t, ctx.private.param.slot[0].value, "")
 }
 
 // ---------------------------------------------------------------------------
@@ -668,11 +675,11 @@ wp4_pattern_is_app_owned_and_survives_source_mutation :: proc(t: ^testing.T) {
 
 	testing.expect(
 		t,
-		ctx.private.param.found,
+		ctx.private.param.count > 0,
 		"the App must own its pattern copy; the route matched a mutated view",
 	)
-	testing.expect_value(t, ctx.private.param.name, "id")
-	testing.expect_value(t, ctx.private.param.value, "42")
+	testing.expect_value(t, ctx.private.param.slot[0].name, "id")
+	testing.expect_value(t, ctx.private.param.slot[0].value, "42")
 }
 
 @(test)
@@ -856,19 +863,27 @@ wp4_param_does_not_match_across_a_segment_boundary :: proc(t: ^testing.T) {
 // ---------------------------------------------------------------------------
 
 @(test)
-wp4_pattern_with_two_params_never_matches :: proc(t: ^testing.T) {
+// AMENDED BY WP33. This test used to register `/a/:first/:second` and assert it
+// never matched, because Phase 1 bounded a pattern at ONE parameter. That bound
+// is now `ROUTE_PARAM_MAX` (8), so a two-parameter pattern is ordinary and
+// matches — the change is deliberate, not an accident this test caught.
+//
+// The PROPERTY under test is unchanged and still worth pinning: a pattern past
+// the bound is uninterpretable, never matches, and specifically does not match
+// while quietly keeping the first few captures and throwing the rest away.
+// Only the number moved.
+wp4_pattern_past_the_param_bound_never_matches :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
 
-	get(&a, "/a/:first/:second", wp4_static_handler)
+	// Nine parameters, one past the eight-slot bound.
+	get(&a, "/:a/:b/:c/:d/:e/:f/:g/:h/:i", wp4_static_handler)
 
 	ctx: Context
-	wp4_run(&a, &ctx, .GET, "/a/x/y")
+	wp4_run(&a, &ctx, .GET, "/1/2/3/4/5/6/7/8/9")
 
-	// Not a handler call, and specifically not a match that quietly kept only
-	// `first` and threw `y` away.
 	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
-	testing.expect(t, !ctx.private.param.found, "an uninterpretable pattern captures nothing")
+	testing.expect(t, ctx.private.param.count == 0, "an uninterpretable pattern captures nothing")
 }
 
 @(test)
@@ -882,7 +897,7 @@ wp4_pattern_with_an_unnamed_param_never_matches :: proc(t: ^testing.T) {
 	wp4_run(&a, &ctx, .GET, "/users/42")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
-	testing.expect(t, !ctx.private.param.found)
+	testing.expect(t, ctx.private.param.count == 0)
 }
 
 @(test)
@@ -906,10 +921,14 @@ wp4_uninterpretable_pattern_does_not_contribute_to_allow :: proc(t: ^testing.T) 
 
 	// A pattern that can never match must not turn a 404 into a 405 that
 	// advertises a method which could never have served the request.
-	get(&a, "/a/:first/:second", wp4_noop_handler)
+	//
+	// AMENDED BY WP33: the uninterpretable pattern is now one PAST the
+	// eight-parameter bound rather than a two-parameter one, which WP33 made
+	// ordinary. The property is unchanged.
+	get(&a, "/:a/:b/:c/:d/:e/:f/:g/:h/:i", wp4_noop_handler)
 
 	ctx: Context
-	wp4_run(&a, &ctx, .DELETE, "/a/x/y")
+	wp4_run(&a, &ctx, .DELETE, "/1/2/3/4/5/6/7/8/9")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
 
@@ -939,8 +958,8 @@ wp4_uninterpretable_patterns_do_not_disturb_valid_ones :: proc(t: ^testing.T) {
 	ctx2: Context
 	wp4_run(&a, &ctx2, .GET, "/users/42")
 	testing.expect_value(t, string(ctx2.private.response.body), "param")
-	testing.expect_value(t, ctx2.private.param.name, "id")
-	testing.expect_value(t, ctx2.private.param.value, "42")
+	testing.expect_value(t, ctx2.private.param.slot[0].name, "id")
+	testing.expect_value(t, ctx2.private.param.slot[0].value, "42")
 
 	// And the still-valid GET route is what `Allow` reports.
 	ctx3: Context

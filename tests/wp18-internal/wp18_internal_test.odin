@@ -282,7 +282,7 @@ wp18_parametric_prefix_is_path_construction_not_an_error :: proc(t: ^testing.T) 
 }
 
 @(test)
-wp18_two_params_after_concatenation_never_match :: proc(t: ^testing.T) {
+wp18_a_parametric_prefix_now_captures_both :: proc(t: ^testing.T) {
 	a := app()
 	defer destroy(&a)
 
@@ -292,18 +292,33 @@ wp18_two_params_after_concatenation_never_match :: proc(t: ^testing.T) {
 	get(&r, "/posts", wp18_h_noop)
 	mount(&a, "/tenants/:id", &r)
 
-	// ":id" + ":post" = two params: the concatenated pattern is exactly what
-	// `pattern_classify` already refuses (WP4 D5), so it can never match — a
-	// half-captured match would silently discard a segment.
+	// AMENDED BY WP33, AND IT IS A BUG FIX RATHER THAN A RENAME.
+	//
+	// This test used to be `wp18_two_params_after_concatenation_never_match`
+	// and asserted a 404. `":id" + ":post"` concatenated to a two-parameter
+	// pattern, which `pattern_classify` refused under Phase 1's one-parameter
+	// bound — so MOUNTING A ROUTER UNDER A PARAMETRIC PREFIX was silently
+	// broken: every route inside it became unreachable, with no diagnostic.
+	//
+	// WP33 raised the bound to eight, so the concatenated pattern is ordinary
+	// and both captures are available. The old expectation was correct for the
+	// old bound and is deliberately reversed, not accidentally broken.
 	ctx: Context
 	wp18_run(&a, &ctx, .GET, "/tenants/acme/posts/7")
-	testing.expect_value(t, ctx.private.response.status, Status.Not_Found)
+	testing.expect_value(t, ctx.private.response.status, Status.OK)
+	testing.expect_value(t, ctx.private.param.count, 2)
+	testing.expect_value(t, ctx.private.param.slot[0].name, "id")
+	testing.expect_value(t, ctx.private.param.slot[0].value, "acme")
+	testing.expect_value(t, ctx.private.param.slot[1].name, "post")
+	testing.expect_value(t, ctx.private.param.slot[1].value, "7")
 	driver_cleanup(&ctx)
 
-	// The router's other route — one param total — still serves.
+	// The router's other route still serves, with the prefix's own capture.
 	ctx2: Context
 	wp18_run(&a, &ctx2, .GET, "/tenants/acme/posts")
 	testing.expect_value(t, ctx2.private.response.status, Status.No_Content)
+	testing.expect_value(t, ctx2.private.param.count, 1)
+	testing.expect_value(t, ctx2.private.param.slot[0].value, "acme")
 	driver_cleanup(&ctx2)
 }
 

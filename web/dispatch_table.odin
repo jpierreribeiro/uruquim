@@ -88,6 +88,34 @@ Route_Param :: struct {
 	found: bool,
 }
 
+// ROUTE_PARAM_MAX is how many `:param` segments one pattern may declare.
+//
+// WHAT HAPPENS WHEN IT IS FULL, because the capacity ledger does not accept a
+// bound without one: a pattern declaring MORE than this is marked INVALID at
+// registration, exactly as a two-param pattern was in Phase 1. It never
+// matches, never contributes to an `Allow` value, and cannot silently behave
+// like a supported pattern. Fail-closed, and the same answer WP4 already gave.
+//
+// Eight is well past anything a REST path uses — `/orgs/:org/repos/:repo/
+// issues/:number` is three. The number is a compile-time bound on request-local
+// storage, so raising it costs bytes on every Context and lowering it after
+// anyone ships a route would turn that route into a 404.
+@(private)
+ROUTE_PARAM_MAX :: 8
+
+// Route_Params is the fixed inline capture set for one request.
+//
+// C-6's convergent design, and the reason WP33 exists as a work package rather
+// than a patch: a small fixed array of VIEWS in request-local storage. Not a
+// map, not an allocation, not a bag. G-03 is the boundary — this adds capacity
+// to an existing private slot, it does not add a general-purpose keyed store,
+// and `web.path` stays the one canonical accessor (G-01).
+@(private)
+Route_Params :: struct {
+	slot:  [ROUTE_PARAM_MAX]Route_Param,
+	count: int,
+}
+
 // ALLOW_HEADER_NAME is the exact 405 header name. Not `allow`, not `ALLOW`.
 @(private)
 ALLOW_HEADER_NAME :: "Allow"

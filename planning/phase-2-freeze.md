@@ -282,11 +282,16 @@ belong to the transport.
 | effective request ID | 64 bytes | `web/request_id.odin` |
 | poison diagnostic detail | `MW_POISON_DETAIL_MAX` (256) | `web/middleware.odin` |
 | request body | **4 MiB**, fixed, not configurable until Phase 3 | `web/extract.odin` |
+| path parameters per pattern | `ROUTE_PARAM_MAX` (8) — **added by WP33** | `web/dispatch_table.odin` |
 
 Each of these states what it does when full: the logger **truncates and says
 so**; the envelope escaper **stops on a unit boundary**; the body limit
 **answers 413**; the poison diagnostic **truncates the pattern, never the
-approved sentence**.
+approved sentence**; and a pattern declaring **more** parameters than
+`ROUTE_PARAM_MAX` is marked **invalid at registration** — it never matches and
+never contributes to an `Allow` value, which is the fail-closed answer WP4
+already gave to a two-parameter pattern, moved to a higher bound rather than
+removed.
 
 ### Dynamic at registration, then frozen
 

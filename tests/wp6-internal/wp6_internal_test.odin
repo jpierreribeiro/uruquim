@@ -776,7 +776,13 @@ wp6_extractor_errors_keep_field_and_gain_content_type :: proc(t: ^testing.T) {
 	ctx: Context
 	defer response_destroy(&ctx.private.response)
 
-	ctx.private.param = Route_Param{name = "id", value = "banana", found = true}
+	// WP33: captures live in a fixed inline array plus a count.
+
+
+	ctx.private.param.slot[0] = Route_Param{name = "id", value = "banana", found = true}
+
+
+	ctx.private.param.count = 1
 	_, ok_parse := path_int(&ctx, "id")
 	testing.expect(t, !ok_parse)
 

@@ -66,7 +66,7 @@ Context_Internal :: struct {
 	// route was static. `value` is a view over the request path and `name` a
 	// view over the App-owned pattern; neither is copied, and neither survives
 	// the request. WP5 exposes it through `web.path`/`web.path_int`.
-	param: Route_Param,
+	param: Route_Params,
 
 	// WP4 — request-local storage for the 405 `Allow` header.
 	//

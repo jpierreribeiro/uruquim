@@ -110,11 +110,15 @@ parse_int_strict :: proc(s: string) -> (value: int, ok: bool) {
 // It allocates nothing and copies nothing: the result is the same view over the
 // request path that `route_match` produced.
 path :: proc(ctx: ^Context, name: string) -> string {
-	param := ctx.private.param
-	if !param.found || param.name != name {
-		return ""
+	// WP33: a linear scan over at most ROUTE_PARAM_MAX inline slots. Not a map
+	// — at this size a scan is faster than a hash, and a per-request map would
+	// allocate, which is the thing C-6's design exists to avoid.
+	for i in 0 ..< ctx.private.param.count {
+		if ctx.private.param.slot[i].name == name {
+			return ctx.private.param.slot[i].value
+		}
 	}
-	return param.value
+	return ""
 }
 
 // path_int returns a path parameter parsed as an integer.

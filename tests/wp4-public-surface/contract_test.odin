@@ -406,18 +406,20 @@ wp4_unsupported_pattern_never_routes :: proc(t: ^testing.T) {
 
 	before := wp4_unsupported_hits
 
-	// At most ONE :param per pattern in Phase 1. A pattern with two is not
-	// rejected at registration — Phase 1 freezes no registration-error API —
-	// but it must never match, and never make the path look "known".
-	web.get(&app, "/a/:first/:second", wp4_unsupported_handler)
+	// AMENDED BY WP33. Phase 1 bounded a pattern at ONE `:param` and this test
+	// used two; the bound is now eight, so two is ordinary. The property is
+	// unchanged and still worth pinning at the NEW bound: a pattern past it is
+	// not rejected at registration — no registration-error API is frozen — but
+	// it must never match, and never make the path look "known".
+	web.get(&app, "/:a/:b/:c/:d/:e/:f/:g/:h/:i", wp4_unsupported_handler)
 
-	res := web.test_request(&app, .GET, "/a/x/y")
+	res := web.test_request(&app, .GET, "/1/2/3/4/5/6/7/8/9")
 	testing.expect_value(t, res.status, web.Status.Not_Found)
 	testing.expect_value(t, wp4_unsupported_hits - before, 0)
 
 	// Not a 405 either: a route that can never match must not advertise a
 	// method that could never have served the request.
-	other := web.test_request(&app, .DELETE, "/a/x/y")
+	other := web.test_request(&app, .DELETE, "/1/2/3/4/5/6/7/8/9")
 	testing.expect_value(t, other.status, web.Status.Not_Found)
 }
 
