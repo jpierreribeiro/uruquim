@@ -315,6 +315,16 @@ dispatch :: proc(a: ^App, ctx: ^Context) {
 		return
 	}
 
+	// WP31b — the path policy, BEFORE matching and before the chain. A path
+	// whose meaning depends on who is normalising is refused once, at the
+	// boundary, so no route and no middleware ever acts on an ambiguous one
+	// (`planning/phase-3-spec.md` §1). It is not a framework failure and emits
+	// no event, exactly like a 404.
+	if path_rejected(ctx.request.path) {
+		bad_request(ctx, PATH_REJECT_MESSAGE)
+		return
+	}
+
 	entry, param, found := route_lookup(a, ctx.request.method, ctx.request.path)
 	if found {
 		ctx.private.param = param
