@@ -276,6 +276,20 @@ show_invoice :: proc(ctx: ^web.Context) {
 	web.ok(ctx, invoice)
 }
 
+// fragment: phase2/logger-use
+// The one built-in middleware (WP22). Opt-in, and subject to the ordinary
+// ADR-019 rule: every `use` comes before the first route.
+logging_app :: proc() -> web.App {
+	app := web.app()
+	web.use(&app, web.logger)
+	web.get(&app, "/orders/:id", show_order)
+	return app
+}
+
+show_order :: proc(ctx: ^web.Context) {
+	web.ok(ctx, User{id = 1, name = "Ada"})
+}
+
 // The fixtures are compiled as a test package, so one live assertion keeps the
 // runner honest about actually having built them.
 @(test)
@@ -290,4 +304,10 @@ wp10_fixtures_compile_and_run :: proc(t: ^testing.T) {
 	res := web.test_request(&app, .GET, "/users/me")
 	testing.expect_value(t, res.status, web.Status.OK)
 	testing.expect_value(t, res.body, "pong")
+
+	// The documented logger fragment builds a working application.
+	logging := logging_app()
+	defer web.destroy(&logging)
+	logged := web.test_request(&logging, .GET, "/orders/7")
+	testing.expect_value(t, logged.status, web.Status.OK)
 }

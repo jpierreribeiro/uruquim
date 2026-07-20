@@ -38,8 +38,8 @@ a standardized JSON envelope.
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available yet** — do not emit any of it: the built-in logger and
-request-ID middleware (later Phase-2 work packages);
+**Not available yet** — do not emit any of it: the
+request-ID middleware (a later Phase-2 work package);
 configurable limits and read/write timeouts (Phase 3); graceful shutdown with
 a deadline (Phase 4). Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
@@ -57,11 +57,11 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **42** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **43** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
-`header`/`bearer_token` and `observe`/`Framework_Event`/`Framework_Error`
-from Phase 2). The test-support API is a separate ledger of exactly **2**.
-Union: **44**. Do not fold them together and do not invent a third form.
+`header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error` and
+`logger` from Phase 2). The test-support API is a separate ledger of exactly
+**2**. Union: **45**. Do not fold them together and do not invent a third form.
 
 ## Application
 
@@ -380,6 +380,26 @@ first response survives). A second `next()` is a no-op; the handler runs
 exactly once. Middleware also observe automatic `404`/`405` responses.
 `docs/middleware.md` has the full contract.
 
+**The one built-in middleware is `web.logger`.** It is opt-in — there is no
+default-on logging — and writes one `.Info` line per request through
+`context.logger`:
+
+<!-- fragment: phase2/logger-use -->
+```odin
+web.use(&app, web.logger)      // before the first route, like every use
+```
+
+```text
+uruquim: GET /orders/:id 200   method, REGISTERED PATTERN, committed status
+uruquim: GET - 404             a miss has no pattern: `-`, never the raw path
+uruquim: GET /silent -         nothing was committed while the logger watched
+```
+
+It never logs the raw path, the query string, a header, a body byte, or a
+captured parameter value. A too-long route field is cut and marked
+`...[truncated]`, never grown and never silently dropped. Do not tell a user to
+configure its level, sink or format: it has none, by design.
+
 ## Routers
 
 ```text
@@ -471,7 +491,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-42 application symbols.
+43 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
@@ -549,8 +569,7 @@ only so an agent recognizes the names and refuses them.
 
 <!-- phase: 2; unavailable -->
 ```odin
-// Later Phase-2 work packages — unavailable today.
-web.use(&app, web.logger)      // the built-in logger does not exist yet
+// A later Phase-2 work package — unavailable today.
 web.use(&app, web.request_id)  // the request-ID middleware does not exist yet
 ```
 
@@ -575,8 +594,8 @@ Other names reserved for later phases, none of which exist today:
 
 Phase boundaries in one line each:
 
-- **Phase 2** — middleware, route organisation, header lookup and the typed
-  error observer (all delivered); still to come: the built-in logger and
+- **Phase 2** — middleware, route organisation, header lookup, the typed
+  error observer and the built-in `logger` (all delivered); still to come: the
   request-ID middleware. No panic recovery — Odin has no recoverable panic
   (ADR-020).
 - **Phase 3** — route groups, typed application state, configurable limits and

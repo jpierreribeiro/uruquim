@@ -57,6 +57,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp18_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp19_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp20_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp21_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp22_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -724,6 +725,35 @@ timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp21-socket" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp21-socket" ||
   fail "the WP21 socket fault-behaviour contract did not pass within the timeout"
+
+# ---------------------------------------------------------------------------
+# WP22 — THE `logger` MIDDLEWARE (application ledger 42 -> 43).
+#
+# The line buffer, its bounds, the escaper and the commit-guard helper are all
+# package-private, so the internal half runs in a THROWAWAY package exactly
+# like WP2-WP21.
+# ---------------------------------------------------------------------------
+echo "--- WP22 logger, internal behavior: the fixed buffer and its truncation contract (throwaway package) ---"
+URUQUIM_WP22_TMP="$(mktemp -d -t uruquim-wp22-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP22_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP22_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp22-internal/*.odin "$URUQUIM_WP22_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP22_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp22-internal"
+rm -rf "$URUQUIM_WP22_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP22_TMP" || fail "the throwaway WP22 internal-test package was not removed"
+echo "PASS: WP22 internal tests ran against the real sources; throwaway package removed"
+
+# WP22 public surface — an EXTERNAL consumer of the logged LINE. For this one
+# component the output IS the contract, so the suite asserts the exact bytes:
+# the route field is the registered pattern and never the path, the status is
+# the committed one or `-`, and no query, header or body byte ever appears.
+echo "--- WP22 public surface contract: web.logger and the bytes it writes (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp22-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp22-public-surface"
 
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never

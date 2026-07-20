@@ -107,6 +107,93 @@ is exactly the hole an attacker probes — so they are not invisible.
 a miss the chain runs, nothing is committed, and the driver's `500`
 finalization applies, as always under `bare()`.
 
+## `web.logger` — the one built-in middleware
+
+`web.logger` writes exactly one line per request to `context.logger`, at
+`.Info` level, after the rest of the chain has run. It is **opt-in**:
+
+<!-- fragment: phase2/logger-use -->
+```odin
+app := web.app()
+web.use(&app, web.logger)          // before the first route, like every use
+web.get(&app, "/orders/:id", show_order)
+```
+
+The line:
+
+```
+uruquim: GET /orders/:id 200       a routed request
+uruquim: GET - 404                 a miss: no pattern exists, so none is shown
+uruquim: GET /silent -             nothing was committed while the logger watched
+```
+
+Three fields, and the omissions are the design:
+
+- **the method**, or `-` for a method outside the ratified set;
+- **the registered route pattern** — never the raw path. On a miss there is no
+  pattern, so the field is `-`, and it does **not** fall back to the path. The
+  traffic most worth logging is exactly the traffic whose path you least want
+  to echo, and unbounded cardinality breaks whatever consumes the log. This is
+  the same rule `Framework_Event` follows;
+- **the committed status**, or `-`.
+
+**It never logs the query string, any header name or value, any body byte, or
+a captured path-parameter value.** That is a contract, asserted on the exact
+bytes of the line in `tests/wp22-public-surface/`, not a description of current
+behaviour.
+
+**Misses are logged.** `logger` is an ordinary app-level middleware, so it
+observes 404s and 405s through the miss chain. A logger blind to unmatched
+traffic is the hole an attacker probes.
+
+### Why the status can be `-`
+
+The line is written **after `next` returns**, which is what makes the status a
+reading rather than a guess. The consequence is stated rather than hidden: when
+a handler commits nothing, the driver finalizes the standard 500 **after
+dispatch returns** — after the chain has unwound past the logger — so the
+logger never saw it and prints `-`. Printing `500` there would be the framework
+reporting a response it did not watch being sent. That failure reaches
+`web.observe` instead, which is the channel that does see it.
+
+### Truncation is announced, not silent
+
+The line is composed in a fixed stack buffer. A route pattern too long for the
+field is cut on an escape boundary and marked:
+
+```
+uruquim: GET /aaaa…aaa...[truncated] 200
+```
+
+The status still follows the mark, so a truncated pattern never costs you the
+outcome of the request. The two silent alternatives are both refused on
+purpose: growing the buffer would re-import the per-request allocation the
+fixed buffer exists to avoid, and dropping the line would make the logger lie
+by omission about traffic it saw.
+
+CR, LF, backslash and control bytes in a pattern are **escaped** (`\r`, `\n`,
+`\\`, `\x09`), so a pattern can never forge an extra log record.
+
+### Cost
+
+- **Zero when unused.** An application that never names `web.logger` links
+  **zero** logger symbols — proven with `nm` in
+  `build/check_wp22_controls.sh`, against a positive control (an application
+  that does use it links six). Roughly 2.8 KiB of code when you do use it.
+- **No imports.** Not `core:log` (measured at ~37 KiB added to *every*
+  application, referenced or not — Odin links an imported package whether or
+  not anything uses it), and not `core:fmt`. It writes through the
+  `context.logger` your application already has and encodes its one integer by
+  hand.
+- **No allocation.** One fixed-size stack buffer per logged request.
+
+### What it is not
+
+No levels, no sinks, no sampling, no structured fields, no latency
+measurement. Those are Phase-4 observability. A log ring, queue or drop policy
+is specifically **not** here: building one now would put an unbounded queue
+behind a bounded-buffer claim.
+
 ## Costs, stated plainly
 
 - Dispatch through a middleware chain allocates **zero** bytes; chains are
@@ -130,5 +217,4 @@ finalization applies, as always under `bare()`.
   page, nested inside the app's globals (outermost first).
 - **No recovery middleware, ever.** Odin has no recoverable panic; a faulting
   handler aborts the process (ADR-020). Run under a supervisor.
-- **No built-in catalog yet.** The logging and request-ID middleware are later
-  Phase-2 work packages.
+- **No request-ID middleware yet.** It is a later Phase-2 work package.

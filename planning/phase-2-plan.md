@@ -786,6 +786,40 @@ symbols.**
   are Phase-4 observability, and building them here would put an unbounded
   queue behind a "bounded buffer" claim.
 
+### Amendment 1 (2026-07-20, WP22) — "byte-identical binary" is NOT TESTABLE; the claim is the SYMBOL COUNT
+
+The bullet above asks that an application which never references `web.logger`
+have a binary "byte-identical to WP17's baseline". **That property cannot be
+tested on the pinned toolchain, and the requirement is withdrawn** — replaced
+by a stronger-in-practice one that can be.
+
+**The measurement.** Five consecutive builds of an *identical, unmodified*
+source tree produced five *different* binaries: 876,304 / 876,352 / 876,352 /
+876,368 / 876,360 bytes, five distinct md5 sums. The compiler does not build
+reproducibly here — the vendored `nbio` emits polymorphic instantiations whose
+mangled parameter names vary from run to run (`_poly_cb:proc(C:$proc(_:^nbio::
+Operation,...))` versus `...(op:^nbio::Operation,conn:...)`). Byte-identity
+therefore fails for a tree compared against **itself**, so a gate asserting it
+would flake rather than guard.
+
+**What ships instead**, in `build/check_wp22_controls.sh` control 7: `nm` over
+two real consumers. An application that never names `web.logger` links
+**zero** symbols from `web/logger.odin`, and — the positive control, without
+which a typo in the pattern would make the zero-assertion vacuous — an
+application that *does* use it links **six**. The count is stable: 0 across all
+five rebuilds above. The symbol pattern must match BOTH `web::logger` (the
+public entry) and `web::[logger.odin]::*` (the helpers); an earlier version
+matched only the file-qualified form and would have missed a regression that
+linked the public procedure while dead-stripping its helpers.
+
+**The general lesson, for WP23-WP25.** "Byte-identical binary" is not a
+provable claim in this project and must not be written into another work
+package. Where a phases document or plan says it, read it as "links zero
+symbols, measured with a positive control" — and if a future claim needs
+reproducible builds, that is its own work package, not a line item inside
+another one. This is the "measure instead of assert" rule catching a
+requirement the plan itself had asserted.
+
 ---
 
 ## WP23 — `request_id` middleware and its trust policy
