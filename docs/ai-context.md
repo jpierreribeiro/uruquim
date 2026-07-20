@@ -56,12 +56,12 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **44** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **45** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
-`logger` and `request_id` from Phase 2). The test-support API is a separate
-ledger of exactly **2**. Union: **46**. Do not fold them together and do not
-invent a third form.
+`logger` and `request_id` from Phase 2, and `route` from Phase 3). The
+test-support API is a separate ledger of exactly **2**. Union: **47**. Do not
+fold them together and do not invent a third form.
 
 ## Application
 
@@ -138,6 +138,32 @@ path exists under another method -> 405 + Allow, {"error":{"code":"method_not_al
 `Allow` lists only the methods registered for that path, always in the order
 `GET, POST, PUT, PATCH, DELETE`, comma-and-space separated, with no duplicates.
 
+### Route identity
+
+```text
+route(ctx) -> string    the REGISTERED PATTERN, or "" when nothing matched
+```
+
+<!-- fragment: phase3/route-identity -->
+```odin
+by_route :: proc(ctx: ^web.Context) {
+	// "/users/:id" — never "/users/42". `record_hit` is YOUR code.
+	record_hit(web.route(ctx))
+	web.next(ctx)
+}
+```
+
+`web.route(ctx)` returns the pattern the request matched, so `/users/:id` and
+never `/users/42`. Use it — not `ctx.request.path` — to label metrics, logs or
+spans: route identity must be **low-cardinality**, and a path-valued label
+creates one time series per id and puts user data in a dashboard.
+
+A mounted route reports the composed pattern (`/api/users/:id`). A `404` or a
+`405` reports `""`, because no route ran; treat that as the "unmatched" bucket.
+The result is a view over App-owned storage and stays valid until `destroy` —
+the one value reachable from a `^Context` that outlives its request. It is the
+same string `web.Framework_Event.route` carries, by design and by test.
+
 A method outside the `Method` set arrives as `.UNKNOWN` and follows the same
 404/405 rules. It never produces a 501.
 
@@ -164,7 +190,8 @@ logs it and sends `500`. HTTP has no zero status.
 ## Request
 
 `ctx.request` is the only public request surface — a `web.Request` value. There
-is no `ctx.response`, no `ctx.params` and no `ctx.route`.
+is no `ctx.response`, no `ctx.params` and no `ctx.route` **field** — route
+identity is read with `web.route(ctx)`, below.
 
 <!-- pseudocode: the Request field list -->
 ```odin
@@ -514,7 +541,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-44 application symbols.
+45 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

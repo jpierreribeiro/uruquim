@@ -328,4 +328,41 @@ wp10_fixtures_compile_and_run :: proc(t: ^testing.T) {
 	defer web.destroy(&correlated)
 	tagged := web.test_request(&correlated, .GET, "/orders/7")
 	testing.expect_value(t, tagged.status, web.Status.OK)
+
+	// The documented route-identity fragment records the PATTERN. If it ever
+	// recorded the path, this is where the documentation would go red — the
+	// fragment claims "/users/:id, never /users/42" in those words.
+	metrics := metrics_app()
+	defer web.destroy(&metrics)
+	route_hits = 0
+	route_last = ""
+	labelled := web.test_request(&metrics, .GET, "/users/42")
+	testing.expect_value(t, labelled.status, web.Status.OK)
+	testing.expect_value(t, route_hits, 1)
+	testing.expect_value(t, route_last, "/users/:id")
+}
+
+// fragment: phase3/route-identity
+// WP34. The label is the PATTERN — `/users/:id`, never `/users/42` — because
+// route identity keyed on the path is one time series per id, and puts user
+// data in a dashboard. `record_hit` is the APPLICATION's code, not a framework
+// symbol: the framework supplies the identity and nothing else.
+route_hits: int
+route_last: string
+
+record_hit :: proc(pattern: string) {
+	route_hits += 1
+	route_last = pattern
+}
+
+by_route :: proc(ctx: ^web.Context) {
+	record_hit(web.route(ctx))
+	web.next(ctx)
+}
+
+metrics_app :: proc() -> web.App {
+	app := web.app()
+	web.use(&app, by_route)
+	web.get(&app, "/users/:id", ping)
+	return app
 }

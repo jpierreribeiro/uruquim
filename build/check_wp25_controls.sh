@@ -11,7 +11,8 @@
 #   3  the unbounded column is emptied      -> the freeze gate MUST reject
 #   4  "the framework is bounded" in a doc  -> the freeze gate MUST reject
 #   5  the usage-lab finding is softened    -> the freeze gate MUST reject
-#   6  the ledger counts drift from the API -> the freeze gate MUST reject
+#   6  the recorded Phase-2 total is restated  -> the freeze gate MUST reject
+#   6b the delta no longer adds up to it       -> the freeze gate MUST reject
 #   7  POSITIVE: the real tree freezes, and the whole mutation suite passes
 #
 # CONTROL 4 IS THE ONE THE OWNER ASKED FOR BY NAME (docket D-2): "bounded" must
@@ -161,10 +162,15 @@ PYEOF
 assert_mutated "usage-lab finding softened" "$T/$URUQUIM_FREEZE_DOC" "$H"
 must_reject "$T" "5: the usage-laboratory finding is softened" "finding"
 
-# --- 6. the ledger counts drift from the API ---------------------------------
-# The freeze document restates counts that live in check_public_api.sh. This
-# control proves the gate reads the CANONICAL source rather than trusting the
-# document to agree with itself.
+# --- 6. the recorded Phase-2 total is restated -------------------------------
+# AMENDED BY WP34, and the reason belongs here. The gate used to compare this
+# table against the LIVE ledger count, and this control proved it. That was
+# right for as long as no phase grew the ledger after Phase 2 — and wrong the
+# moment one did, because 32 + 12 = 44 is what Phase 2 FROZE, a historical fact
+# that must not be edited to track Phase 3. The gate now pins the frozen totals,
+# checks the table's own arithmetic, and separately requires the live ledger not
+# to have SHRUNK below them. The mutation is unchanged; only the sentence it
+# must provoke is.
 T="$(tree_copy drift)"
 assert_freeze_green "$T" "6: ledger drift"
 H="$(md5sum "$T/$URUQUIM_FREEZE_DOC" | cut -d' ' -f1)"
@@ -178,7 +184,26 @@ wrong = "| application | 32 | +%s | **%d** |" % (m.group(1), int(m.group(2)) + 1
 open(p, 'w').write(s[:m.start()] + wrong + s[m.end():])
 PYEOF
 assert_mutated "ledger drift" "$T/$URUQUIM_FREEZE_DOC" "$H"
-must_reject "$T" "6: the ledger counts drift from the API" "canonical application ledger"
+must_reject "$T" "6: the recorded Phase-2 total is restated" "records the ledger Phase 2 froze"
+
+# --- 6b. the delta is edited but the total is not (WP34) ---------------------
+# The subtler half of the same defect, and the one a restated-total check alone
+# would miss: "32 | +11 | **44**" still shows the right answer while no longer
+# adding up. A table that does not survive its own arithmetic is not evidence.
+T="$(tree_copy arithmetic)"
+assert_freeze_green "$T" "6b: broken arithmetic"
+H="$(md5sum "$T/$URUQUIM_FREEZE_DOC" | cut -d' ' -f1)"
+python3 - "$T/$URUQUIM_FREEZE_DOC" <<'PYEOF'
+import re, sys
+p = sys.argv[1]
+s = open(p).read()
+m = re.search(r"\| application \| 32 \| \+(\d+) \| \*\*(\d+)\*\* \|", s)
+assert m, "pattern not found"
+wrong = "| application | 32 | +%d | **%s** |" % (int(m.group(1)) - 1, m.group(2))
+open(p, 'w').write(s[:m.start()] + wrong + s[m.end():])
+PYEOF
+assert_mutated "broken arithmetic" "$T/$URUQUIM_FREEZE_DOC" "$H"
+must_reject "$T" "6b: the delta no longer adds up to the total" "arithmetic does not hold"
 
 # --- 7. POSITIVE control -----------------------------------------------------
 # Controls 1-6 are all satisfied by deleting the freeze document. This is the

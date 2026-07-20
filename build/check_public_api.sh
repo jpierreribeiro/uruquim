@@ -115,6 +115,7 @@ query
 query_int
 query_int_or
 request_id
+route
 router
 serve
 text
@@ -446,7 +447,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 44 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id)"
+echo "public API contract: application ledger is exactly 45 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id + WP34 route)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -490,16 +491,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 44; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 44 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error + WP22 logger + WP23 request_id)"
+if test "$URUQUIM_APP_COUNT" -ne 45; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 45 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error + WP22 logger + WP23 request_id + WP34 route)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 46; then
-  fail "exported union is $URUQUIM_UNION, not 46 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 47; then
+  fail "exported union is $URUQUIM_UNION, not 47 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 46"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 47"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -852,6 +853,58 @@ test -f "$URUQUIM_DISPATCH_TABLE" ||
 test -f "$URUQUIM_DISPATCH_MATCH" ||
   fail "web/dispatch_match.odin is missing; WP4 has not created the matcher"
 
+# ---------------------------------------------------------------------------
+# 8b. WP34 route identity — THE PATTERN, NEVER THE PATH.
+#
+# IT RUNS HERE, after the two presence checks above, and the ordering is load-
+# bearing: the assignment it inspects lives in the matcher, so a MISSING matcher
+# would otherwise trip this check's vacuity guard first and report a redaction
+# failure for a file that is simply absent. A gate that diagnoses the wrong
+# thing is worse than one that diagnoses late (WP16 control: 'missing WP4
+# dispatch file' must be rejected for its own reason).
+#
+# `web.route` hands an application the same low-cardinality string
+# `Framework_Event.route` carries, and it is the same constraint (C-2, the
+# OpenTelemetry `http.route` rule) wearing a different name: a metric or a log
+# label keyed on `/users/42` has one time series per user id, and it puts a user
+# identifier into a dashboard nobody meant to put it in.
+#
+# The check above keeps the EVENT free of request-derived strings. This one
+# keeps the ACCESSOR honest, because the two could otherwise drift apart while
+# both look correct — one procedure returning the pattern and another quietly
+# returning the path is exactly the drift a single-name guardrail (G-01) exists
+# to prevent.
+#
+# Three assertions, in the order they can fail:
+#
+#   * the accessor's shape is exactly the ratified one;
+#   * it reads the private route slot and NOTHING else — a body that reached
+#     `ctx.request.path` would compile, pass every behavioural test that only
+#     checks static routes, and leak on the first parametric one;
+#   * every WRITE to that slot is the matched entry's PATTERN. The redaction
+#     lives at the assignment; an accessor cannot be more honest than the value
+#     it returns.
+# ---------------------------------------------------------------------------
+grep -qxF 'route :: proc(ctx: ^Context) -> string {' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "the ratified web.route signature changed; it takes the Context and returns one string (WP34)"
+
+URUQUIM_ROUTE_BODY="$(awk '/^route :: proc\(ctx: \^Context\) -> string \{/{f=1;next} /^\}/{f=0} f' \
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" | grep -vE '^[[:space:]]*$')"
+if test "$URUQUIM_ROUTE_BODY" != "	return ctx.private.route"; then
+  echo "--- actual web.route body ---" >&2
+  echo "${URUQUIM_ROUTE_BODY:-<empty>}" >&2
+  fail "web.route must return ctx.private.route and nothing else. It returns the REGISTERED PATTERN, never the request path: a path-valued route identity is unbounded cardinality and carries request bytes into whatever an application labels with it (C-2, the same rule Framework_Event is held to)."
+fi
+
+URUQUIM_ROUTE_WRITES="$(grep -nE 'ctx\.private\.route[[:space:]]*=' <<<"$URUQUIM_WEB_CODE" || true)"
+test -n "$URUQUIM_ROUTE_WRITES" ||
+  fail "nothing assigns ctx.private.route; the redaction check below would be vacuous"
+if grep -vE 'ctx\.private\.route[[:space:]]*=[[:space:]]*entry\.pattern[[:space:]]*$' \
+  <<<"$URUQUIM_ROUTE_WRITES"; then
+  fail "ctx.private.route is assigned something other than the matched entry's pattern. Route identity is the REGISTERED PATTERN — '/users/:id', never '/users/42' — and this is the assignment that decides it (WP34, C-2)."
+fi
+echo "public API contract: web.route returns the registered pattern; every write to the slot is entry.pattern"
+
 URUQUIM_WP4_CODE="$(sed -E 's://.*$::' "$URUQUIM_DISPATCH_TABLE" "$URUQUIM_DISPATCH_MATCH")"
 
 # 9a. EVERY declaration the two WP4 files add is package-private. The route
@@ -1185,7 +1238,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 44 + test-support ledger 2 = union 46"
+echo "public API contract: application ledger 45 + test-support ledger 2 = union 47"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"

@@ -733,6 +733,65 @@ at the same depth before anything reads it.
   loosened later: pattern-to-path is invisible in a type signature and
   visible in an operator's logs.
 
+**WP34 DONE, 2026-07-20 — `web/route_identity.odin`,
+`tests/wp34-public-surface`, Amendment 10 of `planning/phase-1-freeze.md`.**
+`route :: proc(ctx: ^Context) -> string`, **+1 symbol, ledger 44 → 45** (union
+47). Approved in advance by §2b under the ADR-029 delegation; the amendment
+records that authority in those words, because an amendment that cannot say who
+authorised it is not evidence.
+
+**The redaction rule became a gate assertion, as the plan required.**
+`build/check_public_api.sh` §8b pins the accessor's shape, requires its body to
+be exactly `return ctx.private.route`, and requires **every** write to that slot
+to be `entry.pattern`. The third is the one that matters: a behavioural test can
+only check the routes someone thought to write, while the assertion checks the
+assignment where the decision is made. It sits beside the §8 assertion that
+keeps `Framework_Event` free of request-derived strings — the pair exists
+because one procedure returning the pattern while another quietly returns the
+path is exactly how a redaction rule rots.
+
+**G-01 is tested, not asserted in prose.** `web.route(ctx)` and
+`Framework_Event.route` must be the same string, and a test fails if they ever
+diverge. That is why the name is `route` and not `route_pattern`.
+
+**OQ-18 CLOSED.** It called a public accessor FUTURE with no justifying use
+case; the use case arrived with WP20's observer, which gave the identity to an
+observer while leaving the application that owns the request unable to obtain
+it.
+
+**The six-file ritual, rehearsed once as intended, and it needed a seventh and
+an eighth file:** `build/check_public_api.sh`, `build/phase1-public-signatures.txt`,
+`build/check_phase1_freeze.sh`, `planning/phase-1-freeze.md`, `docs/ai-context.md`
+(+ `docs/canonical-patterns.md`), `CHANGELOG.md` — plus `build/check_docs.sh`
+(three count literals) and `tests/wp10-doc-fixtures/fixtures.odin`, because a
+new documented fragment needs a compiling fixture and an assertion that the
+fragment's own claim holds. WP36 and WP37 should budget for eight.
+
+**A finding on the gate itself, recorded and not silently fixed.** Freeze
+evidence citations resolve with `grep -qF`, i.e. by SUBSTRING: the citation
+`docs/ai-context.md::web.route` resolved green against the pre-existing text
+`web.router()` before `web.route` was documented at all. The citation is real
+now, but the check would have accepted a fabricated one. A prefix-shadowed
+citation is exactly the "evidence that points at nothing" the check exists to
+refuse. Tightening it to a word-boundary match is a one-line change; it is not
+made here because it must be validated against all 153 existing citations, and
+that belongs to WP38's freeze pass rather than to a symbol amendment.
+
+**A second gate finding, this one fixed here because it BLOCKED the work.**
+`build/check_phase2_freeze.sh` compared the Phase-2 freeze document's ledger
+diff — `32 | +12 | **44**` — against the LIVE canonical count, and went red the
+moment the live count became 45. The check was right for as long as no phase
+grew the ledger after Phase 2, which is to say it had never been tested. **44 is
+what Phase 2 froze: a historical fact, not a live measurement**, and a freeze
+document that must be edited every time a later phase ships is not a freeze. The
+check now pins the frozen totals, verifies the table's own arithmetic, and
+separately requires the live ledger not to have SHRUNK below them — so a symbol
+Phase 2 froze cannot be removed while this document still claims it. WP25's
+control 6 was re-aimed at the new sentence and a control **6b** added for the
+half a restated-total check misses: a delta edited so the table no longer adds
+up. **WP38 must not repeat this shape** — `check_phase3_freeze.sh` records what
+Phase 3 freezes, and that number is history the day it is written.
+
 ### WP35 — Arena, buffer reuse and oversize policy
 
 **Type: IMPLEMENTATION.** RG-4, risk **R-16**.

@@ -10,10 +10,56 @@ tag exists, and cutting one is an owner decision.
 
 Phase 1 is complete and its public contracts are frozen. What "frozen" means,
 symbol by symbol with the evidence behind each, is in
-`planning/phase-1-freeze.md`. Phase 2 has begun; its growth is recorded as
-freeze amendments.
+`planning/phase-1-freeze.md`. Phase 2 is frozen (`planning/phase-2-freeze.md`)
+and Phase 3 is under way; ledger growth in either is recorded as a numbered
+freeze amendment, never as a snapshot refresh.
 
 ### Documented
+
+- **Route identity is public** (Phase 3, WP34): **+1 symbol**, application
+  ledger **44 → 45** (union 47), recorded as Amendment 10 of
+  `planning/phase-1-freeze.md` — the first amendment whose authority is the
+  **ADR-029 delegation** rather than a direct owner decision, and it says so in
+  those words. `web.route(ctx)` returns the **registered pattern** the request
+  matched — `/users/:id`, never `/users/42` — or `""` when nothing matched.
+  That distinction is the entire contract and it is a correctness rule, not a
+  style one: route identity must be **low-cardinality** (C-2, the OpenTelemetry
+  `http.route` convention), so a metric labelled with the path has one time
+  series per user id and a log field labelled with the path carries user data
+  wherever those logs go. An application that wanted the path already had
+  `ctx.request.path`; what it could not obtain was the identity that is safe to
+  label with.
+  **The redaction rule is a gate assertion, not a convention.**
+  `build/check_public_api.sh` §8b pins the accessor's shape, requires its body
+  to be exactly `return ctx.private.route`, and requires **every** write to
+  that slot to be the matched entry's pattern — because a behavioural test can
+  only check the routes someone thought to write, while the assertion checks
+  the assignment where the decision is made. It is the sibling of the check
+  that keeps `Framework_Event` free of request-derived strings.
+  The name is `route` and not `route_pattern` or `matched_route` (G-01): it is
+  the same string `Framework_Event.route` carries, read from the same slot, and
+  a test asserts they never diverge. A mounted route reports the **composed**
+  pattern; a 404 and a 405 report `""`, because no route ran. The result is a
+  view over App-owned storage valid until `destroy` — the single value
+  reachable from a `^Context` that outlives its request, and the same exception
+  the lifetime ledger already recorded for `Framework_Event.route`. **OQ-18 is
+  closed.**
+- **A duplicate route is no longer a silent one** (Phase 3, WP30): **zero new
+  symbols**. WP4 D5 left a duplicate registration undiagnosed — the second
+  route was stored, never matched, and nothing said so. Two routes registered
+  for the same method and the same path shape now reject the application
+  fail-closed: every request answers 500, `web.serve` refuses to start, and the
+  diagnostic names the losing route. Decided under the ADR-029 delegation, and
+  implemented through the ADR-019 mechanism that already existed rather than a
+  second one — `Framework_Error` gains no member, because the enum names
+  failures that reach an observer and an observer cannot be alive to see this
+  one.
+  **Parameter names do not distinguish routes:** `/users/:id` and `/users/:uid`
+  are one pattern, and a `web.mount` prefix can compose a collision with a
+  route registered directly. Nothing compares pattern text for any of this —
+  the WP29 tree walks both spellings to the same node, so the occupied method
+  slot *is* the conflict. Registration still returns void and still reports
+  through the fail-closed mechanism, never a return value.
 
 - **Phase 2 is frozen** (WP25): **zero new symbols**.
   `planning/phase-2-freeze.md` records the ledger diff (32 + 12 = **44**

@@ -110,9 +110,17 @@ Phase-4 prototype using test transport and one real adapter must define
 admission stop, in-flight work, absolute deadline, forced close, and exactly-once
 cleanup before an ADR is proposed.
 
-### OQ-18 · Public route-pattern accessor
-No current use case justifies one. Phase 3 preserves route identity internally
-for 405 and future instrumentation; public exposure remains FUTURE.
+### OQ-18 · Public route-pattern accessor — CLOSED, 2026-07-20 (WP34)
+**Answered: `web.route(ctx)` ships, and returns the registered pattern.** The
+use case arrived with the observability work: WP20 gave an OBSERVER the route
+identity, and an application that wanted to label its own metrics, logs or
+spans by route had no way to obtain the same string — `ctx.request.path` is
+precisely the wrong substitute, because route identity must be low-cardinality
+(C-2). One symbol, ledger 44 → 45, approved under the ADR-029 delegation and
+recorded as Amendment 10 of `planning/phase-1-freeze.md`.
+
+The redaction rule travelled with it: the PATTERN, never the path, enforced by
+a gate assertion on every write to the slot rather than by convention.
 
 ### OQ-19 · Adaptive overload policy
 Deferred until deterministic bounded admission and shedding work independently.

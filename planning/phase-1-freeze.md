@@ -932,3 +932,71 @@ Evidence rows, same schema as §5:
 | Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
 |---|---|---|---|---|---|---|
 | `request_id` | A | WP23 | `tests/wp23-public-surface/contract_test.odin::wp23_public_signature_is_pinned` | `tests/wp23-public-surface/contract_test.odin::wp23_public_crlf_is_never_echoed` | `docs/middleware.md::web.request_id` | a `Handler` value; the effective ID is copied into fixed request-local storage on the Context, viewed by the committed response and by the overlay; owns no allocation |
+
+## Amendment 10 — WP34: route identity (`route`)
+
+**Date:** 2026-07-20. **Authority:** the **ADR-029 delegation**
+(`planning/adrs.md` §ADR-029, and the resolution table at
+`planning/phase-3-plan.md` §2b, which records WP34 as *"Approved: +1 symbol"*).
+This is the **first Phase-3 amendment**, and the first one whose authority is a
+delegation rather than a direct owner decision — recorded here in those words,
+because an amendment that cannot say who authorised it is not evidence.
+**Ledger effect: application 44 → 45.** 45 application + 2 test-support = 47.
+The snapshot diff for this amendment was exactly one added line; no existing
+row changed a byte.
+
+The recorded line:
+
+```
+application	proc	route :: proc(ctx: ^Context) -> string
+```
+
+**What it returns is the whole contract: the REGISTERED PATTERN, never the
+request path.** `/users/:id`, not `/users/42`. This is C-2's constraint — the
+OpenTelemetry `http.route` convention requires route identity to be
+**low-cardinality** — and it is the reason the symbol earns its place: an
+application that wanted the path already had `ctx.request.path`. What it could
+not obtain was the identity that is safe to key a metric, a log field or a span
+name on. A path-valued answer would create one time series per user id, and put
+a user identifier into a dashboard nobody meant to put it in.
+
+**The redaction rule is a GATE ASSERTION, not a convention.**
+`build/check_public_api.sh` §8b pins the accessor's shape, requires its body to
+be exactly `return ctx.private.route`, and — the assertion that actually does
+the work — requires **every** write to that slot to be the matched entry's
+`pattern`. A behavioural test can only check the routes someone thought to
+write; this checks the assignment where the decision is made. It is the sibling
+of the §8 assertion that keeps `Framework_Event` free of request-derived
+strings, and the two exist together because one procedure returning the pattern
+while another quietly returned the path is exactly how a redaction rule rots.
+
+**Why the name is `route` and not `route_pattern`, `matched_route` or
+`route_name` (G-01).** The framework already calls this value `route`: it is
+the `route` field of `Framework_Event`, read from the same slot and carrying
+the same string. A second name would mean an application reading
+`web.route(ctx)` and an observer reading `event.route` had to be told they are
+the same thing. `tests/wp34-public-surface` asserts they are, so a future
+divergence is a red test rather than a documentation problem.
+
+**No route means `""`,** and that is the answer rather than an error: on a 404
+there is no route, and on a 405 no entry was selected for that method, so
+naming the other method's pattern would name a route that did not run. A field
+the framework cannot supply is left unpopulated rather than guessed (§6.2).
+
+**Lifetime — the one exception, already on the books.** The result is a view
+over **App-owned** storage, the pattern cloned at registration, and is valid
+until `destroy`. It is therefore the only value reachable from a `^Context`
+that is **not** request-scoped, and it is the same exception the Phase-2
+lifetime ledger already records for `Framework_Event.route` — the same string,
+now reachable by a second route. G-05 is unchanged for everything else.
+
+**OQ-18 is closed by this amendment.** It recorded a stable route identity for
+observability as internal and FUTURE. WP20 made the value visible to an
+observer; WP34 makes it visible to the application that owns the request, under
+the same redaction rule.
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `route` | A | WP34 | `tests/wp34-public-surface/contract_test.odin::wp34_the_route_signature_is_pinned` | `tests/wp34-public-surface/contract_test.odin::wp34_a_parametric_route_reports_the_pattern_and_never_the_path` | `docs/ai-context.md::web.route` | App owns the pattern (cloned at registration, freed once by `destroy`); the result is a borrowed view valid until `destroy`, the single documented exception to request-scoped views; allocates nothing |

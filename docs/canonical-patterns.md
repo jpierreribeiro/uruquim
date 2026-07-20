@@ -88,7 +88,7 @@ answer. Every row answers the same four questions.
 
 | Value | Owner | Valid until | May it escape? | Who cleans up |
 |---|---|---|---|---|
-| route pattern (`/users/:id`) | App | `web.destroy(&app)` | only as a documented view | App |
+| route pattern (`web.route(ctx)`) | App | `web.destroy(&app)` | only as a documented view, and only while the App lives | App |
 | `ctx.request.path` / `query` / `body` | transport | end of the request | **no** — copy first | transport |
 | inbound header name and value (`web.header`) | transport | end of the request | **no** — copy first | transport |
 | `web.bearer_token` result | transport | end of the request | **no** — copy first | transport |
@@ -102,7 +102,11 @@ answer. Every row answers the same four questions.
 | `web.Recorded_Response` (`status`, `body`) | the recorder | until the next `test_request` | copy to keep | App teardown |
 
 Read the table as one rule: **only `Framework_Event` may escape a request.**
-Everything else is a view, and a view outlives nothing.
+Everything else is a view, and a view outlives nothing — with one named
+exception, twice over: the route pattern, whether it reaches you through
+`web.route(ctx)` or through `Framework_Event.route`, is App-owned and stays
+valid until `web.destroy`. It outlives the request and it does not outlive the
+application.
 
 ## An App and a Router are never copied
 
@@ -279,6 +283,36 @@ Both bodies are empty until WP6 renders the error envelope.
 
 A method token outside the `Method` set arrives as `.UNKNOWN` and follows the
 same 404/405 rules; it never becomes a 501.
+
+## Route identity (delivered in Phase 3, WP34)
+
+**The canonical way to label telemetry by route is `web.route(ctx)`. The
+canonical way is never `ctx.request.path`.**
+
+<!-- fragment: phase3/route-identity -->
+```odin
+by_route :: proc(ctx: ^web.Context) {
+	// "/users/:id" — never "/users/42". `record_hit` is YOUR code.
+	record_hit(web.route(ctx))
+	web.next(ctx)
+}
+```
+
+`web.route` returns the **registered pattern** the request matched. That is the
+whole distinction and it is a correctness rule, not a style one: route identity
+must be low-cardinality, so a metric labelled with the path has one time series
+per user id, and a log field labelled with the path carries user data into
+wherever those logs go.
+
+- a mounted route reports the **composed** pattern — `/api/users/:id`;
+- a `404` and a `405` report `""`, because no route ran. Treat it as the
+  "unmatched" bucket rather than substituting the path;
+- the result is a view over **App-owned** storage, valid until `destroy`. It is
+  the single value reachable from a `^Context` that outlives its request;
+  everything else in the ownership table is request-scoped;
+- it is the same string `web.Framework_Event.route` carries. One question, one
+  name (G-01) — the accessor is not called `route_pattern` or `matched_route`
+  precisely so nobody has to be told they are the same value.
 
 ## Handler
 
