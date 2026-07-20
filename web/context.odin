@@ -172,6 +172,12 @@ Context_Internal :: struct {
 	// moves it to `.Consumed` on its first call, before the limit and parse.
 	body_state: Body_State,
 
+	// WP32b: the method the framework is answering on the application's behalf,
+	// if any. It is set by `driver_run` from the raw token and read by
+	// `dispatch` and by the drivers — a handler never sees it, because a HEAD
+	// response must be identical to the GET response except for the body.
+	implicit: Implicit_Method,
+
 	// WP7 — the request-lifetime arena that owns decoded nested body data
 	// (ADR-006). It is LAZY: this zero value holds no allocation, so a request
 	// that never binds a body — or whose body is empty or over-limit — creates

@@ -153,7 +153,9 @@ test_request :: proc(
 		recorder,
 		context.allocator,
 		int(res.status),
-		res.body,
+		// WP32b: a HEAD response carries the GET's status and headers and no
+		// body, on both drivers.
+		response_body_view(&ctx),
 		neutral_headers,
 	)
 

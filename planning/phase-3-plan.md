@@ -514,6 +514,33 @@ CORS preflight. 32b must VERIFY that a middleware can short-circuit the
 automatic answer through the single-commit guard — stated as a requirement, not
 assumed.
 
+**32b DONE, 2026-07-20 — `web/head_options.odin`, `tests/wp32-internal`.**
+HEAD matches as GET with the body suppressed on the way out; OPTIONS answers
+`204` with the `Allow` the 405 already builds; an unrecognised method keeps its
+405. **The `Method` enum did not change** — both are resolved from the raw token
+before a `Method` value exists.
+
+**The suite is INTERNAL, and that is the design showing through:**
+`web.test_request` takes a `Method`, and `Method` has no HEAD and no OPTIONS. A
+public-surface suite that COULD send either method would be evidence the enum
+had grown.
+
+**Suppression happens on the way out, not at commit**, via a driver-side view.
+Blanking `response.body` would leak an allocation the Response owns and
+`response_destroy` must free — so the handler's body stays intact underneath,
+and a test pins that.
+
+**The WP9 conformance matrix had to be amended, and the gate caught it.** Two
+scenarios ratified the OLD behaviour — "HEAD is not silently converted to GET
+(WP9 D7)" and "OPTIONS gains no early public behavior", both expecting 405.
+Those expectations were Phase 1's and are deliberately reversed by the owner's
+decision, not accidentally broken. Both rows stay in the matrix, rewritten,
+because the property is exactly the kind that must hold identically on both
+transports.
+
+**`bare()` answers no OPTIONS**, because it installs no miss policy and
+automatic OPTIONS *is* miss policy.
+
 ### WP33 — Multi-param routes without a map
 
 **Type: IMPLEMENTATION.**
