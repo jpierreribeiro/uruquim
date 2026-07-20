@@ -32,31 +32,34 @@ match_all :: proc(
 	hyb: ^sh.Hybrid,
 	rp: ^sh.Radix_Ptr,
 	ri: ^sh.Radix_Idx,
+	ra: ^sh.Radix_Arr,
 	path: string,
-) -> [6]sh.Match {
-	return [6]sh.Match {
+) -> [7]sh.Match {
+	return [7]sh.Match {
 		sh.linear_match(lin, path),
 		sh.linear_improved_match(imp, path),
 		sh.bucketed_match(buc, path),
 		sh.hybrid_match(hyb, path),
 		sh.radix_ptr_match(rp, path),
 		sh.radix_idx_match(ri, path),
+		sh.radix_arr_match(ra, path),
 	}
 }
 
 @(private = "file")
-CANDIDATE_NAMES :: [6]string {
+CANDIDATE_NAMES :: [7]string {
 	"linear",
 	"linear_improved",
 	"bucketed",
 	"hybrid",
 	"radix_ptr",
 	"radix_idx",
+	"radix_arr",
 }
 
-// THE LOAD-BEARING TEST. Six representations, every shape, every cardinality
+// THE LOAD-BEARING TEST. Seven representations, every shape, every cardinality
 // the gate can afford, every registered path plus a set of deliberate misses —
-// and all six must return byte-identical answers.
+// and all seven must return byte-identical answers.
 @(test)
 wp28_every_candidate_agrees :: proc(t: ^testing.T) {
 	names := CANDIDATE_NAMES
@@ -67,7 +70,7 @@ wp28_every_candidate_agrees :: proc(t: ^testing.T) {
 			defer sh.free_patterns(&patterns, &paths)
 
 			lin: sh.Linear;imp: sh.Linear_Improved;buc: sh.Bucketed
-			hyb: sh.Hybrid;rp: sh.Radix_Ptr;ri: sh.Radix_Idx
+			hyb: sh.Hybrid;rp: sh.Radix_Ptr;ri: sh.Radix_Idx;ra: sh.Radix_Arr
 
 			testing.expect(t, sh.linear_build(&lin, patterns[:]), "linear must build")
 			defer sh.linear_destroy(&lin)
@@ -81,10 +84,12 @@ wp28_every_candidate_agrees :: proc(t: ^testing.T) {
 			defer sh.radix_ptr_destroy(&rp)
 			testing.expect(t, sh.radix_idx_build(&ri, patterns[:]), "radix_idx must build")
 			defer sh.radix_idx_destroy(&ri)
+			testing.expect(t, sh.radix_arr_build(&ra, patterns[:]), "radix_arr must build")
+			defer sh.radix_arr_destroy(&ra)
 
 			// Every registered path must be found, by all six, identically.
 			for path in paths {
-				results := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, path)
+				results := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, &ra, path)
 				for r, i in results {
 					testing.expectf(
 						t,
@@ -127,7 +132,7 @@ wp28_every_candidate_agrees :: proc(t: ^testing.T) {
 				"/bench/s0/",
 			}
 			for path in misses {
-				results := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, path)
+				results := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, &ra, path)
 				for r, i in results {
 					testing.expectf(
 						t,
@@ -158,7 +163,7 @@ wp28_every_candidate_agrees :: proc(t: ^testing.T) {
 // THE POSITIVE CONTROL for the agreement test above.
 //
 // If `match_all` compared things that can never differ — a copy-paste that
-// called the same matcher six times, say — then "all six agree" would be true
+// called the same matcher seven times, say — then "all seven agree" would be true
 // of everything and the test above would prove nothing. So a disagreement must
 // be constructible and must be visible.
 //
@@ -169,11 +174,11 @@ wp28_every_candidate_agrees :: proc(t: ^testing.T) {
 @(test)
 wp28_precedence_is_where_candidates_could_diverge :: proc(t: ^testing.T) {
 	// `/bench/fixed` is reachable two ways: as a static route, and through the
-	// parametric `/bench/:id`. Static must win, in all six.
+	// parametric `/bench/:id`. Static must win, in all seven.
 	patterns := []string{"/bench/:id", "/bench/fixed"}
 
 	lin: sh.Linear;imp: sh.Linear_Improved;buc: sh.Bucketed
-	hyb: sh.Hybrid;rp: sh.Radix_Ptr;ri: sh.Radix_Idx
+	hyb: sh.Hybrid;rp: sh.Radix_Ptr;ri: sh.Radix_Idx;ra: sh.Radix_Arr
 	testing.expect(t, sh.linear_build(&lin, patterns), "linear must build")
 	defer sh.linear_destroy(&lin)
 	testing.expect(t, sh.linear_improved_build(&imp, patterns), "improved must build")
@@ -186,13 +191,15 @@ wp28_precedence_is_where_candidates_could_diverge :: proc(t: ^testing.T) {
 	defer sh.radix_ptr_destroy(&rp)
 	testing.expect(t, sh.radix_idx_build(&ri, patterns), "radix_idx must build")
 	defer sh.radix_idx_destroy(&ri)
+	testing.expect(t, sh.radix_arr_build(&ra, patterns), "radix_arr must build")
+	defer sh.radix_arr_destroy(&ra)
 
 	names := CANDIDATE_NAMES
 
 	// The static route is registered SECOND, so a candidate that honours
 	// registration order instead of class precedence returns route 0 here — the
 	// exact defect this control exists to be able to see.
-	results := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, "/bench/fixed")
+	results := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, &ra, "/bench/fixed")
 	for r, i in results {
 		testing.expectf(t, r.ok, "%s must match the static route", names[i])
 		testing.expectf(
@@ -207,7 +214,7 @@ wp28_precedence_is_where_candidates_could_diverge :: proc(t: ^testing.T) {
 
 	// And the parametric route still works for anything else, with the value
 	// captured as a VIEW rather than a copy.
-	other := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, "/bench/42")
+	other := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, &ra, "/bench/42")
 	for r, i in other {
 		testing.expectf(t, r.ok, "%s must match the parametric route", names[i])
 		testing.expectf(t, r.route == 0, "%s matched the wrong route for /bench/42", names[i])
@@ -230,7 +237,7 @@ wp28_matching_allocates_nothing :: proc(t: ^testing.T) {
 	defer sh.free_patterns(&patterns, &paths)
 
 	lin: sh.Linear;imp: sh.Linear_Improved;buc: sh.Bucketed
-	hyb: sh.Hybrid;rp: sh.Radix_Ptr;ri: sh.Radix_Idx
+	hyb: sh.Hybrid;rp: sh.Radix_Ptr;ri: sh.Radix_Idx;ra: sh.Radix_Arr
 	testing.expect(t, sh.linear_build(&lin, patterns[:]), "linear must build")
 	defer sh.linear_destroy(&lin)
 	testing.expect(t, sh.linear_improved_build(&imp, patterns[:]), "improved must build")
@@ -243,6 +250,8 @@ wp28_matching_allocates_nothing :: proc(t: ^testing.T) {
 	defer sh.radix_ptr_destroy(&rp)
 	testing.expect(t, sh.radix_idx_build(&ri, patterns[:]), "radix_idx must build")
 	defer sh.radix_idx_destroy(&ri)
+	testing.expect(t, sh.radix_arr_build(&ra, patterns[:]), "radix_arr must build")
+	defer sh.radix_arr_destroy(&ra)
 
 	// The tracker goes on AFTER every table is built, because building is
 	// allowed to allocate and lookup is not.
@@ -256,7 +265,7 @@ wp28_matching_allocates_nothing :: proc(t: ^testing.T) {
 
 	hits := 0
 	for path in paths {
-		results := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, path)
+		results := match_all(&lin, &imp, &buc, &hyb, &rp, &ri, &ra, path)
 		for r in results {
 			if r.ok {
 				hits += 1
@@ -267,6 +276,6 @@ wp28_matching_allocates_nothing :: proc(t: ^testing.T) {
 	// The positive half: the loop really did the work. Without it, a matcher
 	// that returned immediately would satisfy the zero-allocation assertion
 	// perfectly.
-	testing.expect_value(t, hits, len(paths) * 6)
+	testing.expect_value(t, hits, len(paths) * 7)
 	testing.expect_value(t, track.total_allocation_count, 0)
 }
