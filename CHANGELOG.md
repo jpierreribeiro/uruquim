@@ -15,6 +15,30 @@ freeze amendments.
 
 ### Documented
 
+- **Phase 2 is frozen** (WP25): **zero new symbols**.
+  `planning/phase-2-freeze.md` records the ledger diff (32 + 12 = **44**
+  application, 46 union), and adds three ledgers Phase 1 did not have, each
+  enforced by the new `build/check_phase2_freeze.sh`. The **claim ledger**
+  holds nine strong promises the project already makes, each with its exact
+  sentence, scope, implementation, positive test, **negative control**,
+  environment, and — the column that does the real work — what it explicitly
+  does **not** guarantee; a claim with no negative control does not freeze. The
+  **lifetime ledger** promotes WP24's ownership table to frozen evidence. The
+  **capacity ledger** states what is fixed, dynamic at registration, bounded
+  per request, and — stated plainly — what remains **unbounded or delegated to
+  the transport**: concurrent connections, accept backlog, inbound header
+  counts and sizes, and read/write timeouts. Uruquim bounds its own per-request
+  working memory; **it does not bound the server**, and no document may claim
+  otherwise.
+  Freezing the claims found two that did not survive contact: the middleware
+  page claimed a program that never calls `use` "does not even link it" (false
+  — eight symbols always link, by design, because the fail-closed guard sits on
+  the shared dispatch path; the sentence also contradicted its own +2,424-byte
+  figure), and the "byte-identical binary" requirement was untestable and had
+  already been withdrawn in WP22. The usage laboratory was re-run: an unguarded
+  five-route CRUD service still needs exactly **14** concepts, and one adopting
+  middleware, routers, auth, logging and request IDs needs **23** — reported as
+  a finding, not a footnote.
 - **Examples, the canonical auth pattern, and the ownership table** (Phase 2,
   WP24): **zero new symbols**. Three new examples — `04-middleware`,
   `05-route-groups`, `06-authentication` — bring the compiled example set to

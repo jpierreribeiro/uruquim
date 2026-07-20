@@ -263,8 +263,21 @@ value that is explicitly not a secret.
   flattened once, at registration.
 - The machinery present but unused costs **+2,424 bytes** of binary in a
   default build, **+1,488** with `-o:speed` (measured on the hello-world
-  example against the Phase-1 baseline; a program that never calls `use` does
-  not even link it).
+  example against the Phase-1 baseline).
+- **It is linked whether or not you call `use`**, and that is by design. An
+  application that never calls `use` still links eight symbols from the
+  middleware machinery — `chain_enter`, `chain_flatten`, `miss_chain_ensure`,
+  `miss_terminal`, `mw_destroy`, `mw_miss_prepare`, `mw_poison_intercept` and
+  `next` — because dispatch walks a chain for every request and the
+  fail-closed ordering guard has to sit on the shared dispatch path, so both
+  transports reject an ill-formed application identically. The `+2,424 bytes`
+  above IS that cost. (An earlier version of this page also claimed such a
+  program "does not even link it", which contradicted the same sentence's own
+  figure; the WP25 claim ledger measured it and corrected it.)
+- Registering one middleware costs **+8,448 bytes** over a hello-world
+  baseline, measured in a debug build. The noise floor of this toolchain is
+  ~100 bytes — it does not build reproducibly — so treat smaller deltas as
+  "no measurable cost".
 - The chain runs by recursion: each middleware holds a stack frame while the
   rest runs (~80 bytes each in a debug build, ~16 with `-o:speed`). The
   practical depth bound is around one hundred thousand on the default stack —
