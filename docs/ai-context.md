@@ -44,6 +44,19 @@ configurable limits and read/write timeouts (Phase 3); graceful shutdown with
 a deadline (Phase 4). Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
 
+**Fault behaviour — state it accurately, both halves (ADR-020).**
+
+- A handler that returns **without committing a response** is finalized by the
+  response driver to the standardized `internal_error` 500 — logged on the
+  server, and carrying no detail about the request. This holds identically
+  under `web.serve` and `web.test_request`, identically under `web.app()` and
+  `web.bare()`, and identically for the second fault and the hundredth.
+- A handler that **faults** — panic, failed assertion, out-of-bounds index, nil
+  dereference, divide-by-zero — **aborts the process**. The client gets an
+  empty reply. Run under a supervisor.
+- Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
+  handler to catch the panic". None of it exists, and none of it can.
+
 **Two ledgers.** The application API is exactly **42** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token` and `observe`/`Framework_Event`/`Framework_Error`

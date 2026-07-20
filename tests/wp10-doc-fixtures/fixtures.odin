@@ -246,6 +246,36 @@ metrics_increment :: proc(kind: web.Framework_Error, route: string, status: web.
 	// Application code: export to metrics, tracing, or an alerting pipeline.
 }
 
+Invoice :: struct {
+	id:    int    `json:"id"`,
+	payee: string `json:"payee"`,
+}
+
+lookup_invoice :: proc(id: int) -> (invoice: Invoice, found: bool) {
+	if id != 1 {
+		return {}, false
+	}
+	return Invoice{id = 1, payee = "grace"}, true
+}
+
+// fragment: phase2/fault-early-return
+// The fault case docs/errors.md documents: an error branch that returns
+// WITHOUT committing a response. It is a bug, and the response driver answers
+// it with the standardized `internal_error` 500 rather than a zero status.
+show_invoice :: proc(ctx: ^web.Context) {
+	id, ok := web.path_int(ctx, "id")
+	if !ok {
+		return // path_int already answered 400
+	}
+
+	invoice, found := lookup_invoice(id)
+	if !found {
+		return // BUG: nothing was committed on this branch
+	}
+
+	web.ok(ctx, invoice)
+}
+
 // The fixtures are compiled as a test package, so one live assertion keeps the
 // runner honest about actually having built them.
 @(test)

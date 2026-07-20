@@ -15,9 +15,10 @@ these forms. If a pattern here conflicts with any other document except
 > They are NOT available today and their code blocks are marked accordingly —
 > do not copy them.
 >
-> Still ahead: middleware, route groups and typed state (Phase 2 and Phase 3);
-> panic recovery (Phase 2); configurable limits and read/write timeouts
-> (Phase 3); graceful shutdown with a deadline (Phase 4).
+> Still ahead: typed state (Phase 3); configurable limits and read/write
+> timeouts (Phase 3); graceful shutdown with a deadline (Phase 4). Panic
+> recovery is NOT on that list and never will be: Odin has no recoverable
+> panic, a faulting handler aborts the process, and ADR-020 records why.
 
 ## The one rule
 
@@ -136,10 +137,14 @@ main :: proc() {
 ```
 
 - `web.app()` — progressive production defaults. Delivered so far: a
-  standardized 404 and a minimal 405 with the `Allow` header (WP4). Still to
-  come: the fixed 4 MiB request-body cap (WP7); recovery (Phase 2);
-  configurable limits, read/write timeouts, and optimized 405/header handling
-  (Phase 3); graceful shutdown hardening (Phase 4).
+  standardized 404 and a minimal 405 with the `Allow` header (WP4), and the
+  fixed 4 MiB request-body cap (WP7). Still to come: configurable limits,
+  read/write timeouts, and optimized 405/header handling (Phase 3); graceful
+  shutdown hardening (Phase 4). Note what is NOT and never will be on that
+  list: a recovery default (ADR-020). A handler that commits no response is
+  finalized to the standardized 500 under BOTH `web.app()` and `web.bare()` —
+  that is a driver guarantee, not a default — while a handler that *faults*
+  aborts the process.
 - `web.bare()` — no defaults (advanced; not for quick starts). It routes
   exactly like `web.app()` but installs neither the 404 nor the 405, so an
   unmatched request produces no response at all.

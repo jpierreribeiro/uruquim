@@ -179,7 +179,12 @@ Honest limits, so nothing surprises you later:
 
 - **No middleware, groups, or shared application state.** Handlers are
   standalone procedures. (Phase 2 and Phase 3.)
-- **No panic recovery.** A crash in a handler is not contained yet. (Phase 2.)
+- **A fault in a handler aborts the process.** A panic, a failed assertion or
+  an out-of-bounds index takes the server down; the client sees an empty reply.
+  There is no recovery middleware and there never will be — Odin has no
+  recoverable panic (ADR-020). Run under a supervisor. What Uruquim *does*
+  guarantee is the other half: a handler that returns without responding gets
+  the standardized 500. See `docs/errors.md`.
 - **No configurable limits or timeouts.** The 4 MiB body cap is fixed, and
   there are no read/write timeouts. (Phase 3.)
 - **No graceful-shutdown deadline.** Stopping is clean, but there is no

@@ -132,11 +132,17 @@ observable contracts hold.
 
 **Not yet, and named honestly**
 
-- Middleware, route groups and typed application state — Phase 2 and Phase 3.
-- Panic recovery — Phase 2.
+- Typed application state — Phase 3.
 - Configurable limits and read/write timeouts — Phase 3.
 - Graceful shutdown with a deadline — Phase 4.
-- Request header lookup — Phase 2.
+
+**Never, and named just as honestly**
+
+- Panic recovery. Odin has no recoverable panic, so a faulting handler aborts
+  the process and Uruquim expects to run under a supervisor (ADR-020). The
+  guarantee it *does* make is narrower and real: a handler that commits no
+  response is finalized to a standardized 500, identically in tests and over a
+  socket. `docs/errors.md` documents both halves.
 
 Phase 1 is usable for building and testing a JSON API, and `web.serve` is a
 working bootstrap server. It is not hardened for unattended production

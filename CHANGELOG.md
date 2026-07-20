@@ -13,6 +13,27 @@ symbol by symbol with the evidence behind each, is in
 `planning/phase-1-freeze.md`. Phase 2 has begun; its growth is recorded as
 freeze amendments.
 
+### Documented
+
+- **Fault behaviour** (Phase 2, WP21): **zero new symbols** (ADR-020). Two
+  different failures are now documented as the two different things they are.
+  A handler that returns **without committing a response** is finalized by the
+  response driver to the standardized `internal_error` 500 — identically under
+  `web.serve` and `web.test_request`, identically under `web.app()` and
+  `web.bare()`, in default *and* `-o:speed` builds, repeatably, and carrying no
+  detail about the request. A handler that **faults** — panic, failed
+  assertion, out-of-bounds index, nil dereference, divide-by-zero — **aborts
+  the process**; run Uruquim under a supervisor.
+- **`recovery` will never exist** (ADR-020). Odin has no recoverable panic:
+  `context` is an implicit by-value parameter, so `web.app()` cannot install a
+  fault hook on its caller's behalf, and `bounds_check_error` is
+  `proc "contextless"` and cannot consult a hook even in principle. The earlier
+  promise of "recovery middleware, default-on in `web.app()`" was not hard but
+  impossible, and it has been withdrawn from `README.md`,
+  `docs/quick-start.md` and `docs/canonical-patterns.md` rather than left
+  standing as a default that would never be delivered (G-08). The Phase-4
+  "last-gasp responder" is a different thing and must never be called recovery.
+
 ### Added
 
 - **Typed framework-error observer** (Phase 2, WP20): `web.observe`,

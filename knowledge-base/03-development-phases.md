@@ -234,9 +234,25 @@ dispatcher.
 - [ ] middleware order exactness, including nested groups
 - [ ] short-circuit stops downstream
 - [ ] post-`next` unwind order correct (if onion adopted)
-- [ ] a handler that commits no response is finalized to a standardized 500
-      (this is what Phase 2 means by recovery — ADR-020)
-- [ ] a panic in a handler aborts the process, and the documentation says so
+- [x] a handler that commits no response is finalized to a standardized 500
+      (this is what Phase 2 means by recovery — ADR-020) — WP21. Proven under
+      BOTH transports (`tests/wp21-public-surface`, `tests/wp21-socket`), in
+      default AND `-o:speed` builds, for `app()` and `bare()`, for a plain
+      silent handler and for an early-return error branch, and repeatably: the
+      second and third fault are byte-identical to the first and a healthy
+      request in between is unaffected. The finalized body BORROWS the
+      compile-time constant (`tests/wp21-internal`), so the guarantee cannot
+      fail for want of memory and there is no buffer in which a detail string
+      could be composed
+- [x] a panic in a handler aborts the process, and the documentation says so —
+      WP21. It cannot be an in-process test, because the process it asserts
+      about is the test runner; it is `build/check_wp21_controls.sh` control 7,
+      which BUILDS and RUNS three programs. A fault-free baseline exits 0 (so
+      the probe is sound, not merely a broken build), while a panicking handler
+      and an out-of-bounds index are each killed by signal 4 (status 132) —
+      both fault classes, because ADR-020 turns on their difference. The
+      documentation half is `build/check_docs.sh` §6e, with control 6 proving
+      it rejects a document that promises recovery (G-08)
 - [ ] `use()` after a registered route fails at boot, fail-closed (ADR-019),
       with a test proving the mis-ordered auth program does NOT serve the
       route
