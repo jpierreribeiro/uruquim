@@ -28,8 +28,9 @@ wp9_public_surface_is_unchanged :: proc(t: ^testing.T) {
 	// The server entry point — unchanged by WP9, which added no serve variant.
 	serve_sig: proc(a: ^web.App, port: int) = web.serve
 
-	// Test support: still exactly two symbols, still method + path.
-	test_request_sig: proc(a: ^web.App, method: web.Method, path: string, body: string, query: string) -> web.Recorded_Response =
+	// Test support: still exactly two symbols. AMENDED IN WP19: the `headers`
+	// default parameter joined the pinned signature (freeze Amendment 6).
+	test_request_sig: proc(a: ^web.App, method: web.Method, path: string, body: string, query: string, headers: []string) -> web.Recorded_Response =
 		web.test_request
 
 	testing.expect(t, app_sig != nil)

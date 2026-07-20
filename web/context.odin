@@ -128,6 +128,17 @@ Context_Internal :: struct {
 	miss_kind:  Miss_Kind,
 	miss_allow: string,
 
+	// WP19 — the ADR-027 request-header OVERLAY, read by `web.header` before
+	// the arrived headers ("the effective request header"). ONE slot, on
+	// purpose: Phase 2 has exactly one writer — WP23's request-ID middleware —
+	// and a second slot ships only when a work package ratifies a second
+	// writer. Both strings are either static or App/request-owned by the
+	// writer's contract; the slot itself allocates nothing and needs no
+	// teardown. WP19 ships the READ path; nothing in this work package writes
+	// it outside the tests.
+	overlay:     Header_Pair,
+	overlay_set: bool,
+
 	// WP7 — the single-consumer body capability (ADR-012 A). `.Fresh` is the
 	// zero value, so a new Context begins with the body available. `web.body`
 	// moves it to `.Consumed` on its first call, before the limit and parse.

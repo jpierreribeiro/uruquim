@@ -127,7 +127,9 @@ wp7_body_handler_via_test_request_produces_invalid_json :: proc(t: ^testing.T) {
 
 @(test)
 wp7_test_request_signature_is_pinned :: proc(t: ^testing.T) {
-	sig: proc(a: ^web.App, method: web.Method, path: string, body: string, query: string) -> web.Recorded_Response = web.test_request
+	// AMENDED IN WP19: `headers` joined the signature as the third fully
+	// visible default parameter (freeze Amendment 6).
+	sig: proc(a: ^web.App, method: web.Method, path: string, body: string, query: string, headers: []string) -> web.Recorded_Response = web.test_request
 	serve_sig: proc(a: ^web.App, port: int) = web.serve
 	a := web.app()
 	defer web.destroy(&a)
@@ -136,7 +138,7 @@ wp7_test_request_signature_is_pinned :: proc(t: ^testing.T) {
 	// `sig` requires all four arguments even though `web.test_request` itself
 	// defaults the last one. That is a useful property here — the pin exercises
 	// the complete signature rather than the convenient call shape.
-	res := sig(&a, .GET, "/nope", "", "")
+	res := sig(&a, .GET, "/nope", "", "", nil)
 	testing.expect_value(t, res.status, web.Status.Not_Found)
 	testing.expect(t, serve_sig != nil)
 }

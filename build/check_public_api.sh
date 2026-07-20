@@ -87,12 +87,14 @@ Status
 app
 bad_request
 bare
+bearer_token
 body
 created
 delete
 destroy
 forbidden
 get
+header
 internal_error
 json
 mount
@@ -439,7 +441,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 37 symbols (32 Phase-1 + WP17 use/next + WP18 Router/router/mount)"
+echo "public API contract: application ledger is exactly 39 symbols (32 Phase-1 + WP17 + WP18 + WP19 header/bearer_token)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -483,16 +485,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 37; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 37 (32 Phase-1 + use/next WP17 + Router/router/mount WP18)"
+if test "$URUQUIM_APP_COUNT" -ne 39; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 39 (32 Phase-1 + use/next WP17 + Router/router/mount WP18 + header/bearer_token WP19)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 39; then
-  fail "exported union is $URUQUIM_UNION, not 39 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 41; then
+  fail "exported union is $URUQUIM_UNION, not 41 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 39"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 41"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -540,7 +542,7 @@ echo "public API contract: web/testing bridge exports match the locked minimal s
 # ratified test-support names never reach this loop.
 # ---------------------------------------------------------------------------
 for URUQUIM_FUTURE in group state app_with_state \
-  header bearer_token serve_with serve_transport app_init \
+  serve_with serve_transport app_init \
   redirect conflict bytes logger recovery request_id cors \
   Response Header Header_Pair Header_View_Internal Params Route_Info \
   Transport method_raw headers commit; do
@@ -767,10 +769,16 @@ if grep -nE '\b(404|405|501|Not_Found|Method_Not_Allowed)\b' <<<"$URUQUIM_WP2_CO
   fail "the WP2 model decides an HTTP status; 404/405/501 decisions belong to WP4/WP9"
 fi
 
-# 8g. No header lookup exists in Phase 1 (`web.header` is Phase 2).
-if grep -nE '^(header|headers|bearer_token|header_get) ::' <<<"$URUQUIM_WEB_PUBLIC_CODE"; then
-  fail "a header lookup entered the Phase-1 package; web.header is Phase 2"
-fi
+# 8g. WP19 delivered the header lookups; their exact ratified signatures are
+#     pinned here, redundantly with the freeze snapshot on purpose (a named
+#     assertion encodes the DECISION and survives snapshot laundering). Both
+#     return (value, ok); 10a's package-wide #optional_ok ban covers them.
+grep -qxF 'header :: proc(ctx: ^Context, name: string) -> (value: string, ok: bool) {' \
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "the ratified web.header signature changed (WP19; freeze Amendment 5)"
+grep -qxF 'bearer_token :: proc(ctx: ^Context) -> (value: string, ok: bool) {' \
+  <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "the ratified web.bearer_token signature changed (WP19; freeze Amendment 5)"
 
 # ---------------------------------------------------------------------------
 # 9. WP4 route registration and dispatch (planning/phase-1-plan.md §WP4 D1-D5)
@@ -1118,7 +1126,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 37 + test-support ledger 2 = union 39"
+echo "public API contract: application ledger 39 + test-support ledger 2 = union 41"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"

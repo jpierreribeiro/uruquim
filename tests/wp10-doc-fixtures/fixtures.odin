@@ -160,17 +160,21 @@ middleware_app :: proc() {
 	web.serve(&app, 8080)
 }
 
-// fragment: phase2/middleware-guard
-// A guard: respond and return WITHOUT calling next to short-circuit. The
-// credential here is a query token only because header lookup is a later work
-// package; the pattern is the point.
+// fragment: phase2/bearer-auth
+// The canonical auth guard (WP19): a strict RFC 6750 bearer parse, then the
+// application's own validity check. Respond and return WITHOUT calling next
+// to short-circuit. `token_is_valid` stands in for application code.
 require_auth :: proc(ctx: ^web.Context) {
-	token, found := web.query(ctx, "token")
-	if !found || token != "expected" {
+	token, ok := web.bearer_token(ctx)
+	if !ok || !token_is_valid(token) {
 		web.unauthorized(ctx, "authentication required")
 		return
 	}
 	web.next(ctx)
+}
+
+token_is_valid :: proc(token: string) -> bool {
+	return token == "expected"
 }
 
 list_users :: proc(ctx: ^web.Context) {

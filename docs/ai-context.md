@@ -26,23 +26,26 @@ a standardized JSON envelope.
 - **Route organisation:** `web.router()` builds a detached `Router` with the
   same verbs and `use`; `web.mount(&app, "/prefix", &r)` attaches it. A
   one-route Router is the route-level guard.
+- **Request headers:** `web.header` (case-insensitive, first occurrence wins)
+  and `web.bearer_token` (strict RFC 6750). Pure lookups — no automatic
+  response, nothing logged, values are request-lifetime views.
 - **Testing:** `web.test_request` runs a request through real routing without a
   socket.
 - **HTTP/1 safety:** ambiguous or malformed framing (`CL`+`TE`, duplicate
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available yet** — do not emit any of it: request header lookup, the
-error observer, the built-in logger and request-ID middleware (all later
-Phase-2 work packages);
+**Not available yet** — do not emit any of it: the error observer, the
+built-in logger and request-ID middleware (later Phase-2 work packages);
 configurable limits and read/write timeouts (Phase 3); graceful shutdown with
 a deadline (Phase 4). Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
 
-**Two ledgers.** The application API is exactly **37** symbols (32 frozen in
-Phase 1, plus `use`/`next` from WP17 and `Router`/`router`/`mount` from WP18).
-The test-support API is a separate ledger of exactly **2**. Union: **39**. Do
-not fold them together and do not invent a third form.
+**Two ledgers.** The application API is exactly **39** symbols (32 frozen in
+Phase 1, plus `use`/`next`, `Router`/`router`/`mount`, and
+`header`/`bearer_token` from Phase 2). The test-support API is a separate
+ledger of exactly **2**. Union: **41**. Do not fold them together and do not
+invent a third form.
 
 ## Application
 
@@ -341,11 +344,11 @@ A middleware is an ordinary `Handler`. `use` after any route — or after the
 first dispatched request — REJECTS the application fail-closed: every request
 answers `500` and `web.serve` refuses to start. Register every `use` first.
 
-<!-- fragment: phase2/middleware-guard -->
+<!-- fragment: phase2/bearer-auth -->
 ```odin
 require_auth :: proc(ctx: ^web.Context) {
-	token, found := web.query(ctx, "token")
-	if !found || token != "expected" {
+	token, ok := web.bearer_token(ctx)
+	if !ok || !token_is_valid(token) {
 		web.unauthorized(ctx, "authentication required")
 		return
 	}
@@ -392,10 +395,37 @@ mounted at `"/api"` serves `"/api/"`, not `"/api"`). Chain order: app globals,
 then each enclosing router outermost-first, then the handler. A route needing
 its own guard is a ONE-ROUTE Router mounted at the path.
 
+## Request headers
+
+```text
+header(ctx, name)  -> (value, ok)   the effective request header
+bearer_token(ctx)  -> (value, ok)   strict RFC 6750 Authorization parse
+```
+
+Both are PURE lookups: they never commit a response (unlike the extractors —
+an absent header is routinely not an error) and never log. `ok` means
+presence; an empty value is present. Names are case-insensitive; duplicates:
+first occurrence wins. Values are VIEWS valid only for the request — copy to
+persist. The token comes back verbatim: never trimmed, never normalised; a
+sloppy `Authorization` (two spaces, trailing blank, wrong scheme) is rejected,
+not repaired.
+
+<!-- fragment: phase2/bearer-auth -->
+```odin
+require_auth :: proc(ctx: ^web.Context) {
+	token, ok := web.bearer_token(ctx)
+	if !ok || !token_is_valid(token) {
+		web.unauthorized(ctx, "authentication required")
+		return
+	}
+	web.next(ctx)
+}
+```
+
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-37 application symbols.
+39 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
@@ -415,10 +445,10 @@ check_ping :: proc() -> bool {
 ```
 
 It drives the REAL routing and the real response pipeline with no socket, so a
-result here matches what a real client gets. `body` and `query` are optional
-parameters (defaulting to empty); there is no header argument yet.
-`Recorded_Response` exposes `status` and `body` only — there is no public way
-to read response headers.
+result here matches what a real client gets. `body`, `query` and `headers` are
+optional parameters; each `headers` element is one `"Name: value"` line
+(`headers = {"Authorization: Bearer tok"}`). `Recorded_Response` exposes
+`status` and `body` only — there is no public way to read response headers.
 
 `body` stays valid until `web.destroy(&app)`.
 
@@ -474,9 +504,8 @@ only so an agent recognizes the names and refuses them.
 <!-- phase: 2; unavailable -->
 ```odin
 // Later Phase-2 work packages — unavailable today.
-value, found := web.header(ctx, "x-api-key")
-token, found := web.bearer_token(ctx)
 web.use(&app, web.logger)      // the built-in logger does not exist yet
+web.use(&app, web.request_id)  // the request-ID middleware does not exist yet
 ```
 
 <!-- phase: 3; unavailable -->
@@ -500,9 +529,10 @@ Other names reserved for later phases, none of which exist today:
 
 Phase boundaries in one line each:
 
-- **Phase 2** — middleware (delivered), route organisation (delivered),
-  header lookup, the typed error observer, the built-in logger and request-ID
-  middleware. No panic recovery — Odin has no recoverable panic (ADR-020).
+- **Phase 2** — middleware, route organisation and header lookup (all
+  delivered); still to come: the typed error observer, the built-in logger
+  and request-ID middleware. No panic recovery — Odin has no recoverable
+  panic (ADR-020).
 - **Phase 3** — route groups, typed application state, configurable limits and
   read/write timeouts.
 - **Phase 4** — graceful shutdown with a deadline, security hardening.

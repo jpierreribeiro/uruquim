@@ -48,11 +48,11 @@ Call `web.next(ctx)` to run the rest of the chain — later middleware, then the
 route handler. Return **without** calling `next` to short-circuit: nothing
 downstream runs, and your response is what the client receives.
 
-<!-- fragment: phase2/middleware-guard -->
+<!-- fragment: phase2/bearer-auth -->
 ```odin
 require_auth :: proc(ctx: ^web.Context) {
-	token, found := web.query(ctx, "token")
-	if !found || token != "expected" {
+	token, ok := web.bearer_token(ctx)
+	if !ok || !token_is_valid(token) {
 		web.unauthorized(ctx, "authentication required")
 		return
 	}
@@ -60,8 +60,9 @@ require_auth :: proc(ctx: ^web.Context) {
 }
 ```
 
-(Request-header lookup is a later Phase-2 work package; until it lands, a
-credential travels as a query parameter in examples like this one.)
+(`web.bearer_token` rejects a sloppy `Authorization` — wrong scheme, doubled
+or trailing whitespace — rather than repairing it, and the token is never
+logged: header values are attacker-controlled.)
 
 ## Execution order
 

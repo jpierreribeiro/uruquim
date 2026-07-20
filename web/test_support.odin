@@ -73,12 +73,24 @@ Recorded_Response :: struct {
 // neutral `Inbound` and nothing downstream can tell the two transports apart.
 // That is what makes the 4 MiB cap and the JSON errors identical here and on a
 // real connection (R-10), rather than a claim this facade makes about itself.
+// WP19: `headers` is the THIRD fully visible default parameter, on exactly the
+// ADR-021 terms the first two set — the whole callable contract stays inside
+// the frozen record, and every earlier call shape compiles unchanged. Each
+// element is one header line, `"Name: value"`: split at the FIRST colon, with
+// optional whitespace (SP/HTAB) trimmed around the value — the same field
+// parsing a socket transport performs, so the in-memory request carries
+// exactly what the wire would deliver. Inner colons stay in the value; an
+// element with no colon is a name with an empty value (an empty value is a
+// PRESENT header). No test-only header type exists and `Header_Pair` stays
+// private: strings were chosen over a pair type precisely so the test-support
+// ledger stays at 2 (spec §9.3's stated contingency was not needed).
 test_request :: proc(
 	a: ^App,
 	method: Method,
 	path: string,
 	body: string = "",
 	query: string = "",
+	headers: []string = nil,
 ) -> Recorded_Response {
 	recorder := &a.private.test_transport
 
@@ -90,8 +102,21 @@ test_request :: proc(
 	// pointer and does nothing when it is nil.
 	a.private.test_teardown = testing.destroy
 
-	// 1. The machinery constructs the neutral inbound request.
+	// 1. The machinery constructs the neutral inbound request. The header
+	//    lines are split into neutral pairs here, in the facade — views over
+	//    the caller's strings, alive for this call, exactly like `body`. The
+	//    slice is transient (temp allocator); the core's own conversion in
+	//    `driver_run` treats it precisely as it treats a socket adapter's.
 	req := testing.build_request(method_token(method), path)
+
+	inbound_headers: []transport.Header
+	if len(headers) > 0 {
+		inbound_headers = make([]transport.Header, len(headers), context.temp_allocator)
+		for line, i in headers {
+			name, value := test_header_split(line)
+			inbound_headers[i] = transport.Header{name = name, value = value}
+		}
+	}
 
 	// 2-3. WP9 — the SHARED driver pipeline: neutral inbound -> Context ->
 	//      dispatch -> finalize a missing response. `serve` runs exactly this
@@ -113,7 +138,8 @@ test_request :: proc(
 			// A view over the caller's string for the duration of this call. The
 			// core copies whatever it decides to keep, exactly as it does for a
 			// socket, so nothing here outlives the request.
-			body   = transmute([]u8)body,
+			body    = transmute([]u8)body,
+			headers = inbound_headers,
 		},
 	)
 
@@ -145,6 +171,36 @@ test_request :: proc(
 	//    valid until `web.destroy(&app)`, so it is unaffected by the teardowns
 	//    above.
 	return Recorded_Response{status = Status(status_int), body = body}
+}
+
+// test_header_split parses one `"Name: value"` line: the name is everything
+// before the FIRST colon, the value is everything after it with optional
+// whitespace (SP/HTAB) trimmed from both ends — RFC 9110 field parsing, which
+// is what a socket transport delivers to the core. A line with no colon is a
+// name with an empty value. Both results are views over `line`; nothing is
+// copied and nothing is allocated.
+@(private)
+test_header_split :: proc(line: string) -> (name: string, value: string) {
+	colon := -1
+	for i in 0 ..< len(line) {
+		if line[i] == ':' {
+			colon = i
+			break
+		}
+	}
+	if colon < 0 {
+		return line, ""
+	}
+
+	name = line[:colon]
+	value = line[colon + 1:]
+	for len(value) > 0 && (value[0] == ' ' || value[0] == '\t') {
+		value = value[1:]
+	}
+	for len(value) > 0 && (value[len(value) - 1] == ' ' || value[len(value) - 1] == '\t') {
+		value = value[:len(value) - 1]
+	}
+	return name, value
 }
 
 // response_headers_neutral converts the framework's private header pairs into
