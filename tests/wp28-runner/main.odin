@@ -49,6 +49,7 @@ CANDIDATES :: [?]string {
 	"hybrid",
 	"radix_ptr",
 	"radix_idx",
+	"radix_arr",
 }
 
 main :: proc() {
@@ -81,13 +82,14 @@ main :: proc() {
 				warmup := iterations / WARMUP_FRACTION
 
 				lin: sh.Linear;imp: sh.Linear_Improved;buc: sh.Bucketed
-				hyb: sh.Hybrid;rp: sh.Radix_Ptr;ri: sh.Radix_Idx
+				hyb: sh.Hybrid;rp: sh.Radix_Ptr;ri: sh.Radix_Idx;ra: sh.Radix_Arr
 				ok := sh.linear_build(&lin, patterns[:])
 				ok &= sh.linear_improved_build(&imp, patterns[:])
 				ok &= sh.bucketed_build(&buc, patterns[:])
 				ok &= sh.hybrid_build(&hyb, patterns[:])
 				ok &= sh.radix_ptr_build(&rp, patterns[:])
 				ok &= sh.radix_idx_build(&ri, patterns[:])
+				ok &= sh.radix_arr_build(&ra, patterns[:])
 				if !ok {
 					fmt.eprintf("FAILED: a table did not build at %d/%v\n", count, shape)
 					os.exit(1)
@@ -104,7 +106,7 @@ main :: proc() {
 
 					for i in 0 ..< warmup {
 						path := paths[i % len(paths)]
-						m := run_one(cand, &lin, &imp, &buc, &hyb, &rp, &ri, path)
+						m := run_one(cand, &lin, &imp, &buc, &hyb, &rp, &ri, &ra, path)
 						if !m.ok {
 							misses += 1
 						}
@@ -113,7 +115,7 @@ main :: proc() {
 					for i in 0 ..< iterations {
 						path := paths[i % len(paths)]
 						start := tick()
-						m := run_one(cand, &lin, &imp, &buc, &hyb, &rp, &ri, path)
+						m := run_one(cand, &lin, &imp, &buc, &hyb, &rp, &ri, &ra, path)
 						bench.samples_add(&samples, elapsed(start))
 						if !m.ok {
 							misses += 1
@@ -163,6 +165,7 @@ main :: proc() {
 				sh.hybrid_destroy(&hyb)
 				sh.radix_ptr_destroy(&rp)
 				sh.radix_idx_destroy(&ri)
+				sh.radix_arr_destroy(&ra)
 				sh.free_patterns(&patterns, &paths)
 				ci += 1
 			}
@@ -213,6 +216,7 @@ run_one :: proc(
 	hyb: ^sh.Hybrid,
 	rp: ^sh.Radix_Ptr,
 	ri: ^sh.Radix_Idx,
+	ra: ^sh.Radix_Arr,
 	path: string,
 ) -> sh.Match {
 	switch cand {
@@ -228,6 +232,8 @@ run_one :: proc(
 		return sh.radix_ptr_match(rp, path)
 	case 5:
 		return sh.radix_idx_match(ri, path)
+	case 6:
+		return sh.radix_arr_match(ra, path)
 	}
 	return sh.MISS
 }
