@@ -466,6 +466,24 @@ disagreement invisible — a 404 is not a diagnosis. **The trailing slash keeps
 its Phase-1 meaning:** it is not an interior empty segment, and `/users/`
 remains a legal distinct pattern. 31b implements it after WP29.
 
+**31b DONE, 2026-07-20 — `web/path_policy.odin`, `tests/wp31-public-surface`.**
+Four rules, exhaustive: a dot segment, an interior empty segment, a
+percent-encoded slash, a percent-encoded NUL. The check sits on the shared
+dispatch path BEFORE matching and before the chain, uses the existing
+`bad_request` envelope, allocates nothing, and emits no `Framework_Event` —
+a rejected path is a client error, like a 404.
+
+**The trailing slash has its own test, because the obvious implementation of the
+interior-empty-segment rule breaks it.** `/users/` ends with an empty segment,
+and "reject any empty segment" would answer 400 to a legal, distinct Phase-1
+pattern. `/users` and `/users/` remain two different paths.
+
+**The other half is tested just as hard:** ordinary percent-encoding is neither
+decoded nor refused, `a.txt` and `a..b` are ordinary segments rather than dot
+segments, and a trailing slash on an unregistered path is still a 404 and not a
+400. A rejection policy that quietly grew would break applications whose paths
+were legal the day they were written.
+
 ### WP32 — HEAD, OPTIONS, and the 501 decision
 
 **Type: SPEC + IMPLEMENTATION. Requires owner approval — observable HTTP

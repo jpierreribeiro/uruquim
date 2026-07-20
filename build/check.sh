@@ -815,6 +815,16 @@ trap - EXIT
 test ! -d "$URUQUIM_WP27_TMP" || fail "the throwaway WP27 internal-test package was not removed"
 echo "PASS: WP27 allocation audit ran against the real sources; throwaway package removed"
 
+# WP31b — the path policy. Rejection rules, and the much larger set that is NOT
+# rejected: a policy that quietly grew would break applications whose paths were
+# legal the day they were written. The trailing-slash case has its own test
+# because the obvious implementation of the interior-empty-segment rule breaks
+# `/users/`, a legal Phase-1 pattern.
+echo "--- WP31b path policy: reject, do not transform (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp31-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp31-public-surface"
+
 # WP28 — the route representation shootout, correctness half.
 #
 # It asserts that seven representations return byte-identical answers, and that a
