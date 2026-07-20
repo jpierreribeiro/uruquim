@@ -36,6 +36,30 @@ freeze amendments.
 
 ### Added
 
+- **The `logger` middleware** (Phase 2, WP22): `web.logger`, a `Handler` value,
+  **opt-in** — `web.use(&app, web.logger)`; there is no default-on logging
+  (G-08). One `.Info` line per request, written through `context.logger` after
+  the chain unwinds, carrying exactly three fields: method, **registered route
+  pattern**, and **committed** status. It never logs the raw path, the query
+  string, a header name or value, a body byte, or a captured path-parameter
+  value — asserted on the exact bytes of the line, not described. A miss logs
+  `-` for the route rather than falling back to the path, and a request whose
+  chain committed nothing logs `-` for the status rather than reporting a
+  response the logger never watched being sent (the driver's 500 finalization
+  happens after dispatch returns; that failure reaches `web.observe`, which
+  does see it). Misses are logged, so 404s and 405s are visible. The line is
+  composed in a fixed stack buffer that no response can alias: a route field
+  too long is cut on an escape boundary and **marked** `...[truncated]` — never
+  grown silently, never dropped silently — and the status still follows the
+  mark. CR, LF, backslash and control bytes are escaped, so a route pattern
+  cannot forge a second log record. It imports **nothing**: not `core:log`
+  (measured at ~37 KiB added to every application, referenced or not) and not
+  `core:fmt`; an application that never names `web.logger` links zero logger
+  symbols and its binary is byte-identical to one built without it, proven with
+  `nm` against a positive control. No levels, sinks, sampling, structured
+  fields or latency measurement — those are Phase-4 observability, and a log
+  ring or drop policy would put an unbounded queue behind a bounded-buffer
+  claim. Application ledger 42 → 43 (freeze Amendment 8).
 - **Typed framework-error observer** (Phase 2, WP20): `web.observe`,
   `web.Framework_Event` and the now-public `web.Framework_Error`. One observer
   per application receives a typed event — kind, method, registered route

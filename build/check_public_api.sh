@@ -99,6 +99,7 @@ get
 header
 internal_error
 json
+logger
 mount
 next
 no_content
@@ -444,7 +445,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 42 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer)"
+echo "public API contract: application ledger is exactly 43 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -488,16 +489,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 42; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 42 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error)"
+if test "$URUQUIM_APP_COUNT" -ne 43; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 43 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error + WP22 logger)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 44; then
-  fail "exported union is $URUQUIM_UNION, not 44 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 45; then
+  fail "exported union is $URUQUIM_UNION, not 45 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 44"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 45"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -546,7 +547,7 @@ echo "public API contract: web/testing bridge exports match the locked minimal s
 # ---------------------------------------------------------------------------
 for URUQUIM_FUTURE in group state app_with_state \
   serve_with serve_transport app_init \
-  redirect conflict bytes logger recovery request_id cors \
+  redirect conflict bytes recovery request_id cors \
   Response Header Header_Pair Header_View_Internal Params Route_Info \
   Transport method_raw headers commit; do
   if grep -qx "$URUQUIM_FUTURE" <<<"$URUQUIM_ACTUAL_EXPORTS"; then
@@ -1183,7 +1184,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 42 + test-support ledger 2 = union 44"
+echo "public API contract: application ledger 43 + test-support ledger 2 = union 45"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"

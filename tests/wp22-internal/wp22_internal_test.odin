@@ -251,10 +251,14 @@ wp22_truncation_never_splits_an_escape :: proc(t: ^testing.T) {
 	body := line[len("uruquim: GET "):]
 	cut := strings.index(body, LOGGER_TRUNCATED)
 	testing.expect(t, cut > 0, "this pattern must truncate")
+	// Every pattern begins with `/` — that one byte is the leading unit, and
+	// everything after it is two-byte `\r` units.
 	field := body[:cut]
-	testing.expect(t, len(field) % 2 == 0, "the escaped CR field must be whole two-byte units")
-	for i := 0; i < len(field); i += 2 {
-		testing.expect(t, field[i] == '\\' && field[i + 1] == 'r', "only whole \\r units")
+	testing.expect(t, field[0] == '/', "the pattern's leading slash survives")
+	rest := field[1:]
+	testing.expect(t, len(rest) % 2 == 0, "the escaped CR field must be whole two-byte units")
+	for i := 0; i < len(rest); i += 2 {
+		testing.expect(t, rest[i] == '\\' && rest[i + 1] == 'r', "only whole \\r units")
 	}
 }
 

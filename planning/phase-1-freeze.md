@@ -801,3 +801,65 @@ Evidence rows, same schema as §5:
 | `observe` | A | WP20 | `tests/wp20-public-surface/contract_test.odin::wp20_public_signatures_are_pinned` | `tests/wp20-internal/wp20_internal_test.odin::wp20_last_observer_wins` | `docs/ai-context.md::observe` | one procedure pointer on the App; last wins; owns no storage |
 | `Framework_Event` | A | WP20 | `tests/wp20-public-surface/contract_test.odin::wp20_public_signatures_are_pinned` | `tests/wp20-internal/wp20_internal_test.odin::wp20_the_event_survives_the_request_by_value` | `docs/ai-context.md::Framework_Event` | passed by value; `route` is an App-owned pattern valid until `destroy` |
 | `Framework_Error` | A | WP20 | `tests/wp20-public-surface/contract_test.odin::wp20_public_signatures_are_pinned` | `tests/wp20-internal/wp20_internal_test.odin::wp20_marshal_failure_is_observed_once` | `docs/ai-context.md::Framework_Error` | closed enum, value type; grows only by ratification |
+
+## Amendment 8 — WP22: the `logger` middleware
+
+**Date:** 2026-07-20. **Authority:** owner — the approved Phase-2 ledger
+(`planning/phase-2-spec.md` §9.2, row `logger`) and `planning/phase-2-plan.md`
+WP22, which the spec records as carrying **no new decision**.
+**Ledger effect: application 42 → 43.** 43 application + 2 test-support = 45.
+The snapshot diff for this amendment was exactly one added line.
+
+The recorded line:
+
+```
+application	proc	logger :: proc(ctx: ^Context)
+```
+
+`logger` is a `Handler` value, not a constructor and not a configurable object.
+That is the whole shape: there is no `logger_with(...)`, no level, no sink and
+no format argument, because every one of those would be a second public name
+for an operation that already has one (G-01) and would freeze a configuration
+contract Phase 4 owns.
+
+**It is OPT-IN.** `web.app()` does not install it. G-08 forbids inventing a
+default, and the phases document makes only recovery default-on; an application
+that never writes `web.use(&app, web.logger)` logs nothing and links none of
+this code.
+
+**What the line may contain is frozen with the symbol**, because for this
+component the OUTPUT is the contract. Method, registered route pattern, and
+committed status — nothing else. Never the raw path, the query string, a header
+name or value, a body byte, or a captured parameter value. The route field
+carries the same low-cardinality identity rule §6.2 imposes on
+`Framework_Event`, and for the same reason: on a miss there is no pattern, so
+the field is `-` and does **not** fall back to the path.
+
+Three properties are recorded because they are the ones a later change would
+silently break:
+
+* **Truncation is observable.** The line is composed in a fixed stack buffer
+  bounded by `LOGGER_LINE_MAX`. A route field that does not fit is cut on an
+  escape-unit boundary and marked `...[truncated]`, and the status still
+  follows the mark. Growing the buffer would defeat the fixed buffer and
+  re-import the per-request allocation it exists to avoid; dropping the line
+  would make the logger lie by omission about traffic it saw. Both are excluded
+  by tests, and a positive control asserts an ordinary pattern is **not**
+  marked.
+* **The status is read, never predicted.** The line is written after `next`
+  returns (ADR-022 B1 is what makes that legal to promise). When the chain
+  committed nothing, the field is `-`: the driver's 500 finalization happens
+  after dispatch returns — after this middleware's frame is gone — so the
+  logger did not see it, and says so rather than inventing it. That failure is
+  reported through the WP20 observer, which is the channel that does see it.
+* **It costs nothing when unused.** No import at all: not `core:log` (WP6
+  measured ~37 KiB added to every application, referenced or not), not
+  `core:fmt`. An application that never names `web.logger` links zero logger
+  symbols, proven with `nm` against a positive control in
+  `build/check_wp22_controls.sh`.
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `logger` | A | WP22 | `tests/wp22-public-surface/contract_test.odin::wp22_public_signature_is_pinned` | `tests/wp22-public-surface/contract_test.odin::wp22_public_never_emits_query_header_or_body` | `docs/middleware.md::web.logger` | a `Handler` value; composes into a fixed STACK buffer no response can alias; owns no storage; consults the commit guard through `logger_status` before reading response state |
