@@ -953,6 +953,18 @@ commands and outputs.
   **Evidence for (B) or (C) must be a real program that cannot be written
   cleanly today, never a hypothetical.**
 
+- **Observed datapoint (2026-07-20, reference only).** One external real
+  program was examined: `arturfil/coffees_odin`, a third-party CRUD service
+  written against the same odin-http backend Uruquim vendors. Its auth
+  middleware validates the JWT and **discards the claims**; its `/auth/me`
+  handler then re-validates the same token itself. So a real program on this
+  exact backend pays the revalidation cost today — at string-comparison cost,
+  with no database round-trip — and its author neither threads the user down
+  as a parameter nor works around the repetition. Recorded as an observation
+  from a reference program, not as evidence for any option: the burden of
+  proof above is unchanged, and it names a real program **measured in this
+  tree**.
+
 - **Public impact.** (A) zero symbols. (B) and (C) add public surface, a
   capacity-ledger row, a lifetime-ledger row, and a claim with a negative
   control.

@@ -24,8 +24,9 @@ invalidate something the skeleton plan in `later-phases-plan.md` assumed.
 
 Five builds of an **identical, unmodified** source tree produced five different
 binaries: 876,304 / 876,352 / 876,352 / 876,368 / 876,360 bytes, five distinct
-md5 sums. The vendored `nbio` emits polymorphic instantiations whose mangled
-parameter names vary between runs.
+md5 sums. The vendored backend's use of `core:nbio` — the event loop comes from
+the pinned toolchain, not the vendor tree — emits polymorphic instantiations
+whose mangled parameter names vary between runs.
 
 **Consequences for Phase 3, which is the phase that lives on measurement:**
 
@@ -57,11 +58,14 @@ Phase 3 needs a clock in two places, and they are **not** the same problem:
   application ever links it. This is not a preference; importing `core:time`
   into `web` to benchmark it would change the thing being benchmarked.
 * **Timeouts (WP36)** need a clock **on the serving path**. But that path is
-  `web/internal/transport`, which already imports `core:net` — so the cost
-  question there is entirely different from the cost question in `web`, and it
-  must be measured rather than assumed either way. **A work package that adds
-  a `core:time` import to `web` itself needs owner approval and a measured
-  justification.**
+  `web/internal/transport`, which already imports `core:net` — and the vendored
+  backend behind it (`vendor/odin-http/server.odin`) already imports `core:time`
+  and `core:nbio`, so the serving path links a clock today whether or not any
+  Uruquim package names one. The open cost question is what an *additional*
+  `core:time` import into Uruquim's own packages costs — entirely different from
+  the cost question in `web`, and it must be measured rather than assumed either
+  way. **A work package that adds a `core:time` import to `web` itself needs
+  owner approval and a measured justification.**
 
 The skeleton plan did not distinguish these two. It must.
 
@@ -455,8 +459,9 @@ capacity-ledger amendment.**
   system-specification concept from a runtime that sizes shards, pools and
   rings; Uruquim sizes none of those.
 * **FINDING-B applies:** timeouts need a clock on the serving path. That path
-  is `web/internal/transport`, which already imports `core:net` — a different
-  cost question from importing into `web`, and it must be **measured**.
+  is `web/internal/transport`, which already imports `core:net`, and the
+  vendored backend behind it already links `core:time` — a different cost
+  question from importing into `web`, and it must be **measured**.
 * **FINDING-C applies:** the capacity ledger's "4 MiB, fixed, not configurable
   until Phase 3" row changes **in this commit**, and the claim ledger gains a
   row for whatever new promise the options make.
@@ -695,6 +700,60 @@ workload matrix — it is what exposed the eighth defect in this plan's own
 review). **P-T5**, the deterministic transport fault plan, is **not** scheduled
 here: it is a hardening lab and belongs with Phase 4, but it is named so the
 Phase-4 planner finds it rather than inventing it.
+
+---
+
+## 6b. External reference programs — same discipline, smaller scale (added 2026-07-20)
+
+Two further external sources were checked for this plan, and the Tina rule of
+§6 applies to both, unchanged: **reference, never architecture; never citable
+as evidence; never a dependency; absence never a blocker.** Anything taken from
+them is proven here, with a test or a measurement that lives in this tree.
+
+### `laytan/odin-http` upstream, and its documentation
+
+https://odin-http.laytan.dev/http/ documents the package whose root server
+Uruquim already vendors at a pinned commit (`vendor/odin-http/VENDOR.md`), so
+this is the one external source that is also partly *in* the tree. Two things
+are worth knowing for Phase 3:
+
+* **WP36 has an in-tree precedent to read before designing anything:**
+  `Server_Opts` with `Default_Server_Opts` (`vendor/odin-http/server.odin`) is
+  an options struct with package defaults — the same shape the P3-11 amendment
+  chose. Note the difference before taking anything from it: upstream's default
+  is a **mutable global variable**, while the precedent this plan names —
+  `core:net`'s `DEFAULT_TCP_OPTIONS` — is a constant. Keep the constant; a
+  default an application can mutate is a configuration channel nobody
+  validates.
+* The backend already imports `core:time` and `core:nbio` on the serving path
+  (FINDING-B, as stated above): the clock exists there today, and the open cost
+  question is about Uruquim's own packages.
+
+### `arturfil/coffees_odin` — a real application on the same backend
+
+https://github.com/arturfil/coffees_odin is a third-party CRUD service written
+against the same odin-http backend: coffees and users, Postgres, JWT auth,
+hand-rolled CORS. Its value is as a **specimen** of what a real Odin web
+application looks like today, and it touches four Phase-3 questions:
+
+* **WP28 — route cardinality.** It registers **13 routes**. That is context for
+  "the cardinalities this project actually targets" in the stopping rule — a
+  real application sitting exactly in the 5–50 band — and it is context only,
+  never evidence (C-5): Uruquim's numbers come from Uruquim's harness.
+* **WP37 / ADR-028 — the revalidation pattern, observed in the wild.** Its auth
+  middleware validates the JWT and **discards the claims**; its `/auth/me`
+  handler then re-validates the same token itself. A real program on this exact
+  backend pays the revalidation cost today, does not thread the user down as a
+  parameter, and does not work around the repetition. The datapoint is recorded
+  in ADR-028 as an observation; it does not move the burden of proof, which
+  stays a real program **measured in this tree**.
+* **WP32 — OPTIONS demand.** It hand-rolls a CORS middleware that answers
+  OPTIONS preflight itself, because the framework layer offers nothing.
+  Real-world demand for the automatic-OPTIONS decision, observed rather than
+  hypothesised.
+* **WP33 — a null result worth keeping.** None of its 13 routes uses more than
+  one path parameter. One specimen proves little, but it is one more reason
+  WP33 is capacity work rather than urgent demand.
 
 ---
 
