@@ -151,6 +151,40 @@ The test-support machinery links only when `test_request` is called, and the
 backend only when `serve` is reachable (WP11 measured 0/11 and 0/7 symbols
 respectively).
 
+**Phase-2 additions (WP24 measurement, debug builds, bytes).** Same method,
+against a hello-world baseline built from the same tree:
+
+| Program | Size | Delta vs baseline | Delta vs previous row |
+|---|---|---|---|
+| hello (text only) | 876,616 | baseline | — |
+| + `use` / `next` (one no-op middleware) | 885,064 | +8,448 | +8,448 |
+| + `header` / `bearer_token` in the handler | 885,216 | +8,600 | **+152** |
+| + `request_id` | 885,520 | +8,904 | +456 |
+| + `Router` / `mount` | 889,488 | +12,872 | +3,968 |
+| + `logger` | 889,472 | +12,856 | +4,408 |
+| + `request_id` **and** `logger` | 889,968 | +13,352 | — |
+
+**The noise floor is ~100 bytes and it is stated rather than hidden.** Three
+builds of the IDENTICAL baseline tree produced 876,616 / 876,552 / 876,544
+bytes: this toolchain does not build reproducibly (see `planning/phase-2-plan.md`
+WP22 Amendment 1). Any delta below ~100 bytes in this table means "no
+measurable cost", not a precise figure.
+
+Reading the table:
+
+* **`header` and `bearer_token` are free** (+152, at the noise floor). They
+  allocate nothing and return views over headers the transport had already
+  materialised — WP19 turned an existing cost into a used one rather than
+  adding one.
+* **`request_id` is nearly free** (+456) because it imports nothing: no clock,
+  no CSPRNG, no formatter. That number is the whole reason the ASLR-seed design
+  was chosen over `base:intrinsics` or `core:time`.
+* **The middleware mechanism is the one real cost** (+8,448), paid once by any
+  application that calls `use` at all, and **not paid** by one that never does.
+* **`logger` costs +4,408 when used and 0 when not** — an application that
+  never names `web.logger` links zero of its symbols, proven with `nm` and a
+  positive control in `build/check_wp22_controls.sh`.
+
 ---
 
 ## 3. Concrete frictions
