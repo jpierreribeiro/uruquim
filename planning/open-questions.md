@@ -163,18 +163,27 @@ owning WP does not rediscover them.
 | OQ-28 | Which licence? | MIT matches the vendored dependency and is lowest-friction | corrective PR, before Phase 2 | **yes** — cannot be defaulted by an agent |
 
 
-## OQ — request-scoped typed state (opened 2026-07-20, tracked as ADR-028)
+## OQ — request-scoped typed state — CLOSED, 2026-07-20 (ADR-028, WP37)
 
-Can a middleware hand a typed value to a handler? Today it cannot, and the
-canonical auth pattern pays for it — `current_user` revalidates the token on
-every call.
+**Answered: it does not exist, and it is not scheduled.** A middleware cannot
+hand a typed value to a handler, and the canonical auth pattern pays for it —
+`current_user` revalidates the token on every call. **That cost is permanent
+until an ADR decides otherwise**, and `build/check_examples.sh` rejects a
+comment that schedules its removal.
 
-**This is not ADR-004.** That ADR accepted `web.state` for APPLICATION state
-(one rawptr+typeid on the App, set before serving). Per-request values have a
-different lifetime and owner, and conflating the two produced a false promise
-in shipped documentation that had to be corrected under G-08.
+**This was never ADR-004,** and the conflation is what made the question worth
+tracking separately. ADR-004 accepted `web.state` for APPLICATION state — one
+`rawptr`+`typeid` on the App, set before serving — which WP37 shipped.
+Per-request values have a different lifetime and a different owner, and
+treating them as one produced a false promise in shipped documentation that had
+to be corrected under G-08.
 
-Research finding C-6 argues against a request-scoped mechanism, and ADR-028
-recommends ratifying the cost permanently. **Until ADR-028 is accepted, no
-document may state or imply that the revalidation cost will go away.**
-Owned by WP37 (`planning/phase-3-plan.md`).
+Research finding C-6 is the substance of the answer: Go's `context.WithValue`
+and Rust's `http::Extensions` exist for type-erased, dynamically-keyed state
+crossing library boundaries, which Uruquim does not have — so the finding
+SUPPORTS G-03 rather than challenging it. ADR-028 accepted option 1 and placed
+the burden of proof on reopening: the evidence must be **a real program that
+cannot be written cleanly in this tree**, never a hypothetical. Option 1 is
+also the only reversible arm — adding a mechanism later is a pure
+strengthening, while shipping one and withdrawing it breaks applications at
+compile time with no deprecation window that helps.

@@ -40,7 +40,9 @@ a standardized JSON envelope.
 
 **Not available yet** — do not emit any of it:
 configurable limits and read/write timeouts (Phase 3); graceful shutdown with
-a deadline (Phase 4). Panic recovery does not exist and never will: Odin has
+a deadline (Phase 4). There is **no request-scoped state** and there will not
+be one (ADR-028): `ctx` is not an extension bag, and a value a middleware
+computes for a handler is passed down or recomputed. Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
 
 **Fault behaviour — state it accurately, both halves (ADR-020).**
@@ -56,12 +58,13 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **45** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **47** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
-`logger` and `request_id` from Phase 2, and `route` from Phase 3). The
-test-support API is a separate ledger of exactly **2**. Union: **47**. Do not
-fold them together and do not invent a third form.
+`logger` and `request_id` from Phase 2, and `route`, `app_with_state` and
+`state` from Phase 3). The test-support API is a separate ledger of exactly
+**2**. Union: **49**. Do not fold them together and do not invent a third
+form.
 
 ## Application
 
@@ -90,6 +93,46 @@ main :: proc() {
 `serve(a: ^App, port: int)` validates the port (1..65535), binds IPv4 Any and
 blocks. An invalid port or a bind failure is logged and returns without
 serving.
+
+### Application state
+
+```text
+app_with_state(&state) -> App     app() plus ONE typed value; rejects nil
+state(ctx, T) -> ^T               that value, typed; asserts before it casts
+```
+
+<!-- fragment: phase3/app-state -->
+```odin
+App_State :: struct {
+	greeting: string,
+}
+
+main :: proc() {
+	state := App_State{greeting = "hi"}
+	app := web.app_with_state(&state)
+	defer web.destroy(&app)
+
+	web.get(&app, "/config", show_config)
+	web.serve(&app, 8080)
+}
+
+show_config :: proc(ctx: ^web.Context) {
+	s := web.state(ctx, App_State)
+	web.ok(ctx, s^)
+}
+```
+
+**One value, APP-scoped, created before serving** — a database pool, a config
+struct, a cache. `web.app_with_state` gives the same defaults as `web.app()`
+plus that value; a nil pointer rejects the application fail-closed.
+
+- the App stores the **pointer**, so a handler writing through it mutates your
+  value. The value must **outlive the App** — put it in `main`, beside it;
+- `web.state(ctx, T)` asserts that state was registered and that `T` is
+  **exactly** the registered type, then returns `^T`. A wrong type aborts: it
+  is a programming error, not a runtime condition (ADR-020);
+- handlers and middleware read it the same way. There is no second name;
+- it is **not** per-request storage, and there is none.
 
 ## Routing
 
@@ -541,7 +584,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-45 application symbols.
+47 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
@@ -616,14 +659,6 @@ See `examples/02-json-api` for a CRUD-shaped API and
 
 **Everything below is UNAVAILABLE in Phase 1. Do not emit it.** It is listed
 only so an agent recognizes the names and refuses them.
-
-<!-- phase: 3; unavailable -->
-```odin
-// Phase 3 — unavailable today. (web.group is NOT here: it is rejected
-// forever by ADR-024, not deferred.)
-state := web.state(ctx, App_State)
-app := web.app_with_state(&my_state)
-```
 
 <!-- phase: 4; unavailable -->
 ```odin

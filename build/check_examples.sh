@@ -39,13 +39,14 @@ URUQUIM_EXPECTED_EXAMPLES="01-hello-world
 03-route-params
 04-middleware
 05-route-groups
-06-authentication"
+06-authentication
+07-app-state"
 
 test -d "$URUQUIM_EXAMPLES" || fail "examples/ does not exist"
 
 for URUQUIM_NAME in $URUQUIM_EXPECTED_EXAMPLES; do
   test -d "$URUQUIM_EXAMPLES/$URUQUIM_NAME" ||
-    fail "examples/$URUQUIM_NAME/ is missing; the six examples are a contract (WP10 D3, extended by WP24)"
+    fail "examples/$URUQUIM_NAME/ is missing; the seven examples are a contract (WP10 D3, extended by WP24 and WP37)"
   test -f "$URUQUIM_EXAMPLES/$URUQUIM_NAME/main.odin" ||
     fail "examples/$URUQUIM_NAME/main.odin is missing; each example is a self-contained program"
 done
@@ -69,10 +70,10 @@ for URUQUIM_NAME in $URUQUIM_EXPECTED_EXAMPLES; do
   # WP24: `use`/`next` (WP17), `router`/`mount` (WP18), `header`/`bearer_token`
   # (WP19), `logger` (WP22) and `request_id` (WP23) are RATIFIED application
   # symbols and left this list as they shipped — examples 04-06 exist to teach
-  # them. `web.group` stays FOREVER: ADR-024 rejects it in every phase, so it is
+  # them. WP37 removed `web.state` and `web.app_with_state` for the same
+  # reason, and example 07 exists to teach them. `web.group` stays FOREVER: ADR-024 rejects it in every phase, so it is
   # not deferred API, it is refused API.
   for URUQUIM_FUTURE in 'web\.group' \
-    'web\.state' 'web\.app_with_state' \
     'web\.serve_with' 'web\.serve_transport' 'web\.body_limit' 'web\.bytes' \
     'web\.redirect' 'web\.conflict'; do
     if grep -nE "$URUQUIM_FUTURE" <<<"$URUQUIM_CODE"; then
@@ -148,4 +149,4 @@ fi
 rm -rf "$URUQUIM_BIN_TMP"
 trap - EXIT
 
-echo "PASS: the six examples compile and use only the public surface"
+echo "PASS: the seven examples compile and use only the public surface"

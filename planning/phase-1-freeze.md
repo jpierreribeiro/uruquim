@@ -1000,3 +1000,79 @@ Evidence rows, same schema as §5:
 | Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
 |---|---|---|---|---|---|---|
 | `route` | A | WP34 | `tests/wp34-public-surface/contract_test.odin::wp34_the_route_signature_is_pinned` | `tests/wp34-public-surface/contract_test.odin::wp34_a_parametric_route_reports_the_pattern_and_never_the_path` | `docs/ai-context.md::web.route` | App owns the pattern (cloned at registration, freed once by `destroy`); the result is a borrowed view valid until `destroy`, the single documented exception to request-scoped views; allocates nothing |
+
+## Amendment 11 — WP37: typed application state (`app_with_state`, `state`)
+
+**Date:** 2026-07-20. **Authority:** the **ADR-029 delegation**
+(`planning/phase-3-plan.md` §2b: *"WP37 implements ADR-004 only"*), over
+**ADR-004** (ACCEPTED, option A, with AMEND-1) and **ADR-028** (ACCEPTED,
+option 1).
+**Ledger effect: application 45 → 47.** 47 application + 2 test-support = 49.
+The snapshot diff for this amendment was exactly two added lines; no existing
+row changed a byte.
+
+The two recorded lines:
+
+```
+application	proc	app_with_state :: proc(state: ^$T) -> App
+application	proc	state :: proc(ctx: ^Context, $T: typeid) -> ^T
+```
+
+**Two symbols and not one**, because construction and access are different
+operations with different failure modes: one rejects nil at boot, the other
+asserts type identity per call.
+
+**WHAT IS FROZEN IS THE SHAPE OF THE CALL SITE.** `web.state(ctx, App_State)`
+carries no generic noise, and no handler signature acquires a type parameter.
+That is precisely what ADR-004 chose option A for: option B — a parametric
+`App(S)`/`Context(S)` — would have put a type argument on every handler in
+every program. The declared price is a runtime assert instead of a compile
+error, and it is paid where it can be seen: `state` asserts registration and
+then EXACT `typeid` equality before the cast. There is no subtyping walk and no
+"close enough"; casting a `^Config` to a `^Database` because both are pointers
+is the defect the `typeid` exists to make impossible.
+
+**A nil state rejects the application (AMEND-1),** through the ADR-019 poison
+mechanism rather than a new one. An App that accepted nil would abort inside
+the first request instead — the same failure, discovered later, in front of a
+client.
+
+**The `rawptr` is private and that is the whole basis on which G-03 permits
+it.** Neither exported signature carries an untyped pointer: `app_with_state`
+takes `^$T`, `state` returns `^T`. This is the narrowing
+`build/check_public_api.sh` anticipated by name in the comment beside the ban.
+Enforcing it exposed a hole in the check itself, closed in the same change: the
+exported-declaration extractor treated any declaration line not ending in `{`
+as complete, so a MULTI-LINE exported signature was never scanned at all. It
+now follows a signature to its closing parenthesis, and stops at a procedure's
+opening brace — a body is implementation, a signature is surface, which is what
+G-03 always said in words.
+
+**NO BACK-POINTER TO THE APP.** The driver copies the pointer and the `typeid`
+onto the Context at the start of the request, exactly as it copies the WP20
+observer. `Context_Internal` still holds no `^App` — the WP4 D3 decision stands
+— and both transports get the state through one line on the shared pipeline
+(R-10).
+
+**ADR-028 IS THE OTHER HALF OF THIS AMENDMENT, and it ships nothing.**
+Request-scoped typed state **does not exist and is not scheduled**. C-6 found
+that Go's `context.WithValue` and Rust's `http::Extensions` exist for
+type-erased, dynamically-keyed state crossing library boundaries — which
+Uruquim does not have — and concluded that this SUPPORTS G-03. The honest
+consequence is recorded rather than softened: the canonical auth pattern's
+revalidation cost (WP24) stands until an ADR decides otherwise, and
+`build/check_examples.sh` rejects a comment that schedules its removal.
+
+**Lifetime, stated plainly because no assert can enforce it:** the pointed-to
+value must outlive the App. The framework owns nothing here — `destroy` has
+nothing to release, because it allocated nothing — and a pointer to a local in
+a procedure that has returned is dangling with the type still right and the
+memory still mapped. `examples/07-app-state` teaches the rule as LAYOUT: the
+state and the App are both locals of `main`.
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `app_with_state` | A | WP37 | `tests/wp37-public-surface/contract_test.odin::wp37_the_state_signatures_are_pinned` | `tests/wp37-public-surface/contract_test.odin::wp37_a_nil_state_rejects_the_application` | `docs/ai-context.md::web.app_with_state` | stores the CALLER's pointer and a `typeid`; owns nothing and allocates nothing; the caller owns the value and must outlive the App; `destroy` releases nothing here |
+| `state` | A | WP37 | `tests/wp37-public-surface/contract_test.odin::wp37_the_requested_type_decides_the_result_type` | `tests/wp37-public-surface/contract_test.odin::wp37_a_handler_mutates_the_original_value` | `docs/ai-context.md::web.state` | returns the caller's own pointer, typed; asserts registration and exact `typeid` before the cast; borrows, owns nothing, allocates nothing |

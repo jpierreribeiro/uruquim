@@ -15,9 +15,11 @@ these forms. If a pattern here conflicts with any other document except
 > They are NOT available today and their code blocks are marked accordingly —
 > do not copy them.
 >
-> Still ahead: typed state (Phase 3); configurable limits and read/write
-> timeouts (Phase 3); graceful shutdown with a deadline (Phase 4). Panic
-> recovery is NOT on that list and never will be: Odin has no recoverable
+> Still ahead: configurable limits and read/write timeouts (Phase 3); graceful
+> shutdown with a deadline (Phase 4). Typed application state shipped in Phase 3
+> (WP37); request-scoped state is not on that list and never will be, because
+> ADR-028 decided against it. Panic recovery is not on it either and never will
+> be: Odin has no recoverable
 > panic, a faulting handler aborts the process, and ADR-020 records why.
 
 ## The one rule
@@ -99,6 +101,7 @@ answer. Every row answers the same four questions.
 | `Framework_Event.route` | App | `web.destroy(&app)` | only while the App lives | App |
 | middleware list and chain pool | App | `web.destroy(&app)` | **no** | App |
 | `web.Router` after `web.mount` | App (routes were copied) | `web.destroy(&app)` | **no** | App |
+| application state (`web.state`) | **you** | as long as you keep the value alive | it is yours; the App only borrows it | **you** — the framework allocated nothing |
 | `web.Recorded_Response` (`status`, `body`) | the recorder | until the next `test_request` | copy to keep | App teardown |
 
 Read the table as one rule: **only `Framework_Event` may escape a request.**
@@ -540,25 +543,40 @@ is still uncommitted. It never returns a silent 500 or a partial body.
 `web.text` sets `text/plain; charset=utf-8`; `web.no_content` sets none. There
 is no public way to set a response header in Phase 1.
 
-## Application state (Phase 3 — unavailable in Phase 1)
+## Application state (delivered in Phase 3, WP37)
 
-> Available from Phase 3 as an Advanced API. It does not exist in Phase 1.
+**One value, app-scoped, created before serving.** A database pool, a
+configuration struct, a template cache — the things a service creates once and
+needs everywhere.
 
-<!-- phase: 3; unavailable -->
+<!-- pseudocode: the App_State shape and its lifetime -->
 ```odin
 App_State :: struct {
 	db:     ^postgres.Pool,
 	config: Config,
 }
 
-state := App_State{db = db, config = config}
-app := web.app_with_state(&state)
+main :: proc() {
+	// The state and the App are BOTH locals of main. That layout is the
+	// lifetime rule: the value must outlive the App.
+	state := App_State{db = db, config = config}
+	app := web.app_with_state(&state)
+	defer web.destroy(&app)
+
+	register_routes(&app)
+	web.serve(&app, 8080)
+}
 ```
 
-`app_with_state` rejects nil. `web.state` asserts that state was registered  *(Phase 2/3 — unavailable in Phase 1.)*
-and that the requested type matches before returning the typed pointer.
+`web.app_with_state` is `web.app()` with a value attached: the same automatic
+404 and 405, the same everything else. **A nil pointer rejects the application
+fail-closed** — every request answers 500 and `web.serve` refuses to start —
+because an App that accepted nil would abort inside the first request instead.
 
-<!-- phase: 3; unavailable -->
+The App stores the **pointer**, never a copy. A handler writing through it
+mutates your value, which is what makes a connection pool work.
+
+<!-- pseudocode: reading the state inside a handler -->
 ```odin
 list_users :: proc(ctx: ^web.Context) {
 	state := web.state(ctx, App_State)
@@ -572,6 +590,20 @@ list_users :: proc(ctx: ^web.Context) {
 	web.ok(ctx, users)
 }
 ```
+
+`web.state(ctx, T)` asserts that state was registered **and** that `T` is
+exactly the registered type, then returns `^T`. Both are programming errors and
+neither varies with the request, so a failing assert aborts on your first
+request rather than in front of a client (ADR-020: run under a supervisor).
+Exact type, not assignable type: there is no subtyping walk, and casting a
+`^Config` to a `^Database` because both are pointers is what the check exists
+to make impossible.
+
+**There is no request-scoped state, and there is not going to be one**
+(ADR-028). `ctx` is not an extension bag (G-03). A value one middleware
+computes for a handler is passed down by calling a procedure, or recomputed —
+including the auth pattern's `current_user`, whose revalidation cost is
+permanent until an ADR decides otherwise.
 
 ## Middleware (delivered in Phase 2, WP17)
 

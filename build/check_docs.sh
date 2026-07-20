@@ -30,8 +30,8 @@ URUQUIM_TS_SYMBOLS="$(sed -n '/^URUQUIM_EXPECTED_TESTSUPPORT_EXPORTS="/,/"$/p' \
 
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_APP_SYMBOLS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TS_SYMBOLS")"
-test "$URUQUIM_APP_COUNT" -eq 45 ||
-  fail "the canonical application ledger is $URUQUIM_APP_COUNT, not 45; docs parity cannot be trusted"
+test "$URUQUIM_APP_COUNT" -eq 47 ||
+  fail "the canonical application ledger is $URUQUIM_APP_COUNT, not 47; docs parity cannot be trusted"
 test "$URUQUIM_TS_COUNT" -eq 2 ||
   fail "the canonical test-support ledger is $URUQUIM_TS_COUNT, not 2"
 
@@ -146,10 +146,10 @@ while IFS= read -r URUQUIM_SYMBOL; do
 done <<<"$URUQUIM_TS_SYMBOLS"
 
 # 2c. The documented counts must be the real ones.
-grep -qE '\b45\b' <<<"$URUQUIM_AI_ACTIVE" ||
-  fail "docs/ai-context.md does not state the 45-symbol application ledger"
 grep -qE '\b47\b' <<<"$URUQUIM_AI_ACTIVE" ||
-  fail "docs/ai-context.md does not state the 47-symbol union"
+  fail "docs/ai-context.md does not state the 47-symbol application ledger"
+grep -qE '\b49\b' <<<"$URUQUIM_AI_ACTIVE" ||
+  fail "docs/ai-context.md does not state the 49-symbol union"
 
 # ---------------------------------------------------------------------------
 # 3. Method and Status members in the docs match the package.
@@ -192,8 +192,7 @@ for URUQUIM_DOC in "${URUQUIM_ACTIVE_DOCS[@]}"; do
   # Lines that explicitly name a later phase are allowed to mention the symbol.
   URUQUIM_PROSE="$(grep -viE 'phase [2-4]|future|unavailable|not in phase 1|later phase' <<<"$URUQUIM_PROSE" || true)"
   for URUQUIM_FUTURE in 'web\.group\b' \
-    'web\.state\b' \
-    'web\.app_with_state\b' 'web\.serve_with\b' 'web\.serve_transport\b' \
+    'web\.serve_with\b' 'web\.serve_transport\b' \
     'web\.body_limit\b' 'web\.bytes\b' 'web\.redirect\b' 'web\.conflict\b'; do
     if grep -nE "$URUQUIM_FUTURE" <<<"$URUQUIM_PROSE"; then
       fail "$(basename "$URUQUIM_DOC") names future API /$URUQUIM_FUTURE/ in an ACTIVE section (AMEND-4)"

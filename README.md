@@ -96,7 +96,8 @@ examples/                Compiling programs (all built by the gate)
 ├── 03-route-params/
 ├── 04-middleware/
 ├── 05-route-groups/
-└── 06-authentication/
+├── 06-authentication/
+└── 07-app-state/
 ```
 
 ## Status
@@ -222,8 +223,10 @@ single source of truth for what "passing" means in this repository.
 - **`examples/05-route-groups`** — `Router`, `mount` and shared prefixes.
 - **`examples/06-authentication`** — the canonical auth pattern, with its
   revalidation cost stated instead of hidden.
+- **`examples/07-app-state`** — one typed value every handler can reach, with
+  the lifetime rule shown as layout rather than described.
 
-All six examples compile in the mandatory gate.
+All seven examples compile in the mandatory gate.
 
 ## Licence, security and contributing
 

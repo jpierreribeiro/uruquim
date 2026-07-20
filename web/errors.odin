@@ -784,6 +784,19 @@ FRAMEWORK_MESSAGE_ROUTE_CONFLICT ::
 	"This application is rejected fail-closed: every request will answer 500 " +
 	"and web.serve will refuse to start."
 
+// WP37 — the ADR-004 AMEND-1 member of the fail-closed family: a nil state.
+//
+// Registration rejects nil rather than storing it, on the same reasoning the
+// rest of this family uses: an App that accepted nil here would abort inside
+// the first request instead — the same failure, discovered later, by a client.
+@(private)
+FRAMEWORK_MESSAGE_NIL_STATE ::
+	"uruquim: web.app_with_state was given a nil state pointer; the application " +
+	"would abort on the first handler that called web.state (ADR-004, AMEND-1). " +
+	"Create the state value first and pass its address. This application is " +
+	"rejected fail-closed: every request will answer 500 and web.serve will " +
+	"refuse to start."
+
 @(private)
 framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_location) {
 	report := Framework_Report {

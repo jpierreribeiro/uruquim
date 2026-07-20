@@ -82,6 +82,22 @@ App_Internal :: struct {
 	closed:      bool,
 	has_mounted: bool,
 
+	// WP37 — ADR-004 option A: the application's typed state, as an untyped
+	// pointer plus the `typeid` that makes it typed again at the boundary.
+	//
+	// The App stores the POINTER and owns nothing: the caller created the value
+	// and the caller outlives the App with it. `destroy` therefore has nothing
+	// to release here, and adding a teardown would be the framework freeing
+	// memory it never allocated.
+	//
+	// The `rawptr` is PRIVATE, which is the whole basis on which G-03 permits
+	// it: `app_with_state` takes `^$T` and `state` returns `^T`, so no exported
+	// signature carries an untyped pointer. `state_type` is not decoration —
+	// it is the only thing standing between a wrong `web.state(ctx, T)` and a
+	// silently mistyped cast.
+	state:      rawptr,
+	state_type: typeid,
+
 	// WP20 — the application's framework-error observer (ADR-026), or nil.
 	// ONE slot: `observe` replaces rather than appends (last wins), so no
 	// storage is owned and nothing needs teardown. The driver copies this

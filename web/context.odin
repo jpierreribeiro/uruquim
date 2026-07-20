@@ -147,6 +147,17 @@ Context_Internal :: struct {
 	observer: proc(event: Framework_Event),
 	route:    string,
 
+	// WP37 — the application's typed state, COPIED from the App by the driver
+	// at the start of the request, exactly as `observer` above is.
+	//
+	// The copy is the design, not an optimisation. A back-pointer to the App
+	// would be the reference `Context_Internal` has deliberately not had since
+	// WP4 D3, and adding one for this would undo that decision for a pointer
+	// and a `typeid` that fit in two words. `state` reads these; nothing else
+	// does; neither is owned, so neither needs teardown.
+	state:      rawptr,
+	state_type: typeid,
+
 	// WP19 — the ADR-027 request-header OVERLAY, read by `web.header` before
 	// the arrived headers ("the effective request header"). ONE slot, on
 	// purpose: Phase 2 has exactly one writer — WP23's request-ID middleware —

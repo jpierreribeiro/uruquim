@@ -110,6 +110,12 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 	// than a claim (R-10).
 	ctx.private.observer = a.private.observer
 
+	// WP37: the typed state travels the same way, and for the same reason —
+	// one copy on the shared pipeline, so both transports behave identically
+	// (R-10) and the Context still holds no `^App`.
+	ctx.private.state = a.private.state
+	ctx.private.state_type = a.private.state_type
+
 	if inbound.over_limit {
 		// The adapter rejected the body for length BEFORE the handler. The core
 		// authors the WP7 413 envelope; the handler never runs (WP8 D3).
