@@ -131,6 +131,18 @@ ALLOW_VALUE_MAX :: 29
 // contributes a method to a 405.
 @(private)
 route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handler) {
+	// WP18: a registration on an already-rejected owner stays quiet (the first
+	// diagnosis stands); a registration on a CLOSED Router — one that `mount`
+	// already copied — fails closed, because the route would otherwise be
+	// silently dead (never mounted, never served, never reported).
+	if a.private.poisoned {
+		return
+	}
+	if a.private.closed {
+		router_poison_closed(a)
+		return
+	}
+
 	if a.private.routes == nil {
 		a.private.routes = make([dynamic]Route_Entry, context.allocator)
 	}

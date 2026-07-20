@@ -186,6 +186,51 @@ observe_outcome :: proc(ctx: ^web.Context) {
 	// the request is fully answered here
 }
 
+// fragment: phase2/router-mount
+// The canonical WP18 shape: build the Router fully, then mount it.
+router_mount_app :: proc() {
+	app := web.app()
+	defer web.destroy(&app)
+
+	api := web.router()
+	defer web.destroy(&api)
+	web.use(&api, require_auth)
+	web.get(&api, "/users", list_users)
+
+	web.mount(&app, "/api", &api)
+
+	web.serve(&app, 8080)
+}
+
+// fragment: phase2/router-guard
+// A per-prefix guard: middleware on a Router applies to that router's routes
+// only, nested inside the app's globals.
+router_guard_app :: proc() {
+	app := web.app()
+	defer web.destroy(&app)
+
+	admin := web.router()
+	defer web.destroy(&admin)
+	web.use(&admin, require_admin)
+	web.get(&admin, "/stats", stats)
+	web.mount(&app, "/admin", &admin)
+
+	web.serve(&app, 8080)
+}
+
+require_admin :: proc(ctx: ^web.Context) {
+	token, found := web.query(ctx, "token")
+	if !found || token != "admin-token" {
+		web.forbidden(ctx, "admin access required")
+		return
+	}
+	web.next(ctx)
+}
+
+stats :: proc(ctx: ^web.Context) {
+	web.ok(ctx, []User{})
+}
+
 // The fixtures are compiled as a test package, so one live assertion keeps the
 // runner honest about actually having built them.
 @(test)

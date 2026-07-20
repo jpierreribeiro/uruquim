@@ -229,21 +229,21 @@ while IFS=$'\t' read -r ledger kind decl; do
 done <"$URUQUIM_FREEZE_ACTUAL_SIG"
 
 # ---------------------------------------------------------------------------
-# 4. The ledgers still add up: 34 application + 2 test-support = 36
-#    (32 frozen Phase-1 application symbols, plus `use` and `next` ratified by
-#    WP17 under the approved Phase-2 ledger, spec §9.2 — recorded as
-#    Amendment 3 in the freeze manifest).
+# 4. The ledgers still add up: 37 application + 2 test-support = 39
+#    (32 frozen Phase-1 application symbols, plus `use`/`next` from WP17 —
+#    Amendment 3 — and `Router`/`router`/`mount` from WP18 — Amendment 4 —
+#    both ratified by the approved Phase-2 ledger, spec §9.2).
 # ---------------------------------------------------------------------------
 URUQUIM_FREEZE_APP_COUNT="$(grep -c '^application	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"
 URUQUIM_FREEZE_TS_COUNT="$(grep -c '^test-support	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"
 URUQUIM_FREEZE_TOTAL="$(( URUQUIM_FREEZE_APP_COUNT + URUQUIM_FREEZE_TS_COUNT ))"
 
-[ "$URUQUIM_FREEZE_APP_COUNT" -eq 34 ] ||
-  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the recorded 34 (32 frozen Phase-1 + use + next, WP17 / spec §9.2)"
+[ "$URUQUIM_FREEZE_APP_COUNT" -eq 37 ] ||
+  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the recorded 37 (32 frozen Phase-1 + WP17 use/next + WP18 Router/router/mount, spec §9.2)"
 [ "$URUQUIM_FREEZE_TS_COUNT" -eq 2 ] ||
   fail "the test-support ledger holds $URUQUIM_FREEZE_TS_COUNT symbols, not the frozen 2"
-[ "$URUQUIM_FREEZE_TOTAL" -eq 36 ] ||
-  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the recorded 36"
+[ "$URUQUIM_FREEZE_TOTAL" -eq 39 ] ||
+  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the recorded 39"
 
 # ---------------------------------------------------------------------------
 # 5. Named assertions on the contracts most likely to be eroded quietly.
@@ -437,8 +437,8 @@ grep -oE '(build|tests|examples|docs|experiments|web|planning|ops|vendor)/[A-Za-
   "$URUQUIM_FREEZE_MANIFEST" | LC_ALL=C sort -u >"$URUQUIM_FREEZE_REFS" || true
 
 URUQUIM_FREEZE_REF_COUNT="$(wc -l <"$URUQUIM_FREEZE_REFS" | tr -d ' ')"
-[ "$URUQUIM_FREEZE_REF_COUNT" -ge 36 ] ||
-  fail "$URUQUIM_FREEZE_MANIFEST carries only $URUQUIM_FREEZE_REF_COUNT resolvable evidence citations for 36 recorded symbols; the matrix is incomplete"
+[ "$URUQUIM_FREEZE_REF_COUNT" -ge 39 ] ||
+  fail "$URUQUIM_FREEZE_MANIFEST carries only $URUQUIM_FREEZE_REF_COUNT resolvable evidence citations for 39 recorded symbols; the matrix is incomplete"
 
 URUQUIM_FREEZE_BAD_REFS=0
 while IFS= read -r ref; do
@@ -477,7 +477,7 @@ done
 # helper may legitimately be called `middleware_free`, but nothing EXPORTED may
 # carry Phase-2+ vocabulary, because that is how a future feature gets
 # accidentally promised.
-URUQUIM_FREEZE_FUTURE='middleware|group|mount|router|radix|wildcard|user_data|locals|typed_state|upload|static_file|openapi|websocket|stream|recover|timeout|serve_with|serve_transport|header_lookup|bearer_token'
+URUQUIM_FREEZE_FUTURE='middleware|group|radix|wildcard|user_data|locals|typed_state|upload|static_file|openapi|websocket|stream|recover|timeout|serve_with|serve_transport|header_lookup|bearer_token'
 if cut -f3 "$URUQUIM_FREEZE_ACTUAL_SIG" | sed -E 's@ ::.*@@' \
    | grep -qiE "^($URUQUIM_FREEZE_FUTURE)"; then
   cut -f3 "$URUQUIM_FREEZE_ACTUAL_SIG" | sed -E 's@ ::.*@@' \
@@ -510,7 +510,7 @@ echo "freeze: signatures      -> $URUQUIM_FREEZE_APP_COUNT application + $URUQUI
 echo "freeze: fields/enums    -> Method(u8, 6), Status(int, 10, no 413), Handler, Context, Request, Header_View, App, Recorded_Response pinned"
 echo "freeze: extractors      -> named results pinned, no #optional_ok on any exported procedure"
 echo "freeze: dependencies    -> $(wc -l <"$URUQUIM_FREEZE_ACTUAL_DEP" | tr -d ' ') direct imports match the snapshot; boundaries one-way"
-echo "freeze: evidence matrix -> $URUQUIM_FREEZE_REF_COUNT citations resolved, all 36 symbols present, none NOT_FROZEN"
+echo "freeze: evidence matrix -> $URUQUIM_FREEZE_REF_COUNT citations resolved, all 39 symbols present, none NOT_FROZEN"
 echo "freeze: proc_group extraction self-test passed (private-member group is visible)"
 echo "freeze: no future-phase vocabulary exported; no open Phase-1 blocker"
 echo "PASS: Phase 1 freeze gate"

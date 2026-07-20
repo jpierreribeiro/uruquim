@@ -53,6 +53,7 @@ bash -n "$URUQUIM_ROOT/build/check_docs.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase1_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp16_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp17_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp18_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -577,6 +578,33 @@ timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp17-socket" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp17-socket" ||
   fail "the WP17 socket refusal contract did not pass within the timeout"
+
+# WP18 — route organisation: `Router`, `router`, `mount`.
+#
+# The mounted entries' composed chains, the closed flag and the poison
+# propagation are package-private, so the internal tests run in a THROWAWAY
+# package exactly like WP2-WP17.
+echo "--- WP18 Router and mount, internal behavior (throwaway package) ---"
+URUQUIM_WP18_TMP="$(mktemp -d -t uruquim-wp18-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP18_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP18_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp18-internal/*.odin "$URUQUIM_WP18_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP18_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp18-internal"
+rm -rf "$URUQUIM_WP18_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP18_TMP" || fail "the throwaway WP18 internal-test package was not removed"
+echo "PASS: WP18 internal tests ran against the real sources; throwaway package removed"
+
+# WP18 public surface — an EXTERNAL consumer building and mounting routers
+# through the ratified surface. The load-bearing pin lives here: every ^App
+# procedure accepts a ^Router UNCHANGED (subtype polymorphism), so the WP17
+# signature pins survive byte-identical.
+echo "--- WP18 public surface contract: Router, router, mount (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp18-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp18-public-surface"
 
 # G-11 — the test-support teardown must not ship in applications that never
 # test. Promised by planning/public-api-guardrails.md and, until now, never

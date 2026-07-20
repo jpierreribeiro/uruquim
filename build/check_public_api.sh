@@ -82,6 +82,7 @@ Handler
 Header_View
 Method
 Request
+Router
 Status
 app
 bad_request
@@ -94,6 +95,7 @@ forbidden
 get
 internal_error
 json
+mount
 next
 no_content
 not_found
@@ -106,6 +108,7 @@ put
 query
 query_int
 query_int_or
+router
 serve
 text
 unauthorized
@@ -436,7 +439,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 34 symbols (32 Phase-1 + use/next, WP17)"
+echo "public API contract: application ledger is exactly 37 symbols (32 Phase-1 + WP17 use/next + WP18 Router/router/mount)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -480,16 +483,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 34; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 34 (32 Phase-1 + use + next, WP17)"
+if test "$URUQUIM_APP_COUNT" -ne 37; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 37 (32 Phase-1 + use/next WP17 + Router/router/mount WP18)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 36; then
-  fail "exported union is $URUQUIM_UNION, not 36 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 39; then
+  fail "exported union is $URUQUIM_UNION, not 39 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 36"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 39"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -529,13 +532,14 @@ echo "public API contract: web/testing bridge exports match the locked minimal s
 # 3. Later-phase surface must not exist yet
 #
 # `test_request` was removed from this list by WP3 (ratified test-support
-# symbol); `use` and `next` were removed by WP17 (ratified application
-# symbols, spec §9.2 — they are pinned by the inventory above). `Response` stays
+# symbol); `use`/`next` by WP17 and `router`/`mount` by WP18 (ratified
+# application symbols, spec §9.2 — pinned by the inventory above). `group`
+# stays FOREVER: ADR-024 rejects it in every phase. `Response` stays
 # forbidden; `Recorded_Response` is a different exact name and is allowed.
 # The application ledger scanned here excludes test_support.odin, so the two
 # ratified test-support names never reach this loop.
 # ---------------------------------------------------------------------------
-for URUQUIM_FUTURE in router group mount state app_with_state \
+for URUQUIM_FUTURE in group state app_with_state \
   header bearer_token serve_with serve_transport app_init \
   redirect conflict bytes logger recovery request_id cors \
   Response Header Header_Pair Header_View_Internal Params Route_Info \
@@ -1114,7 +1118,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 34 + test-support ledger 2 = union 36"
+echo "public API contract: application ledger 37 + test-support ledger 2 = union 39"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"
