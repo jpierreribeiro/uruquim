@@ -187,6 +187,26 @@ see §4.
 
 ---
 
+## 2b. Approvals resolved in advance (ADR-029 delegation, 2026-07-20)
+
+The owner delegated the pending decisions (ADR-029), so the approval points in
+the table above are **resolved now** and no work package stalls waiting for a
+review. Every resolution is conditional in the same way: **if the work
+package's own spec or prototype work contradicts the decided arm, the agent
+stops and records the finding instead of proceeding.**
+
+| WP | Decided arm | Grounds |
+|---|---|---|
+| **WP30** | **Diagnose-and-poison** at registration. | Fail-closed is the project default and the mechanism (ADR-019) exists and is proven. Go's precedent panics at registration; Uruquim poisons instead. Observable change — the spec and tests are still owed. |
+| **WP31a** | **Ratify the absence of normalisation, permanently.** Bytes received are bytes matched; `/users` and `/users/` stay distinct; `web.path` params are **raw, undecoded views** — decoding is the application's explicit choice. | The security arm and the reversible arm coincide: every normalisation rule is an opportunity for two components to disagree about what a path means. The negative-control corpus is still owed and proves the mismatch behaviour. |
+| **WP32a** | **Automatic HEAD** (respond as GET, suppress the body); **automatic OPTIONS** (reuse the `Allow` machinery); **no 501** — the SHOULD-deviation is ratified: an unknown method stays on the 404/405 path (WP9 D7). | HEAD is the RFC's MUST-support; OPTIONS costs no second machinery; 501 would open the method vocabulary with no demonstrated demand. |
+| **WP34** | **Approved: +1 symbol.** | C-2's constraint is a MUST and the framework already holds the value. The redaction rule — the pattern, never the path — becomes a gate assertion in the same change. |
+| **WP36** | **Approved**: options struct + package default **constant**; boot-derived immutable runtime. Concurrency arm: registration after `serve` begins is **REJECTED via the existing poison mechanism** — the snapshot sits beside ADR-019/023 and does not replace them. | The shape was already amended in; the vendored backend's mutable-global default (§6b) is the counter-example that confirms the constant. |
+| **WP37** | Implements **ADR-004 only**. The request-scope question is closed: **ADR-028 is ACCEPTED, option A.** | See ADR-028; reopening requires a real program measured in this tree. |
+| **WP38** | **Approval delegated to the gate**: the freeze proceeds if and only if every gate is green, every ledger amended, and the guarded lab program holds at ≤ 25 concepts. Any breach stops the freeze and goes to the owner. | A freeze that needs a human yes when every recorded criterion is met is ceremony; one that proceeds despite a breach is a lie. |
+
+---
+
 ## 3. The work packages
 
 ### WP26 — Benchmark harness and Phase-2 baseline
@@ -562,9 +582,10 @@ applies — registration rejects nil, and access asserts registration plus exact
 type before casting. This is for a database handle or configuration: **one
 value, app-scoped, set before serving**.
 
-**Question 2 — request-scoped typed state. UNDECIDED, and this plan does not
-assume it.** It is a different feature with a different lifetime, and the
-project's own research argues *against* it:
+**Question 2 — request-scoped typed state. DECIDED: it does not exist**
+(ADR-028, option A, ACCEPTED 2026-07-20 under the ADR-029 delegation). It is a
+different feature with a different lifetime, and the project's own research
+argued *against* it:
 
 * **C-6** finds that Go's `context.WithValue` and Rust's `http::Extensions`
   exist for type-erased, dynamically-keyed state crossing library boundaries —
@@ -580,8 +601,8 @@ cost, which no ADR had decided. They now say the cost stands until an ADR says
 otherwise, and `check_examples.sh` rejects a comment that schedules a future
 capability.
 
-**ADR-028 is now open for exactly this** (PROPOSED, 2026-07-20), with three
-live options:
+**ADR-028 decided exactly this** (ACCEPTED, option 1, 2026-07-20 under the
+ADR-029 delegation). The three options it weighed:
 
 1. **No request-scoped state, permanently.** Ratify the revalidation cost and
    the pass-it-down workaround as the answer. Costs nothing, closes the
@@ -599,11 +620,11 @@ are **LOW**: once an application stores a value per request, removing the slot
 breaks it at compile time and no deprecation window helps. That asymmetry is
 itself an argument, and it is the reason the recommendation falls where it does.
 
-**ADR-028 recommends option 1** and places the burden of proof on the others.
-The evidence for 2 or 3 must be a real program that cannot be written cleanly
-today — never a hypothetical — and option 1 is the only reversible one:
-adding a mechanism later is a pure strengthening, while shipping one and
-withdrawing it breaks applications.
+**ADR-028 accepted option 1** and places the burden of proof for reopening on
+the others. The evidence for 2 or 3 must be a real program that cannot be
+written cleanly today — never a hypothetical — and option 1 is the only
+reversible one: adding a mechanism later is a pure strengthening, while
+shipping one and withdrawing it breaks applications.
 
 ### WP38 — Phase-3 freeze
 
@@ -689,7 +710,7 @@ reasoning as before.
 | **Choosing a representation on a benchmark that flatters it** | WP28 records losing candidates and numbers, which makes a bad choice *visible*. It does not make it impossible. |
 | **Timing nondeterminism (FINDING-A)** | Repeated alternating runs reduce it; they do not eliminate it. A 3% difference may never be trustworthy on this toolchain, and the freeze should say so rather than report it. |
 | **Concept budget (FINDING-D)** | A budget is a constraint, not a mechanism. Only the freeze's re-run of the usage lab actually measures it, and by then the symbols are shipped. |
-| **The request-scope question (WP37)** | Whichever way it goes, it is hard to reverse: adding the mechanism later is a pure strengthening, but shipping it and withdrawing it would break applications. Option 1 is the reversible one. |
+| **The request-scope question (WP37)** | **Decided** (ADR-028: option A, the reversible arm). The residual risk is only that real programs keep paying the revalidation cost until evidence reopens it — the cheapest failure mode on this table. |
 
 ---
 
