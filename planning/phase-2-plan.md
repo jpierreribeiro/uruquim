@@ -587,6 +587,45 @@ variadic.**
 * **Out of scope.** `web.group` unless the owner rejects the WP15
   recommendation; route-info accessors; conflict diagnostics (Phase 3).
 
+### Amendment 1 (2026-07-20) — `mount` is fail-OPEN on allocation failure
+
+**Status: OPEN DEFECT in merged code. Owner decision required (docket D-1 in
+`tina/docs/evidence/uruquim-tina-impact-assessment.md`).**
+
+`mount` validates the prefix, the poisoned flag and the closed flag **before**
+the publication loop, which is correct. The loop itself, however, publishes with
+`strings.concatenate` and `append` and **checks neither result**. In Odin an
+`append` that cannot allocate does **not** panic: `_append_elem` returns
+`num_appended = 0` and reports the failure through
+`#optional_allocator_error`, which every call site in `mount` discards.
+
+**Measured**, with a `mem.Arena` of fixed capacity installed in
+`context.allocator` — a legal, documented Odin practice, and the same shape
+Phase 3's arena work (P3-10) will make more common:
+
+```text
+12 routes, arena 1024..1536 B -> App has  8/12 routes, poisoned = false
+ 5 routes, arena  256.. 512 B -> App has  0/5  routes, poisoned = false,
+                                 Router closed = true, mw_pool = 10 orphans
+```
+
+So routes vanish with **no diagnostic**, the App reports **healthy**, `serve`
+binds, and every lost route answers 404. The Router is left `closed`, so the
+mount cannot even be retried. This is fail-open in the one place ADR-019 exists
+to make fail-closed, and it is an undeclared exception to this project's own
+rule.
+
+The recommended repair is the **smaller** one: check the results and **poison
+the App** through the mechanism WP17/WP18 already own. Once poisoned the App
+refuses `serve` and answers 500 on both transports, so the partial state stops
+being observable — full transactional rollback buys atomicity the poison
+already renders moot. RED proof: the arena probe above, asserting
+`poisoned = true` and a `serve` refusal.
+
+**This amendment records the defect; it does not authorise the code change.**
+The fix belongs to its own branch, before WP22, because WP22 reads the same
+poison mechanism.
+
 ---
 
 ## WP19 — Request header lookup: `header`, `bearer_token`
@@ -718,7 +757,19 @@ symbols.**
   OWASP's logging guidance, CR/LF must be escaped in anything echoed.
 * **Binary cost.** An application that never references `web.logger` links zero
   logger symbols and its binary is byte-identical to WP17's baseline.
-* **Out of scope.** Structured logging, sinks, sampling, levels (Phase 4).
+* **Truncation is OBSERVABLE (amendment, 2026-07-20).** A fixed request-local
+  buffer has a boundary, and what happens at that boundary is a contract, not
+  an implementation detail. A route pattern or a line that exceeds the buffer
+  must be truncated in a way a TEST can detect — never grown silently (which
+  would defeat the fixed buffer and re-import the allocation the buffer exists
+  to avoid) and never dropped without a signal (which would make a logger
+  quietly lie about traffic it saw). Pick one, write it down, and prove it.
+  This is the Tina discipline "a bounded resource states what it does when
+  full" applied at the smallest scale the framework has.
+* **Out of scope.** Structured logging, sinks, sampling, levels (Phase 4). No
+  log ring, queue, drop policy or non-blocking sink in the framework now: those
+  are Phase-4 observability, and building them here would put an unbounded
+  queue behind a "bounded buffer" claim.
 
 ---
 
@@ -750,6 +801,16 @@ symbols.**
 * **Mutation probes.** Echo without validation → the CR/LF test fails. Reuse one
   ID → uniqueness fails. Allocate per request → the tracking-allocator test
   fails. Emit the header twice → a duplicate-header test fails.
+* **Reuse, proven before it can break (amendment, 2026-07-20).** Add a RED test
+  that two consecutive requests on the same application never let the second
+  observe the first's ID. Today the property is STRUCTURAL and the test passes
+  on arrival: `Context` is a fresh stack value in `serve_dispatch` and in
+  `test_request`, so the overlay starts zeroed every time and there is nothing
+  to leak. Write it anyway — Phase 3 (P3-10) plans buffer reuse and Phase 4
+  plans connection slots, and this is the test that turns a structural accident
+  into a defended invariant on the day something starts being pooled. The
+  overlay stays ONE slot with known capacity: the phase needs a request-ID slot,
+  never a general-purpose map (G-03).
 * **Security.** This is the work package's centre of gravity. Header injection
   via CR/LF is the concrete attack; the ID must never be treated as
   authentication.
@@ -789,6 +850,26 @@ symbols.**
   example's own test must fail loudly, making the D-12.5 hazard visible.
 * **Binary cost.** Extend the audit's pay-for-what-you-use table with
   middleware, router, header lookup, logger and request ID.
+* **The ownership table (amendment, 2026-07-20).** Phase 2 handed the user five
+  new things that are borrowed rather than owned, and "copy it if it must
+  outlive the request" is currently spread across a dozen doc comments. WP24
+  gathers it into ONE canonical table, and the docs gate requires it. One row
+  per value the user can touch, and every row answers the same four questions —
+  **owner, valid until, may it escape, who cleans up**:
+
+  | Value | Owner | Valid until | May escape? | Cleanup |
+  |---|---|---|---|---|
+  | route pattern | App | `destroy(&app)` | only as a documented view | App |
+  | inbound header value | transport | end of the request | no, copy first | transport |
+  | path/query parameter | request arena | end of the request | no, copy first | driver |
+  | effective request ID | Context overlay | end of the request | no, copy first | driver |
+  | `Framework_Event` | the value itself | unbounded | **yes**, by value | none needed |
+  | middleware pool | App | `destroy(&app)` | no | App |
+
+  This is the single most transferable idea from the Tina study: a framework
+  that hands out borrowed memory owes its users a table, not a habit of
+  mentioning it. Teach ownership, limits and the failure model — never the
+  Tina concepts that produced the discipline.
 
 ---
 
@@ -809,6 +890,43 @@ concepts instead of 14, **that is a finding**, not a footnote.
 Any symbol without all its G-09 evidence stays private or is removed before
 freeze. Any unexplained binary cost is a human-review blocker, as G-11 requires.
 Output: `planning/phase-2-freeze.md`, mirroring `phase-1-freeze.md`.
+
+### Amendment 1 (2026-07-20) — freeze the CLAIMS, not only the API
+
+**Scope growth on an approved work package; owner decision D-2.**
+
+Phase 1 froze symbols, signatures and dependencies. It did not freeze the
+project's own *sentences*. The Tina study is the argument for closing that gap,
+and the argument is empirical rather than theoretical: an equally careful
+project was measured against its own README and **six of its public claims came
+back "imprecisa" or "não demonstrada"** — not because anyone was dishonest, but
+because prose has no compiler and drifts while every test stays green. Uruquim
+has already lived a small version of this: WP21 found three active documents
+still promising a "panic recovery (Phase 2)" that ADR-020 had made impossible.
+
+WP25 therefore freezes three further ledgers. They add **zero public symbols**;
+the cost is documentation and gate.
+
+**1. Claim ledger.** One row per strong promise the project makes out loud, in
+`README.md`, `docs/` or `CHANGELOG.md`. Each row carries: the exact sentence,
+its scope, where it is implemented, the positive test, the **negative control**
+that fails when the property is removed, the environment it was measured in,
+and — the column that does the real work — **what it explicitly does NOT
+guarantee**. A claim with no negative control does not freeze.
+
+Deliberately bounded: only claims the project ALREADY makes. Do not invent
+claims to fill the table.
+
+**2. Lifetime ledger.** The WP24 ownership table, promoted to frozen evidence:
+owner, validity, may-it-escape, cleanup, one row per value.
+
+**3. Capacity ledger.** What is fixed, what is dynamic at registration, what is
+bounded per request, and what remains unbounded or delegated to the backend.
+This ledger exists to keep an honest word honest: **"bounded" must never be
+claimed for the framework as a whole** while connections, queues and header
+counts belong to the transport. Say which perimeter is bounded, or do not use
+the word — the same discipline that forbids "zero allocation" as a slogan
+without a perimeter and a test.
 
 ---
 
