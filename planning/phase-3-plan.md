@@ -399,6 +399,16 @@ semantics.**
 * **The output is a policy or a permanent ratification of its absence** — and
   either way it is written down, tested, and given a negative control.
 
+**31a DECIDED, owner, 2026-07-20 — `planning/phase-3-spec.md` §1: REJECT, do
+not transform.** A dot segment, an interior empty segment, a percent-encoded
+slash or a percent-encoded NUL is answered `400` before route matching;
+everything else passes through byte-exact and undecoded, as today. Normalising
+was rejected as maximising the ways Uruquim's view of a path can differ from a
+proxy's; ratifying the silent absence was rejected because it leaves that
+disagreement invisible — a 404 is not a diagnosis. **The trailing slash keeps
+its Phase-1 meaning:** it is not an interior empty segment, and `/users/`
+remains a legal distinct pattern. 31b implements it after WP29.
+
 ### WP32 — HEAD, OPTIONS, and the 501 decision
 
 **Type: SPEC + IMPLEMENTATION. Requires owner approval — observable HTTP
@@ -414,6 +424,20 @@ semantics.**
 * **Interaction to respect:** the `Allow` value and its byte-exact order are
   ratified (WP4 D4) and pinned by the gate. OPTIONS reuses that machinery; it
   does not grow a second one.
+
+**32a DECIDED, owner, 2026-07-20 — `planning/phase-3-spec.md` §2: automatic
+HEAD and OPTIONS, no 501, and the `Method` enum does not change.** HEAD matches
+as GET with the body suppressed at commit; OPTIONS answers `204` with the
+existing `Allow`, and `404` where no route matches. An unrecognised method keeps
+`405` with the exact `Allow`, which tells a client what it *can* do where 501
+only says the server will not. Since both are resolved before a `Method` value
+reaches a handler, the six-member enum stays byte-for-byte as the freeze pins
+it: no public symbol, no freeze amendment, none of FINDING-D's concept budget.
+**One consequence recorded rather than discovered later:** an application cannot
+override OPTIONS through the route table, and the case that will meet that is
+CORS preflight. 32b must VERIFY that a middleware can short-circuit the
+automatic answer through the single-commit guard — stated as a requirement, not
+assumed.
 
 ### WP33 — Multi-param routes without a map
 
