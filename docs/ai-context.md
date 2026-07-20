@@ -23,23 +23,26 @@ a standardized JSON envelope.
   header for a known path under another method — both with a JSON envelope.
 - **Middleware:** `web.use` before any route, `web.next` inside; onion order,
   short-circuit, misses observed. Ordering is enforced fail-closed.
+- **Route organisation:** `web.router()` builds a detached `Router` with the
+  same verbs and `use`; `web.mount(&app, "/prefix", &r)` attaches it. A
+  one-route Router is the route-level guard.
 - **Testing:** `web.test_request` runs a request through real routing without a
   socket.
 - **HTTP/1 safety:** ambiguous or malformed framing (`CL`+`TE`, duplicate
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available yet** — do not emit any of it: route organisation
-(`Router`/`mount`), request header lookup, the error observer, the built-in
-logger and request-ID middleware (all later Phase-2 work packages);
+**Not available yet** — do not emit any of it: request header lookup, the
+error observer, the built-in logger and request-ID middleware (all later
+Phase-2 work packages);
 configurable limits and read/write timeouts (Phase 3); graceful shutdown with
 a deadline (Phase 4). Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
 
-**Two ledgers.** The application API is exactly **34** symbols (32 frozen in
-Phase 1, plus `use` and `next` from WP17). The test-support API is a separate
-ledger of exactly **2**. Union: **36**. Do not fold them together and do not
-invent a third form.
+**Two ledgers.** The application API is exactly **37** symbols (32 frozen in
+Phase 1, plus `use`/`next` from WP17 and `Router`/`router`/`mount` from WP18).
+The test-support API is a separate ledger of exactly **2**. Union: **39**. Do
+not fold them together and do not invent a third form.
 
 ## Application
 
@@ -358,10 +361,41 @@ first response survives). A second `next()` is a no-op; the handler runs
 exactly once. Middleware also observe automatic `404`/`405` responses.
 `docs/middleware.md` has the full contract.
 
+## Routers
+
+```text
+Router                        a detached collection of routes + middleware
+router() -> Router            create; allocates nothing
+mount(&app, "/prefix", &r)    attach every route at prefix + pattern
+```
+
+A `Router` accepts the SAME procedures an `App` does — `use`, the five verbs,
+`destroy` — with no new forms. Build it fully (every `use` before its first
+route), then mount it; `mount` COPIES, closes the router (later registrations
+on it fail closed), and counts as a registration for the app. Destroy the app
+AND every router, each exactly once. `web.group` stays unavailable in every
+future phase (ADR-024) — a mounted Router is the one canonical grouping.
+
+<!-- fragment: phase2/router-mount -->
+```odin
+api := web.router()
+defer web.destroy(&api)
+web.use(&api, require_auth)
+web.get(&api, "/users", list_users)
+
+web.mount(&app, "/api", &api)
+```
+
+The prefix must begin with `/` and must not end with `/`; the mounted pattern
+is prefix + pattern VERBATIM (nothing is normalised, so a router's `"/"`
+mounted at `"/api"` serves `"/api/"`, not `"/api"`). Chain order: app globals,
+then each enclosing router outermost-first, then the handler. A route needing
+its own guard is a ONE-ROUTE Router mounted at the path.
+
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-34 application symbols.
+37 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
@@ -447,8 +481,8 @@ web.use(&app, web.logger)      // the built-in logger does not exist yet
 
 <!-- phase: 3; unavailable -->
 ```odin
-// Phase 3 — unavailable in Phase 1.
-api := web.group(&app, "/api/v1")
+// Phase 3 — unavailable today. (web.group is NOT here: it is rejected
+// forever by ADR-024, not deferred.)
 state := web.state(ctx, App_State)
 app := web.app_with_state(&my_state)
 ```
@@ -460,15 +494,15 @@ web.serve_with(&app, web.Serve_Config{host = "0.0.0.0", port = 8080})
 ```
 
 Other names reserved for later phases, none of which exist today:
-`web.router`, `web.mount`, `web.serve_transport`,
-`web.body_limit`, `web.bytes`, `web.redirect`, `web.conflict`.
-`web.recovery` is reserved and will NEVER exist (ADR-020).
+`web.serve_transport`, `web.body_limit`, `web.bytes`, `web.redirect`,
+`web.conflict`. Two names will NEVER exist: `web.recovery` (ADR-020) and
+`web.group` (ADR-024).
 
 Phase boundaries in one line each:
 
-- **Phase 2** — middleware (delivered), route organisation, header lookup,
-  the typed error observer, the built-in logger and request-ID middleware.
-  No panic recovery — Odin has no recoverable panic (ADR-020).
+- **Phase 2** — middleware (delivered), route organisation (delivered),
+  header lookup, the typed error observer, the built-in logger and request-ID
+  middleware. No panic recovery — Odin has no recoverable panic (ADR-020).
 - **Phase 3** — route groups, typed application state, configurable limits and
   read/write timeouts.
 - **Phase 4** — graceful shutdown with a deadline, security hardening.

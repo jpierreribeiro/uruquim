@@ -690,6 +690,41 @@ FRAMEWORK_MESSAGE_USE_AFTER_ROUTE ::
 	"This application is rejected fail-closed: every request will answer 500 " +
 	"and web.serve will refuse to start."
 
+// The WP18 members of the fail-closed family (ADR-019/ADR-024). Each is a
+// compile-time constant emitted through `context.logger` directly, like every
+// framework diagnostic — no `core:fmt`, no `core:log` (the WP6 measured rule).
+
+@(private)
+FRAMEWORK_MESSAGE_MOUNT_POISONED_ROUTER ::
+	"uruquim: web.mount was given a Router that was already rejected " +
+	"fail-closed (ADR-019); the application inherits the rejection, because a " +
+	"mis-ordered router must not become a healthy application. Fix the " +
+	"Router's registration order — every web.use before its first route — and " +
+	"mount it again. This application is rejected fail-closed: every request " +
+	"will answer 500 and web.serve will refuse to start."
+
+@(private)
+FRAMEWORK_MESSAGE_MOUNT_CLOSED_ROUTER ::
+	"uruquim: web.mount was given a Router that was already mounted; mount " +
+	"closes the router (ADR-019/ADR-024). Build a separate Router value for " +
+	"each mount. This application is rejected fail-closed: every request will " +
+	"answer 500 and web.serve will refuse to start."
+
+@(private)
+FRAMEWORK_MESSAGE_ROUTER_CLOSED ::
+	"uruquim: a route or middleware was registered on a Router after web.mount " +
+	"had already copied it; mount closes the router (ADR-019/ADR-024), so the " +
+	"late registration could never serve. Register everything on a Router " +
+	"before mounting it. This Router is rejected fail-closed: every request " +
+	"dispatched to it directly will answer 500."
+
+@(private)
+FRAMEWORK_MESSAGE_MOUNT_INVALID_PREFIX ::
+	"uruquim: web.mount was given an invalid prefix; a prefix must begin with " +
+	"'/' and must not end with '/', and nothing is normalised (ADR-024, WP4 " +
+	"D5). This application is rejected fail-closed: every request will answer " +
+	"500 and web.serve will refuse to start."
+
 // The ADR-023 member of the same fail-closed family: `use()` after the first
 // dispatch. There is no pattern to name — the offence is temporal.
 @(private)

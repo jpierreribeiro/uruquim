@@ -638,3 +638,50 @@ Evidence rows, same schema as §5:
 One consequence recorded honestly: the §11 forwarded-items table still lists
 middleware as "forwarded to Phase 2" — that stays true as a statement about
 Phase 1. This amendment is the record that Phase 2 (WP17) delivered it.
+
+## Amendment 4 — WP18: route organisation (`Router`, `router`, `mount`)
+
+**Date:** 2026-07-19. **Authority:** owner — the approved Phase-2 ledger
+(`planning/phase-2-spec.md` §9.2) assigns the three names to WP18 under
+ADR-024 (ACCEPTED) and ADR-025 (ACCEPTED as option B).
+**Ledger effect: application 34 → 37.** 37 application + 2 test-support = 39.
+The snapshot diff at this amendment was exactly three added lines; no
+existing row changed a byte.
+
+The three recorded lines:
+
+```
+application	proc	mount :: proc(a: ^App, prefix: string, r: ^Router)
+application	proc	router :: proc() -> Router
+application	type	Router :: struct {using app: App}
+```
+
+**The §9.2 guard note, resolved.** The plan projected `use`, `destroy` and the
+five verbs becoming procedure groups so Router variants add zero names; the
+freeze gate rejects a group over `@(private)` members (unfreezable, ADR-021 as
+amended), and exporting the members would have grown the ledger far past the
+approved 44. The shape chosen instead: `Router` embeds an `App` with `using`
+(subtype polymorphism), so `^Router` converts to `^App` implicitly at every
+existing call site — zero new names beyond the approved three, zero procedure
+groups, and the five verb signatures plus `use`/`destroy` stay byte-identical
+(ADR-025 B's constraint holds literally). Compile-probed on the pinned
+toolchain before implementation: all seven call sites accept `^Router`
+unchanged; `^App` where `^Router` is expected is a compile error, so `mount`
+stays Router-only; `odin doc` renders the using-field fully, so the snapshot
+pins it. No `web.group` exists and none ever will (ADR-024, G-01).
+
+Fail-closed rules carried by the mechanism (ADR-019 family, all tested):
+`use` after a route applies inside a Router; mounting a poisoned Router
+poisons the receiving App; `mount` counts as a registration; `mount` closes
+the Router (late registration or a second mount fails closed); an invalid
+prefix — one that does not begin with `/`, or ends with `/` — rejects the
+App with a diagnostic naming the prefix, composed through a fixed buffer,
+never `core:fmt`.
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `Router` | A | WP18 | `tests/wp18-public-surface/contract_test.odin::wp18_public_signatures_are_pinned` | `tests/wp18-internal/wp18_internal_test.odin::wp18_app_and_router_each_release_their_own_storage_exactly_once` | `docs/canonical-patterns.md::Router` | embeds App via `using`; own storage, destroyed exactly once, never copied |
+| `router` | A | WP18 | `tests/wp18-public-surface/contract_test.odin::wp18_public_signatures_are_pinned` | `tests/wp18-internal/wp18_internal_test.odin::wp18_an_unmounted_router_leaks_nothing` | `docs/canonical-patterns.md::web.router` | returns Router by value; allocates nothing; no default responses |
+| `mount` | A | WP18 | `tests/wp18-public-surface/contract_test.odin::wp18_public_signatures_are_pinned` | `tests/wp18-internal/wp18_internal_test.odin::wp18_nested_routers_outer_use_before_inner_use_before_handler` | `docs/canonical-patterns.md::web.mount` | COPIES into the App; closes the router; counts as a registration |

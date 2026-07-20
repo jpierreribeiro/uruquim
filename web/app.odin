@@ -67,6 +67,14 @@ App_Internal :: struct {
 	poisoned:   bool,
 	dispatched: bool,
 
+	// WP18 fail-closed state (ADR-019/ADR-024). `closed` marks a Router that
+	// `mount` has already copied: a later registration on it would be silently
+	// dead, so it fails closed instead. `has_mounted` records that this App
+	// performed a mount — `mount()` counts as a registration for the ADR-019
+	// ordering rule even when the mounted router carried no routes.
+	closed:      bool,
+	has_mounted: bool,
+
 	// WP3 test-support state (the in-memory `web.test_request` transport). It is
 	// LAZY: this zero value holds no allocation, so `app()`/`bare()` allocate
 	// nothing and an application that never calls `test_request` never creates a

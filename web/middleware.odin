@@ -54,7 +54,16 @@ use :: proc(a: ^App, middleware: Handler) {
 		// first offence, which is the one that orders the fix.
 		return
 	}
-	if len(a.private.routes) > 0 {
+	if a.private.closed {
+		// WP18: this is a Router that `mount` already copied (mount closes the
+		// router); a middleware added now could never run.
+		router_poison_closed(a)
+		return
+	}
+	if len(a.private.routes) > 0 || a.private.has_mounted {
+		// `mount()` counts as a registration (ADR-019), even a mount that
+		// carried no routes — the ordering rule is about the timeline, not the
+		// table's size.
 		mw_poison_use_after_route(a)
 		return
 	}

@@ -123,8 +123,10 @@ finalization applies, as always under `bare()`.
 ## What does not exist
 
 - **No route-level middleware parameters.** The five registration signatures
-  are frozen; a route needing its own guard gets it when the `Router` work
-  package lands (route organisation is the next work package, Phase 2).
+  are frozen (ADR-025, option B); a route needing its own guard is a
+  ONE-ROUTE `Router` mounted at the path — `use` on the router, then the one
+  route, then `mount`. Router-level middleware follow every rule on this
+  page, nested inside the app's globals (outermost first).
 - **No recovery middleware, ever.** Odin has no recoverable panic; a faulting
   handler aborts the process (ADR-020). Run under a supervisor.
 - **No built-in catalog yet.** The logging and request-ID middleware are later

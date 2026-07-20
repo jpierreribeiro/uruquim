@@ -560,24 +560,40 @@ web.use(&admin, require_auth)
 Do not stack both on the same route — that duplicates validation. Pick the
 extractor when you need the user, the gate when you don't.
 
-## Route organisation (Phase 2, next work package — unavailable today)
+## Route organisation (delivered in Phase 2, WP18)
 
-> `Router` and `mount` arrive with the next Phase-2 work package.
-> `web.group` is rejected and stays unavailable in every future phase
-> (ADR-024): once a Router can be mounted at a prefix, `group` would be a
-> second canonical way to do one operation.
+A `Router` is built exactly like an application — the SAME `use` and the same
+five verbs accept `&router` — and then attached with `mount`. Explicit router
+values; no configuration callbacks. `web.group` stays unavailable forever
+(rejected for every future phase, ADR-024): once a Router can be mounted at
+a prefix, `group` would be a second canonical way to do one operation.
 
-Explicit router values; no configuration callbacks:
-
-<!-- phase: 2; unavailable -->
+<!-- fragment: phase2/router-mount -->
 ```odin
 api := web.router()
-
+defer web.destroy(&api)
+web.use(&api, require_auth)
 web.get(&api, "/users", list_users)
-web.post(&api, "/users", create_user)
 
 web.mount(&app, "/api", &api)
 ```
+
+Rules, each enforced fail-closed (a violation answers `500` everywhere and
+`web.serve` refuses to start):
+
+- every `use(&router, …)` before the router's first route (ADR-019, inside
+  the Router too);
+- everything registered before `mount` — mount COPIES and then CLOSES the
+  router; a later registration on it, or a second mount, is rejected loudly,
+  never dropped silently;
+- the prefix must begin with `/` and must not end with `/`; the mounted
+  pattern is prefix + pattern VERBATIM — nothing is normalised, so a router
+  `"/"` mounted at `"/api"` serves `"/api/"`, not `"/api"`.
+
+Two owners: destroy the app AND each router, exactly once, in either order.
+Chain order is app globals, then each enclosing router outermost-first, then
+the handler. A route that needs its own guard is a ONE-ROUTE Router mounted
+at the path (ADR-025, option B).
 
 ## Testing
 
