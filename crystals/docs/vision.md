@@ -76,7 +76,8 @@ App_State :: struct {
 }
 
 main :: proc() {
-    config := config_load() or_return
+    config, config_ok := config_load()
+    if !config_ok { return }
 
     state: App_State
     if !pg.open(&state.db, config.database) { return }
