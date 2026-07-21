@@ -506,6 +506,13 @@ wp41_fault_laboratory :: proc(t: ^testing.T) {
 
 	phase_stop_accepting(t)
 	phase_conflicted_never_binds(t)
+
+	// WP46 — the deadline. These own their own server lifecycle too, for the
+	// same reason as the two above: ONE listener at a time in this process.
+	// Two servers running concurrently is explicitly unsupported (R-10), and in
+	// a test runner it presents as a hang rather than as a failure.
+	phase_deadline_ends_a_held_connection(t)
+	phase_deadline_bounds_a_trickling_client(t)
 }
 
 // ---------------------------------------------------------------------------
@@ -610,4 +617,144 @@ wp41_the_trail_is_bounded :: proc(t: ^testing.T) {
 	// output alone rather than from whoever ran it.
 	summary := fmt.tprintf("seed=%d events=%d", l.seed, l.trail_len)
 	testing.expect(t, strings.contains(summary, "seed="), "the trail summary must name its seed")
+}
+
+// ---------------------------------------------------------------------------
+// 7. WP46 — THE DEADLINE, AND THE AMENDMENT THIS FILE PROMISED.
+//
+// `phase_truncated_hold` and `phase_trickle` above assert that a silent client
+// is held open forever, and the note on the first of them said: *when a read
+// deadline ships, this test must be amended in the same change, and its
+// amendment is the proof that the deadline works.*
+//
+// This is that amendment. Those two phases still run against a server with NO
+// deadline configured — that path must keep behaving as it did, because
+// `max_request_time = 0` means "no deadline" and an operator must be able to
+// ask for the old behaviour explicitly. What follows is the same client against
+// a server that DOES configure one.
+// ---------------------------------------------------------------------------
+
+deadline_ping :: proc(ctx: ^web.Context) {
+	web.text(ctx, .OK, "pong")
+}
+
+// A server whose request deadline is short enough to observe inside a test.
+//
+// EACH CALLER PASSES ITS OWN PORT POOL, and that is not tidiness. Two deadline
+// tests sharing one pool hang: the first server's listener is still being torn
+// down — its swept connections are waiting out `Conn_Close_Delay` — while the
+// second binds the same port. This is the third time in this suite that shared
+// ports produced a hang rather than a failure, which is the argument for making
+// it structurally impossible rather than remembering.
+start_deadline_server :: proc(s: ^Server, nanos: i64, ports: []int) -> bool {
+	g_server = s
+	for candidate in ports {
+		s.app = web.app()
+		budget := web.DEFAULT_LIMITS
+		budget.max_request_time = nanos
+		web.limits(&s.app, budget)
+		web.get(&s.app, "/ping", deadline_ping)
+		s.port = candidate
+		s.thread = thread.create_and_start(serve_thread)
+		sync.wait(&s.ready)
+
+		if wait_until_accepting(candidate) {
+			return true
+		}
+
+		transport.request_stop()
+		thread.join(s.thread)
+		thread.destroy(s.thread)
+		s.thread = nil
+		web.destroy(&s.app)
+	}
+	return false
+}
+
+// Disjoint pools, one per deadline test. See `start_deadline_server`.
+DEADLINE_PORTS_HOLD :: [?]int{55171, 55613}
+DEADLINE_PORTS_TRICKLE :: [?]int{56029, 56497}
+
+phase_deadline_ends_a_held_connection :: proc(t: ^testing.T) {
+	server: Server
+	// 700 ms: comfortably longer than a loopback request takes, comfortably
+	// shorter than the lab's patience, so the two cannot be confused.
+	ports := DEADLINE_PORTS_HOLD
+	if !start_deadline_server(&server, 700 * 1_000_000, ports[:]) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+	defer stop_server(&server)
+
+	l: lab.Lab
+	lab.lab_init(&l, LAB_SEED, 3 * time.Second)
+
+	// THE POSITIVE CONTROL FIRST. A deadline that also refuses valid traffic
+	// would pass the assertion below while breaking the server, and that is the
+	// likeliest way to get this wrong.
+	{
+		sock, ok := lab.dial(server.port, l.patience)
+		testing.expect(t, ok, "the lab must be able to connect")
+		if ok {
+			lab.send_fragmented(sock, lab.GET_PING, 1, 0)
+			outcome, status := lab.read_status(&l, sock)
+			net.close(sock)
+			testing.expect_value(t, outcome, lab.Outcome.Responded)
+			testing.expect_value(t, status, 200)
+		}
+	}
+
+	// THE FINDING, INVERTED. The same truncated request that is held open
+	// forever without a deadline must now be CLOSED.
+	sock, ok := lab.dial(server.port, l.patience)
+	testing.expect(t, ok, "the lab must be able to connect")
+	if !ok {
+		return
+	}
+	defer net.close(sock)
+
+	lab.send_prefix(sock, lab.GET_PING, 30)
+	outcome, _ := lab.read_status(&l, sock)
+
+	testing.expectf(
+		t,
+		outcome == .Closed_Without_Response,
+		"a truncated request must be closed once its deadline passes, not held; got %v",
+		outcome,
+	)
+}
+
+// A trickling client is bounded too, and it needs its own test: an IDLE timeout
+// would be reset by every byte and would never fire here, so this is what
+// distinguishes a request deadline from an idle one.
+phase_deadline_bounds_a_trickling_client :: proc(t: ^testing.T) {
+	server: Server
+	ports := DEADLINE_PORTS_TRICKLE
+	if !start_deadline_server(&server, 700 * 1_000_000, ports[:]) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+	defer stop_server(&server)
+
+	l: lab.Lab
+	lab.lab_init(&l, LAB_SEED, 3 * time.Second)
+
+	sock, ok := lab.dial(server.port, l.patience)
+	testing.expect(t, ok, "the lab must be able to connect")
+	if !ok {
+		return
+	}
+	defer net.close(sock)
+
+	// One byte every 40 ms, never reaching the terminator. An idle timeout would
+	// be reset 25 times a second and would never fire.
+	lab.send_trickle(sock, lab.GET_PING, 40 * time.Millisecond, 25)
+	outcome, _ := lab.read_status(&l, sock)
+
+	testing.expectf(
+		t,
+		outcome == .Closed_Without_Response,
+		"a trickling client must be bounded by the REQUEST deadline, which an idle timeout would never reach; got %v",
+		outcome,
+	)
 }

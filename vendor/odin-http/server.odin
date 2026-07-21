@@ -37,6 +37,26 @@ Server_Opts :: struct {
 	// The HTTP spec does not specify any limits but in practice it is safer.
 	// defaults to 8000.
 	limit_headers:           int,
+	// URUQUIM PATCH 6 (WP46 / ADR-031) — the request read deadline.
+	//
+	// How long ONE request may take to arrive, from its first byte to its last.
+	// Zero disables it, which is the upstream behaviour and the default here, so
+	// this field changes nothing for a caller that does not set it.
+	//
+	// WHY THIS EXISTS: the upstream read has no deadline at all — `scanner.odin`
+	// carries a `TODO: some kinda timeout on this` at the recv site — so a client
+	// that opens a connection and sends one byte a minute, or sends a valid
+	// prefix and stops, holds the connection open indefinitely. Uruquim's WP41
+	// fault laboratory demonstrated both against this server before this patch
+	// existed. It is slowloris: one socket, no bandwidth, held forever.
+	//
+	// WHY A SWEEP AND NOT A TIMER PER CONNECTION: a per-connection timer must be
+	// cancelled when the request completes, and a timer that outlives what it
+	// was guarding is a use-after-free waiting for a slot to be reused. One
+	// periodic sweep per thread has no cancellation problem, no per-connection
+	// allocation, and no timer-capacity question — at the cost of granularity,
+	// which for a defence measured in seconds is not a cost.
+	request_read_timeout:    time.Duration,
 	// The thread count to use, defaults to your core count - 1.
 	thread_count:            int,
 
@@ -366,6 +386,15 @@ Connection :: struct {
 	scanner:        Scanner,
 	temp_allocator: virtual.Arena,
 	loop:           Loop,
+	// URUQUIM PATCH 6 (WP46) — when the current request began arriving, or the
+	// zero value between requests.
+	//
+	// A REQUEST deadline rather than an idle timeout, and the difference is the
+	// whole defence: an idle timer is reset by every byte, so a client trickling
+	// one byte every second resets it forever. This is stamped once when a
+	// request starts and never refreshed, so total time to send a request is
+	// what is bounded.
+	request_started: time.Time,
 }
 
 // Loop/request cycle state.
@@ -459,6 +488,10 @@ conn_handle_reqs :: proc(c: ^Connection) {
 
 @(private)
 conn_handle_req :: proc(c: ^Connection, allocator := context.temp_allocator) {
+	// URUQUIM PATCH 6 (WP46) — stamp the start of this request's arrival. The
+	// sweep in `server_deadline_sweep` reads it; `clean_request_loop` clears it.
+	c.request_started = time.now()
+
 	on_rline1 :: proc(loop: rawptr, token: string, err: bufio.Scanner_Error) {
 		l := cast(^Loop)loop
 
@@ -626,6 +659,56 @@ Server_Date :: struct {
 server_date_start :: proc(s: ^Server) {
 	s.date.buf.buf = slice.into_dynamic(s.date.buf_backing[:])
 	server_date_update(nil, s)
+
+	// URUQUIM PATCH 6 (WP46) — the deadline sweep starts on the same loop and
+	// from the same place as the date tick, so there is one answer to "where do
+	// this server's periodic timers come from".
+	nbio.timeout_poly(URUQUIM_SWEEP_INTERVAL, s, server_deadline_sweep)
+}
+
+// URUQUIM PATCH 6 (WP46 / ADR-031) — the request read deadline, enforced.
+//
+// SWEEP_INTERVAL is the GRANULARITY, not the deadline. A request whose deadline
+// is 5s is closed somewhere in [5s, 5s + interval]; that slack is acceptable for
+// a defence measured in seconds, and it buys the absence of per-connection
+// timers — see the note on `Server_Opts.request_read_timeout`.
+@(private)
+URUQUIM_SWEEP_INTERVAL :: 250 * time.Millisecond
+
+// server_deadline_sweep closes connections whose current request has taken
+// longer than the configured deadline to ARRIVE.
+//
+// It runs per thread, over that thread's own connection map, so it needs no
+// synchronisation — the same property the rest of this server relies on.
+//
+// It deliberately looks only at connections with a request IN PROGRESS
+// (`request_started` non-zero). An idle keep-alive connection is not a slow
+// request, and closing one would turn a working feature into a defect.
+@(private)
+server_deadline_sweep :: proc(_: ^nbio.Operation, s: ^Server) {
+	if atomic_load(&s.closing) { return }
+
+	timeout := s.opts.request_read_timeout
+	if timeout > 0 {
+		now := time.now()
+		for _, conn in td.conns {
+			if conn.request_started == (time.Time{}) {
+				continue
+			}
+			if conn.state >= .Closing {
+				continue
+			}
+			if time.diff(conn.request_started, now) > timeout {
+				log.infof("uruquim: request read deadline exceeded; closing connection %i", conn.socket)
+				connection_close(conn)
+			}
+		}
+	}
+
+	// Rescheduled unconditionally, including when the deadline is disabled, so
+	// this procedure has exactly one exit shape and enabling the deadline never
+	// depends on a timer chain that was never started.
+	nbio.timeout_poly(URUQUIM_SWEEP_INTERVAL, s, server_deadline_sweep)
 }
 
 // Updates the time and schedules itself for after a second.

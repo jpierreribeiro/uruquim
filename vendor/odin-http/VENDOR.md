@@ -54,8 +54,8 @@ README.md, odinfmt.json, .editorconfig, .gitignore — repo tooling
 
 ## Local patches
 
-**Five, all added by WP9 (transport conformance), all minimal and security-
-motivated.** Each is marked in the source with a `URUQUIM PATCH` comment naming
+**Six.** Five added by WP9 (transport conformance) and one by WP46
+(ADR-031); all minimal and security-motivated. Each is marked in the source with a `URUQUIM PATCH` comment naming
 the decision it implements, and each is covered by a raw-wire corpus case that
 FAILED before the patch. There are no opportunistic edits.
 
@@ -70,6 +70,7 @@ crashes and would be bugs anywhere.
 | 2 | `body.odin` (`_body_chunked`) | A chunk not terminated by CRLF is rejected instead of asserted. | **REMOTE DENIAL OF SERVICE.** `assert(len(token) == 0)` treated malformed *input* as a programming error, so a chunked body missing its trailing CRLF **killed the server process**. |
 | 3 | `request.odin` (`headers_validate`) | `Content-Length` + `Transfer-Encoding` is **rejected**, not repaired. | Upstream deleted the `Content-Length` and continued. That leaves the two ends of a proxy chain disagreeing about where the body ends — the request-smuggling vector RFC 9112 §6.1 calls an unrecoverable error. |
 | 4 | `http.odin` (`header_parse`) | **Any** repeated `Content-Length` is rejected, even when the values are identical. | Upstream let an exact duplicate through and then merged it via the comma rule into `2, 2`, an ambiguous framing. WP9 D2 chooses refusal over normalization: it is simpler and safer. |
+| 6 | `server.odin` (`Server_Opts`, `Connection`, `server_deadline_sweep`, `server_date_start`, `conn_handle_req`) and `response.odin` (`clean_request_loop`) | A configurable REQUEST READ DEADLINE: `request_read_timeout`. A per-thread periodic sweep closes any connection whose current request has taken longer than that to arrive. Zero disables it, which is upstream's behaviour. | **REMOTE RESOURCE EXHAUSTION (slowloris).** The upstream read has no deadline — `scanner.odin` carries an unfinished-work comment at the recv site asking for exactly this — so a client that sends a valid prefix and stops, or trickles one byte at a time, holds a connection open indefinitely. Demonstrated against this server by `tests/wp41-fault` before the patch existed (WP41), closed by it (WP46/ADR-031). |
 | 5 | `http.odin` (`Method`, `Requestline`, `requestline_parse`) | A valid but unrecognized method becomes `.Unknown` and its original token is preserved in `Requestline.method_raw`, instead of the server answering `501`. | WP9 D7: method semantics are the framework's decision. `PROPFIND` must reach the dispatcher and follow the ratified 404/405 policy; the transport must not invent a status before the core sees the request. |
 
 Patch 5 also adds a tenth entry to `_method_strings` and makes `method_parse`
@@ -78,7 +79,7 @@ that array under `#no_bounds_check`) stays in bounds.
 
 Every other line is byte-for-byte upstream.
 
-To update to a newer upstream commit, re-apply the five patches above (they are
+To update to a newer upstream commit, re-apply the six patches above (they are
 small and each is commented at its site) and re-run the WP9 raw-wire corpus,
 which is what proves they are still needed and still sufficient.
 
@@ -96,7 +97,7 @@ this cost is not.
 
 To move to a different upstream commit: re-copy the root `.odin` files, the
 `LICENSE` and `mod.pkg` from a fresh checkout at the new commit, re-apply the
-five patches listed above, update the provenance table, and re-run the full
+six patches listed above, update the provenance table, and re-run the full
 gate — including the WP9 raw-wire corpus, which is what proves the patches are
 still necessary and still sufficient. Do not make unrelated edits to these
 files.

@@ -383,6 +383,40 @@ behaviour, but behind spec-recorded RFC obligations rather than taste.
 
 ### WP46 — Limits: connections, queue depth, headers, minimum ingress rate
 
+**PARTIALLY DONE, 2026-07-21 — the READ DEADLINE ships.**
+`Limits.max_request_time` (default 30 s), URUQUIM PATCH 6 in the vendored
+server, Amendment 13, claim-ledger row C-11, capacity-ledger row amended.
+**Zero new symbols — a field, not a name.**
+
+**It closed the hole WP41 found**, and the same laboratory is the proof: the
+truncated-and-trickling phases still assert a connection is held open against a
+server with NO deadline, and two new phases assert it is CLOSED against one that
+configures a deadline. **The two behaviours sit side by side in one suite**, so
+"the deadline works" cannot be satisfied by a server that closes everything.
+
+**A REQUEST deadline, not an idle timeout.** An idle timer is reset by every
+byte, so a client trickling one byte per second resets it forever — which is
+precisely the attack. The clock starts when a request begins arriving and stops
+when it has arrived, and it does not bound a slow HANDLER.
+
+**A sweep, not a timer per connection.** A per-connection timer must be
+cancelled when the request completes, and a timer outliving what it guarded is a
+use-after-free waiting for a slot to be reused. One periodic sweep per thread
+has no cancellation problem and no timer-capacity question, at the cost of
+granularity — [deadline, deadline + 250 ms] — which for a defence measured in
+seconds is not a cost.
+
+**ADR-033 CLOSED on this result: KEEP AND PATCH.** The patch stayed contained —
+one option field, one struct field, one sweep, two timestamp lines — and did not
+spread across the read path, keep-alive and close, which was the named evidence
+for owning the connection layer.
+
+**STILL OUTSTANDING in this package:** connection count, accept-queue depth,
+minimum ingress rate, inbound header COUNT (rows R-1, R-2, R-3, R-8), and a
+WRITE deadline. The read deadline shipped first and alone because it is the
+security fix, and bundling a security fix with a tuning surface is how a
+security fix waits.
+
 **SPEC + IMPLEMENTATION. Amended 2026-07-20 by ADR-031: this package now also
 carries READ AND WRITE DEADLINES**, the half WP36 could not ship. They are rows
 in the same `Limits` value, derived and validated at boot exactly like the byte
