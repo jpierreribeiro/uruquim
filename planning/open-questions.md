@@ -1,10 +1,10 @@
 # Open Questions
 
-Status: **MIXED.** Human decisions on 2026-07-18 closed the original Phase-1
-Spec Gate questions OQ-2, OQ-3, OQ-4, OQ-5, OQ-6, and OQ-14. Research added
-OQ-15 as the next implementation-blocking decision, owned narrowly by WP7; it
-does not block WP3–WP6. All other remaining questions are implementation checks
-or owned by later phases.
+Status: **MIXED, refreshed by WP66 on 2026-07-21.** The Phase-1 questions remain
+as history. Current implementation-blocking questions are explicitly owned by
+the Phase-6/7 specs: Handler liveness (OQ-29), driver selection (OQ-30),
+optional/PATCH representation (OQ-31) and bidirectional streaming lifecycle
+(OQ-32). An open question without an owning WP is not permission to improvise.
 
 ## Critical (block a WP)
 
@@ -81,8 +81,12 @@ Deferred to the **Phase-2 gate** (ADR-005). Evidence exp-07 gathered; no
 Phase-1 impact.
 
 ### OQ-8 · Threading model of handlers
-Deferred until the official `core:net/http` adapter exists. Handler API stays
-synchronous from the app view regardless.
+**Reopened by Phase 6 (ADR-030 Amendment 1).** Waiting for the official
+`core:net/http` adapter is no longer the rule: a conventional synchronous
+PostgreSQL call demonstrates the liveness problem on today's transport. WP69
+compares one lane and bounded multi-lane serving; WP72 decides after the race,
+shutdown and Phase-5 feature corpus. The Handler API stays synchronous from the
+application view regardless.
 
 ### OQ-9 · Path *string* extractor: empty vs missing
 `path_int` is covered (exp-09). The empty-vs-missing semantics of a raw
@@ -93,10 +97,14 @@ detail, not a gate blocker.
 Phase-3/Advanced. Phase 1' at most ships a fixed cap (OQ-3).
 
 ### OQ-11 · Validation story (tags vs explicit vs codegen)
-Deferred, prototype-gated, never a mandatory generator. Not Phase 1.
+**Owned by Phase 6 WP81.** Explicit transport-free validation is the canonical
+arm. The WP must distinguish absent, null, zero and value for PATCH, and may
+prototype tag checking only if unknown/incompatible tags fail closed. A
+mandatory generator or reflection-heavy hot path remains rejected.
 
 ### OQ-12 · OpenAPI surface (`Route_Info`)
-Phase 5 optional layer. Not Phase 1.
+Future optional layer; still demand-driven after the Phase-5 and Phase-6
+amendments. Not part of the Phases 6–8 critical path.
 
 **Noted 2026-07-21, not decided.** Two facts have moved under this question
 since it was written, and neither was recorded:
@@ -159,6 +167,18 @@ Second constraint, from ADR-033 Amendment 1: whatever ownership model WP62 fixes
 must still hold when the body arrives from `core:net/http` in January 2027. The
 parser consumes `[]u8` and never reads from a socket.
 
+**Phase-5 answer, 2026-07-21.** WP62/WP63 selected no temporary file for the
+shipped API: `Uploaded_File` is a request-lifetime view into the bounded,
+fully-buffered body. Cleanup is arena teardown and a body above
+`Limits.max_body` is refused. This closes OQ-20 for `form_file`; it does not
+pretend that a 2 GB upload is possible.
+
+**Amendment 1, owned by Phase 7 WP85/WP93.** The new opt-in large-body path has
+a different ownership problem and must answer generated filename, permissions,
+per-upload/concurrent/process quota, disk-full, timeout, disconnect, shutdown,
+crash remnants and explicit persistence transfer before spool code ships. The
+buffered answer remains unchanged and is the compatibility oracle.
+
 ## Routing table
 
 | OQ | Critical? | Blocks | Due |
@@ -173,6 +193,7 @@ parser consumes `[]u8` and never reads from a socket.
 | OQ-15 | yes | WP7 implementation | before WP7 code |
 | OQ-7..13 | no | — | deferred |
 | OQ-16..20 | no (phase-owned) | P4/Future features only | owning phase gate |
+| OQ-29..32 | yes (phase-owned) | Phase 6/7 implementation | owning spec/prototype WP |
 
 ## Added after the Phase-1 freeze (post-Phase-1 audit)
 
@@ -190,6 +211,10 @@ owning WP does not rediscover them.
 | OQ-26 | What is the supported-Odin-version policy, given the pin is a nightly and `core:os` is mid-redesign in that very build? | state a single pinned version as the contract and re-pin deliberately | Phase-2 documentation WP | yes |
 | OQ-27 | Does `ops/ci` stay, or move to `tools/`? | left open by the local cleanup plan | Phase-2 housekeeping WP | no |
 | OQ-28 | Which licence? | MIT matches the vendored dependency and is lowest-friction | corrective PR, before Phase 2 | **yes** — cannot be defaulted by an agent |
+| OQ-29 | Does bounded multi-lane synchronous serving preserve independent-request liveness without breaking framework safety? | prototype four lanes, keep one-lane on any safety ambiguity | WP69–WP72 | **yes** — ADR-030 Amendment 1 |
+| OQ-30 | Which PostgreSQL implementation arm can meet secure auth, TLS, cancellation, bounded framing and maintainable ownership? | select by the WP74 contract and wire lab; do not assume a new driver is free | WP74–WP75 | yes, delegated by the Phase-6 spec |
+| OQ-31 | What are the canonical nullable and PATCH-state types? | one optional type for none/value and a distinct absent/null/value representation where PATCH needs three states | WP81 | yes, exact names remain gated |
+| OQ-32 | Can response streaming and large-body spool share one private lifecycle without imposing a second Handler model? | prototype both directions; keep buffered request/response canonical and expose only the minimum transport-owned concepts | Phase 7 WP85–WP94 | yes, program approved; signatures not approved |
 
 
 ## OQ — request-scoped typed state — CLOSED, 2026-07-20 (ADR-028, WP37)

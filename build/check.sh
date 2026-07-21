@@ -72,6 +72,7 @@ bash -n "$URUQUIM_ROOT/build/check_phase4_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp39_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp41_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 bash -n "$URUQUIM_ROOT/build/check_vendor_policy.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp38_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
@@ -1058,6 +1059,12 @@ bash "$URUQUIM_ROOT/build/check_phase4_freeze.sh"
 # WP65 — the Phase-5 freeze.
 echo "--- WP65 Phase-5 freeze gate ---"
 bash "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
+
+# WP66 — the next phase starts from a question and thresholds fixed before the
+# experiments. This gate also prevents the old roadmap/backlog from silently
+# restoring the rules the owner amended.
+echo "--- WP66 Phase-6 spec and governance gate ---"
+bash "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 
 # WP51 — the vendor maintenance policy. It runs in the gate because it is the
 # PRECONDITION for WP46: a patch that predates the policy governing patches is

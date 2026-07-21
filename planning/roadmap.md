@@ -1,35 +1,28 @@
-# Uruquim roadmap — Phases 2 to 5 and the release track
+# Uruquim roadmap — Phases 2 to 8 and the release track
 
 Living document. Written after the Phase-1 freeze (`a7d2e9e`) from the evidence
 in [`post-phase1-audit.md`](post-phase1-audit.md) and
 [`odin-fit-audit.md`](odin-fit-audit.md).
 
-Detail is deliberately **proportional to distance**. Phase 2 is complete
-([`phase-2-plan.md`](phase-2-plan.md), [`phase-2-freeze.md`](phase-2-freeze.md)).
-Phase 3 is planned to hand-off depth ([`phase-3-plan.md`](phase-3-plan.md)).
-Phase 4 has a contract-level draft ([`phase-4-plan.md`](phase-4-plan.md)) that
-must be refreshed against Phase 3's outputs before it starts — its own E-4
-makes that an entry condition. Phase 5 keeps defined work packages and
-research gates but no frozen signatures
-([`later-phases-plan.md`](later-phases-plan.md)). Precision about work that is
-two years away would be false precision.
+Detail remains **proportional to distance**. Phases 1–5 are complete and
+frozen. The next executable program is mapped by
+[`phases-6-8-program.md`](phases-6-8-program.md): Phase 6 has a normative spec
+and hand-off plan; Phases 7 and 8 have deliberately revisable plans whose first
+WP must refresh them against the preceding freeze. No future signature is
+frozen merely because the program names a capability.
 
 ## Where the project is
 
-*(Updated 2026-07-20, after the Phase-2 freeze.)*
+*(Updated 2026-07-21, after the Phase-5 freeze.)*
 
-Phases 1 and 2 are complete and frozen: 44 application symbols + 2 test-support
-symbols, protected by an executable gate that now freezes claims, lifetimes and
-capacities as well as signatures. On top of Phase 1's server, routing,
-extractors, JSON body binding, error envelope and socket-free testing, Phase 2
-shipped middleware (onion, ADR-005), route groups (`Router`/`mount`),
-request-header lookup, correlation IDs with a tested trust policy, a
-per-request logger and a typed framework-error observer — each costing zero
-bytes when unused, proven by `nm`. Phase 3 is planned in `phase-3-plan.md`
-(reviewed twice, all corrections applied) and has not started; ADR-028 is its
-open owner decision. The project is usable for building and testing a JSON API.
-It is not hardened for unattended production exposure, and no release has been
-made.
+Phases 1–5 are complete and frozen at `6b6edbc`: **62 application symbols + 2
+test-support symbols**. Uruquim now has indexed routing, middleware, typed
+application state, configurable limits, production lifecycle, proxy-aware
+operation, deadlines, observability, drain, CORS, static files and bounded
+in-memory multipart. The full gate protects public signatures, claims,
+lifetimes, capacities, raw-wire behaviour and mutation controls. Large uploads
+still cannot exceed the buffered request-body model; Phase 7 now owns the
+opt-in spool/stream solution. No release has been made.
 
 ## What each phase is for, in plain terms
 
@@ -38,7 +31,10 @@ made.
 | **2 — Composition** | "I can share behaviour across routes: auth, logging, request IDs, and I can group routes under a prefix." | Today every handler repeats itself. There is no way to require authentication once, or to log every request, without copying code into each handler. |
 | **3 — Performance core** | "It stays fast as my route table and traffic grow, and I can tune the limits." | The route table is a linear scan and every limit is fixed. Neither is wrong today; both stop being fine at scale. |
 | **4 — Production** | "I can run this facing real traffic: shut it down cleanly, sit behind a proxy, bound its resources, and see what it is doing." | Today there is no way to stop the server, no timeouts, no proxy handling, and no observability. This is the phase that makes deployment defensible. |
-| **5 — Ecosystem** | "The optional pieces I need exist, without bloating the core." | Uploads, static files, WebSocket, OpenAPI. Each is real demand; none belongs in a 34-symbol core. |
+| **5 — Table stakes** | "Deploys drain, and my first app has CORS, static files and bounded multipart." | The original demand gate was circular at zero users; the owner rescoped the phase and each symbol still paid G-09. |
+| **6 — Real applications** | "I can write a conventional PostgreSQL service with synchronous handlers, honest input errors and safe deploy migrations." | Ordinary blocking dependencies currently stall the single lane, and the data lifecycle has no accepted contract. |
+| **7 — Streaming foundation** | "I can push bounded incremental responses and receive large bodies without RAM proportional to body size." | Live interfaces and large uploads require lifecycle, backpressure, partial-write and spool ownership that buffered request/response cannot express. |
+| **8 — Proof by use** | "The framework has survived a real multi-user product, repeated evolution, deploys and faults using only public APIs." | Examples prove syntax; a separately deployed system proves composition, operations and Joy of Programming. |
 
 ## Sequencing, and why this order
 
@@ -58,7 +54,13 @@ Phase 3 — Performance core            requires Phase 2's chains to exist
 Phase 4 — Production                  requires Phase 3's limits and timeouts
    │   lifecycle/shutdown → proxies → observability → hardening
    │
-Phase 5 — Ecosystem                   optional packages, each spec-gated
+Phase 5 — table stakes               drain + CORS + static + bounded multipart
+   │
+Phase 6 — real applications          JSON + bounded lanes + data Crystals
+   │
+Phase 7 — streaming foundation       response streams + large-body spool
+   │
+Phase 8 — proof by use               separate real system, evolved and faulted
 ```
 
 Three dependencies are hard and worth stating:
@@ -84,6 +86,9 @@ sized to be reviewable by one person.
 | **Phase 3** | Medium | Medium | ~10 WPs | choosing a router representation before measuring |
 | **Phase 4** | **High** for anyone deploying | **High** | ~14 WPs | security surface: proxies, limits, uploads, TLS |
 | **Phase 5** | Low per item, high in aggregate | Low | per-item | scope creep — everything wants to be in core |
+| **Phase 6** | **High** | **High** | 19 WPs | concurrency safety and database lifecycle must compose without entering `web` |
+| **Phase 7** | **High** | **Very high** | 17 WPs | partial I/O, stale identity, backpressure and spool cleanup are one lifecycle |
+| **Phase 8** | **High evidence value** | Medium | 12 WPs | a demo can look real while avoiding evolution and operational failure |
 
 Phase 2 carries more risk than its size suggests, because it is where the API
 shape for everything after it gets set. Phase 4 carries the most absolute risk,
@@ -145,6 +150,44 @@ transition stays as cheap as the boundary was designed to make it.
 streaming, HTTP/2, templates, database integration. The waiver names three items
 and no others.
 
+### Phase 6 — Real applications
+
+**Owner amendment 2026-07-21:** the demand wait is waived for the bounded
+“first real application” class, recorded in ADR-035. The full evidence burden
+remains. Normative gate: [`phase-6-spec.md`](phase-6-spec.md). Execution plan:
+[`phase-6-plan.md`](phase-6-plan.md).
+
+**Entry:** Phase 5 frozen at `6b6edbc`, ledger 62 + 2; owner amendments and
+pre-registered thresholds recorded by WP66.
+
+**Exit:** request-decoding failures are classified honestly; ADR-030 has a
+liveness-based verdict; synchronous blocking dependencies have bounded blast
+radius or the concurrency surface is refused; PostgreSQL, transactions,
+migrations and validation live outside `web` with bounded capacity and typed
+failures; a real reference application proves CRUD, cancellation, migrations,
+shutdown and health progress; all new ledgers and non-deliveries are frozen.
+
+### Phase 7 — Streaming foundation
+
+**Planned, not signature-frozen.** Response streaming and large-body ingestion
+are one bidirectional lifecycle problem with two different public paths. The
+ordinary buffered `web.body`/multipart path remains the simple default; an
+opt-in bounded spool path supports bodies larger than memory limits. SSE and
+Uruquim Live remain ecosystem consumers of the smallest core primitive.
+
+**Entry:** Phase 6 frozen; WP85 refreshes every threshold and ADR against its
+actual output. **Exit:** detached response ownership, partial-write security,
+bounded backpressure, safe multipart spool, drain and the SSE/Live vertical
+proof all pass without backend types escaping.
+
+### Phase 8 — Proof by use
+
+**Planned, separate repository.** Build and operate one collaborative
+multi-user product using only public, pinned contracts. Repeated migrations,
+deploys, reconnects, concurrency, large attachments, fault drills and a human/
+agent usability study become the evidence for future API improvements and any
+1.0 discussion.
+
 ## Release and adoption track
 
 This runs alongside the phases, not after them. A framework nobody may legally
@@ -175,12 +218,15 @@ Carried forward from Phase 1 because they are why Phase 1 stayed small:
 3. **Defaults must be lazily linked** — an application that does not use a
    feature pays zero bytes for it, proven by `nm`, as G-11 established.
 4. **Optional means optional** — for the things that are genuinely optional.
-   TLS, OpenAPI, WebSocket and streaming are candidates for separate packages,
-   not core growth. **Amended 2026-07-21:** uploads, static files and CORS were
+   TLS, OpenAPI and WebSocket are candidates for separate packages,
+   not automatic core growth. **Amended 2026-07-21:** uploads, static files and CORS were
    on this list and are not any more. They are table stakes, not options: a
    microframework missing all three is a routing library. They land in the core
    in Phase 5, paying G-09 in full. The amendment names three items; the rule is
-   unchanged for every other.
+   unchanged for every other. **Further owner amendment:** Phase 6's
+   first-real-application class and Phase 7's minimal streaming/body primitives
+   have their own explicit spec gates. PostgreSQL and SSE/Live remain Crystals;
+   only semantics that a transport/core alone can own may enter `web`.
 5. **Measurements decide performance questions**, not preference — and the
    losing options get recorded.
 6. **Decisions are made under the ADR-029 delegation (owner, 2026-07-20).**
