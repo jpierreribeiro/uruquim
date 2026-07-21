@@ -32,6 +32,13 @@ Header :: struct {
 //
 // Every field is a VIEW valid only for the duration of the dispatch call.
 Inbound :: struct {
+	// WP48 — the CONNECTED PEER's address, rendered as a string by the adapter.
+	//
+	// A string rather than a `net.Address`, for the reason every other field
+	// here is neutral: the core may not name a transport type. It is the peer,
+	// never a forwarded header — the whole point of ADR-013 is that the two are
+	// different values and only one of them is administered.
+	peer:       string,
 	method:     string,
 	path:       string,
 	query:      string,

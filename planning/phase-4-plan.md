@@ -542,6 +542,29 @@ measurement and a negative control**. **Rollback: MEDIUM.**
 
 ### WP48 — Trusted proxies
 
+**DONE, 2026-07-21 — `web/client_address.odin`, `tests/wp48-public-surface`,
+Amendment 16. +2 symbols, ledger 51 → 53.** ADR-013's fail-closed arm.
+
+**`client_ip` returns the CONNECTED PEER**, never a header, unless that peer
+matches a prefix registered with `trust_proxies`. `X-Forwarded-For` is a request
+header — any client can send one — and rate limits, audit logs and allow-lists
+built on a forged value are an authorization bypass. **Trusting the header by
+default is not a convenience with a caveat.**
+
+**PREFIXES RATHER THAN CIDR, and the asymmetry is the argument.** A wrong CIDR
+mask can trust a network you did not mean to trust; a wrong prefix can only fail
+to trust one you did. The simpler design's failure mode points the safe way, and
+CIDR remains a strengthening a later package can add against evidence.
+
+**The plan asked for an IPv4/IPv6 CIDR corpus. It is NOT delivered**, because
+there is no CIDR arithmetic to test — that is the scope change above, stated
+rather than quietly reinterpreted. The direct-spoof negative controls the plan
+also asked for ARE delivered, and they are most of the suite.
+
+**Registration fails closed twice:** an empty prefix (which would match every
+peer) and more than the bound of eight (truncation would leave the operator's
+configuration quietly untrue).
+
 **SPEC + IMPLEMENTATION** under ADR-013's accepted direction. IPv4/IPv6 CIDR
 corpus; direct-spoof negative controls; both peer and effective addresses kept
 internally; `Forwarded` never echoed. **Rollback: LOW once anyone's audit or

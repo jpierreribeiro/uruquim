@@ -158,6 +158,15 @@ Context_Internal :: struct {
 	state:      rawptr,
 	state_type: typeid,
 
+	// WP48 — the connected peer's address (a view over transport-owned storage,
+	// request-scoped) and the App's trusted-proxy set, copied by the driver.
+	//
+	// The PEER is stored, never a forwarded header: `client_ip` decides which
+	// to return, and storing the decision instead of the inputs would make the
+	// trust rule invisible at the point it matters.
+	peer:    string,
+	trusted: Trusted_Proxies,
+
 	// WP36 — the byte budget this request is held to, copied from the App by
 	// the driver alongside the observer and the state.
 	//

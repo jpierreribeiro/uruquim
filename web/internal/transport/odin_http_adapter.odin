@@ -192,6 +192,10 @@ on_body :: proc(user_data: rawptr, body: http.Body, err: http.Body_Error) {
 		path       = req.url.path,
 		query      = req.url.query,
 		headers    = neutral_headers(req, context.temp_allocator),
+		// WP48: the peer, from the accepted connection rather than from any
+		// header. Rendered into the request's own temp allocator, so it lives
+		// exactly as long as every other request-scoped view.
+		peer       = net.address_to_string(req.client.address, context.temp_allocator),
 		over_limit = err == .Too_Long,
 	}
 	if !inbound.over_limit {
