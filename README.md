@@ -102,7 +102,7 @@ examples/                Compiling programs (all built by the gate)
 
 ## Status
 
-Phases 1, 2 and 3 are complete: implementation finished, public contracts
+Phases 1, 2, 3 and 4 are complete: implementation finished, public contracts
 frozen behind a gate. What "frozen" means, symbol by symbol and with the
 evidence behind each one, is recorded in
 [`planning/phase-1-freeze.md`](planning/phase-1-freeze.md),
@@ -120,8 +120,25 @@ dispatch went from 883 µs to about 1.7 µs and is now **flat**: it costs the sa
 at 5 routes as at 5,000. The six symbols are `route`, `app_with_state`, `state`,
 `Limits`, `DEFAULT_LIMITS` and `limits`.
 
-Phase 4 is planned in
-[`planning/phase-3-plan.md`](planning/phase-3-plan.md) and has not started.
+**Phase 4 (production) shipped five symbols and closed two of the three
+deficiencies it opened with.** Read/write request deadlines (slowloris was a
+real, demonstrated hole), bounded admission with a shutdown reservation, `stop`,
+trusted proxies, security headers and an observable drop policy — most of them
+as FIELDS on a struct that already existed, which is why five names covered
+seven capabilities. `planning/phase-4-freeze.md` records it, including what was
+NOT delivered and why.
+
+**It also fixed a defect nobody was looking for: keep-alive was broken for every
+GET.** One upstream line meant every request paid a TCP handshake, with no
+`Connection: close` advertised, so no client could know. The corpus proved that
+a *bad* request retires a connection; nothing proved that a *good* one preserves
+it.
+
+**Before deploying, read [`docs/operations.md`](docs/operations.md)** — in
+particular what the framework does NOT bound, and the fact that `stop` has no
+deadline.
+
+Phase 5 is not planned.
 
 **What works today**
 

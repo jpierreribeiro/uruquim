@@ -192,8 +192,13 @@ python3 - "$T/response.odin" <<'PYEOF'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = """	count := n
-	if ctx.private.request_id_set {
+# RE-ANCHORED BY WP56's re-run. WP49 inserted the security-header block between
+# `count := n` and the request-ID block, so the old anchor — which spanned both
+# — no longer matched and this control reported a BROKEN PROBE. The mutation is
+# unchanged; only the text it attaches to moved. Anchored on the request-ID
+# block ALONE now, so a future insertion elsewhere cannot break it again (the
+# lesson the WP18 and WP20 probes already taught, applied here).
+old = """	if ctx.private.request_id_set {
 		ctx.private.response_headers[count] = Header_Pair {
 			name  = REQUEST_ID_HEADER,
 			value = ctx.private.request_id_value,
@@ -201,8 +206,7 @@ old = """	count := n
 		count += 1
 	}
 	return ctx.private.response_headers[:count]"""
-new = """	count := n
-	if ctx.private.request_id_set {
+new = """	if ctx.private.request_id_set {
 		for i := count; i > 0; i -= 1 {
 			ctx.private.response_headers[i] = ctx.private.response_headers[i - 1]
 		}

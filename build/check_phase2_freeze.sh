@@ -162,13 +162,32 @@ for URUQUIM_SECTION in 'Fixed at compile time' 'Dynamic at registration' 'Bounde
     fail "the capacity ledger is missing its '$URUQUIM_SECTION' section; all four perimeters must be named"
 done
 
-# The things this framework does NOT bound must be named, by name. Each of
-# these belongs to the transport, and each is a way "bounded" could become a
-# lie if it stopped being written down.
-for URUQUIM_UNBOUNDED in 'concurrent connections' 'backlog' 'header count'; do
+# The things this framework does NOT bound must be named, by name. Each is a way
+# "bounded" could become a lie if it stopped being written down.
+#
+# AMENDED AT THE PHASE-4 FREEZE, and the amendment is progress rather than
+# drift: **`concurrent connections` is now BOUNDED** (WP47's
+# `Limits.max_connections`), so requiring the ledger to name it as unbounded had
+# become a check that enforced a stale fact. It is still required to be NAMED —
+# a resource that vanishes from the ledger is a resource nobody can find the
+# bound for — but as a row rather than as an admission.
+#
+# What remains genuinely unbounded is shorter than it was, which is what a
+# production phase is supposed to do to this list.
+for URUQUIM_UNBOUNDED in 'backlog' 'header count'; do
   grep -qiF "$URUQUIM_UNBOUNDED" "$URUQUIM_P2" ||
     fail "the capacity ledger does not name '$URUQUIM_UNBOUNDED' as unbounded/delegated; the honest word depends on saying so"
 done
+# Still named, now as a bounded row.
+grep -qiF 'concurrent connections' "$URUQUIM_P2" ||
+  fail "the capacity ledger no longer names 'concurrent connections' at all. It is BOUNDED since WP47, and a bounded resource still needs its row — otherwise nobody can find what the bound is."
+
+# The unbounded rows must still SAY they are unbounded. Naming a resource and
+# then describing it as bounded when it is not is the exact failure the section
+# exists to prevent, and a name-only check cannot see it.
+URUQUIM_UNBOUNDED_ROWS="$(grep -cE '^\|.*(not bounded by this framework|still not bounded)' "$URUQUIM_P2" || true)"
+test "$URUQUIM_UNBOUNDED_ROWS" -ge 2 ||
+  fail "the capacity ledger has $URUQUIM_UNBOUNDED_ROWS rows still declaring themselves unbounded, fewer than the 2 that genuinely are. A ledger that lists only what IS bounded is marketing."
 
 grep -qiE 'does not bound the server|not bound(ed)? by this framework' "$URUQUIM_P2" ||
   fail "the capacity ledger never states which perimeter is NOT bounded (D-2)"

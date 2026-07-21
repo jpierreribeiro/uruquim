@@ -120,12 +120,20 @@ python3 - "$T/$URUQUIM_FREEZE_DOC" <<'PYEOF'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "| concurrent connections | transport (`vendor/odin-http`) | **not bounded by this framework** |"
+# RE-AIMED BY WP56's re-run, and the reason is progress rather than drift: WP47
+# BOUNDED concurrent connections, so that row is no longer an unbounded one and
+# this probe found nothing to delete. The control's intent is unchanged —
+# deleting an unbounded row must be rejected — so it now targets a row that is
+# still genuinely unbounded. Fewer such rows is the point of the phase; a
+# control that silently stopped testing because a row improved is not.
+old = "| accept queue / backlog | the OS |"
 assert old in s, "pattern not found"
-open(p, 'w').write(s.replace(old, "", 1))
+i = s.index(old)
+j = s.index("\n", i) + 1
+open(p, 'w').write(s[:i] + s[j:])
 PYEOF
 assert_mutated "unbounded rows deleted" "$T/$URUQUIM_FREEZE_DOC" "$H"
-must_reject "$T" "3: the unbounded column is emptied" "concurrent connections|unbounded"
+must_reject "$T" "3: an unbounded row is deleted" "unbounded"
 
 # --- 4. "the framework is bounded" appears in a shipped document -------------
 # The claim the owner named in docket D-2. It is scanned in `docs/` and the
