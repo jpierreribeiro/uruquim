@@ -1378,3 +1378,83 @@ none; the requirement it keeps is the one nobody disputes.
   boundary and the corpus are what make a swap possible and both already exist.
   C is expensive to undo, which is why it needs evidence first and a second
   adapter rather than a rewrite.
+
+## ADR-030 — the concurrency model: single-threaded, with the burden on threading
+
+- **Status.** **ACCEPTED** (2026-07-21, decided under the ADR-029 delegation,
+  by the procedure the Phase-4 plan pre-registered before any prototype
+  existed). Evidence: `planning/phase-4-concurrency.md`,
+  `experiments/12-concurrency-arms/`.
+
+- **Context.** Whether `web.serve` stays single-threaded by construction is the
+  phase's architectural decision (audit A-4, A-14). The plan deliberately left
+  it open and wrote the PROCEDURE instead: prototype both arms, measure, decide
+  with the losing arm's numbers recorded, and — the part that matters —
+  **an inconclusive prototype means single-threaded.** That rule was fixed in
+  advance precisely because at decision time the temptation would be to read a
+  wide noise band as a mild preference.
+
+- **Options.** (A) single-threaded event loop, `thread_count = 1`, the status
+  quo. (B) threaded, `thread_count = core count` — which the vendored server
+  already supports, so this is a ONE-LINE change in the adapter.
+
+- **Evidence — the timing.** 400 requests, 16 concurrent clients, `-o:speed`:
+  single-threaded **1,861 ms**, threaded **1,288 ms**, both answering 400/400
+  with HTTP 200. Threaded finished ~31% sooner.
+
+  **That is not a result.** FINDING-A's noise floor on this machine, derived by
+  the WP26 harness at the Phase-3 freeze, is **13,821 basis points — 138%**.
+  31% sits far inside it, and the workload is partly bound by spawning client
+  processes rather than by the server. **Inconclusive**, in the sense the rule
+  gave that word in advance.
+
+- **Evidence — the correctness reading, which is what actually decides.**
+  Three shipped guarantees become false the moment `thread_count > 1`:
+  1. **the request-ID counter is non-atomic**, and its own comment says a
+     multi-threaded dispatcher "must make this an atomic increment or two
+     requests can be handed the same ID". The Phase-1 freeze records it as a
+     frozen assumption;
+  2. **the miss chain is built lazily on the first miss**, guarded by a
+     `miss_built` flag — a check-then-act into an append-only pool, whose
+     failure is a WRONG CHAIN rather than a wrong label;
+  3. **`dispatched` and `web.state`** are shared per-request writes, and
+     `examples/07-app-state` documents its counter as correct "under the
+     framework's current model — one server per process, one event loop".
+
+- **What the evidence does NOT show, recorded because the ADR is weaker
+  without it.** A request-ID collision was **not observed**: 300 requests over
+  12 concurrent clients against the threaded arm produced no duplicate. The race
+  is real by construction; "the code cannot be safe" and "I saw it fail" are
+  different claims and only the first is supported. Separately, an apparent
+  finding — 141 of 300 empty responses under threading — **evaporated against
+  its control**: the single-threaded arm produced 133 of 300, so the empties
+  were an artefact of the probe's own shell redirection. That control is the
+  only reason it did not become a published defect.
+
+- **Decision. Option A — single-threaded.** Adopting B today would require, in
+  the same change, an atomic counter, a synchronised miss-chain build, a
+  synchronised `dispatched`, and a documented rule for `web.state` under
+  concurrency: **four amendments to shipped guarantees, in exchange for a
+  speed-up this machine cannot measure.** This is not a refusal of threading
+  forever; it is a refusal to adopt it as the side effect of a one-line change,
+  which is exactly what it would otherwise have been.
+
+- **Consequences that bind the rest of the phase.** WP43's per-server state,
+  WP44's stop and drain, WP45's connection lifetime, WP46's limits and WP47's
+  shedding are all designed against ONE event loop. Each may assume it; none may
+  quietly rely on it without saying so, because the reopening conditions below
+  are real.
+
+- **What reopens it**, written now so it is not written later to fit a
+  preference: (1) a workload measured on an instrument whose noise floor is
+  materially below the observed difference — WP53's job, not a rerun of this
+  one; (2) the four amendments prototyped and passing the WP41 fault lab; (3)
+  evidence that a real deployment is CPU-bound in the FRAMEWORK rather than in
+  the handler, since a threaded server does not help a program whose time is
+  spent in its database.
+
+- **Reversibility. HIGH today, and it decays.** Nothing ships, and the vendored
+  server keeps the capability, so the change stays one line plus the four
+  amendments. It decays because every later package that assumes one loop
+  without saying so adds to the amendment list — which is why this ADR asks each
+  of them to say so.
