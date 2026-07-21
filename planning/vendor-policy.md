@@ -14,8 +14,8 @@ and WP46 is the first work package held to them.
 
 `vendor/odin-http/` is a snapshot of the root server package of
 `laytan/odin-http` at commit `112c49b` (2026-04-11), vendored 2026-07-19, MIT.
-Five local patches, all security-motivated, all marked `URUQUIM PATCH` at their
-site and all covered by a raw-wire corpus case that failed before the patch.
+Six local patches, all security-motivated, all marked `URUQUIM PATCH` at their
+site and all covered by an executable case that failed before the patch.
 
 **The standing risk is stated by the dependency itself.** Its README:
 
@@ -41,7 +41,7 @@ forever is a fork with extra steps.
 queue is not a schedule, and re-vendoring across an API its author says moves is
 work regardless of who wrote the fix.
 
-### 2.1 The five patches, each with its upstream disposition
+### 2.1 The six patches, each with its upstream disposition
 
 | # | Patch | Is it upstream's bug? | Disposition |
 |---|---|---|---|
@@ -50,8 +50,15 @@ work regardless of who wrote the fix.
 | 3 | `Content-Length` + `Transfer-Encoding` rejected, not repaired | **No** — a policy difference. RFC 9112 §6.1 permits refusal; upstream chose repair | **CARRY.** Uruquim's WP9 D2 is stricter on purpose |
 | 4 | Any repeated `Content-Length` rejected, even if identical | **No** — same class as 3 | **CARRY** |
 | 5 | Unknown method becomes `.Unknown` with `method_raw` preserved, no 501 | **No** — a framework-ownership decision (WP9 D7) | **CARRY** |
+| 6 | A configurable request read deadline; a per-thread sweep closes connections whose request has taken too long to arrive | **Yes** — the upstream read has no deadline, and `scanner.odin` carries an unfinished-work comment asking for one at the recv site | **OFFER UPSTREAM.** It is a general slowloris defence, not a Uruquim policy, and the upstream comment is as close to an invitation as one gets |
 
-**Two of five are upstream bugs; three are deliberate divergences.** That ratio
+**Three of six are upstream bugs; three are deliberate divergences.** WP46's
+deadline joined the first group: the upstream read path has no deadline at all
+and says so in an unfinished-work comment, which makes it a gap in a
+general-purpose HTTP server rather than a Uruquim-specific policy.
+
+Originally, of five:
+**two of five were upstream bugs; three were deliberate divergences.** That ratio
 is the useful number: a snapshot whose patches were all policy would be cheap to
 re-vendor, and one whose patches were all bug fixes would argue for upstreaming
 everything. This is neither.
@@ -91,14 +98,22 @@ when someone preserves the line and breaks the behaviour around it.
 
 So:
 
-* **`tests/support/transport_conformance/corpus.odin` is the evidence.** Each of
-  the five patches has a named case that FAILED before the patch existed.
-* **The gate asserts COVERAGE, not text**: the corpus must keep carrying a case
-  for each patch. Deleting a case is caught statically; reverting a patch is
-  caught by the corpus run.
-* **A new patch ships with its corpus case in the same change.** A patch whose
-  necessity is not demonstrated by a failing case is an opportunistic edit, and
-  §5 forbids those.
+* **`tests/support/transport_conformance/corpus.odin` is the evidence for the
+  five framing patches.** Each has a named case that FAILED before its patch
+  existed.
+* **AMENDED BY WP46, and the amendment matters.** Patch 6's evidence is NOT in
+  the wire corpus — it is in `tests/wp41-fault`, because a deadline is a claim
+  about TIME and the wire corpus sends bytes and reads a reply. A corpus of
+  byte sequences cannot express "and then nothing happened for a while".
+  **The rule is therefore an EXECUTABLE case, not specifically a corpus case**;
+  the corpus is the right instrument for framing and the wrong one for
+  deadlines, and pretending otherwise would have produced a case that tested
+  nothing in order to satisfy a sentence.
+* **The gate asserts COVERAGE, not text.** Deleting a case is caught
+  statically; reverting a patch is caught by the run.
+* **A new patch ships with its executable case in the same change.** A patch
+  whose necessity is not demonstrated by a failing case is an opportunistic
+  edit, and §5 forbids those.
 
 ---
 
@@ -126,7 +141,9 @@ human here would be inventing a maintainer this project does not have.
 1. **Security-motivated or ownership-motivated only.** No opportunistic edits,
    no style, no "while I was in there".
 2. **Marked at its site** with `URUQUIM PATCH` and the decision it implements.
-3. **Covered by a corpus case in the same change**, which failed before it.
+3. **Covered by an EXECUTABLE case in the same change**, which failed before
+   it — the raw-wire corpus for framing, the fault laboratory for anything
+   about time. See §3.
 4. **Listed in `vendor/odin-http/VENDOR.md`** with its conceptual change and
    its reason.
 5. **Minimal.** The smallest edit that produces the behaviour, because every

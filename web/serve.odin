@@ -48,6 +48,7 @@ serve :: proc(a: ^App, port: int) {
 		max_body         = a.private.limits.max_body,
 		max_request_line = a.private.limits.max_request_line,
 		max_headers      = a.private.limits.max_headers,
+		max_request_time = a.private.limits.max_request_time,
 		dispatch         = serve_dispatch,
 		user             = a,
 	}

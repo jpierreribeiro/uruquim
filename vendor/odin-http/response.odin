@@ -365,6 +365,11 @@ clean_request_loop :: proc(conn: ^Connection, close: Maybe(bool) = nil) {
 
 	conn.loop.res = {}
 
+	// URUQUIM PATCH 6 (WP46) — the request is over; clear its deadline stamp so
+	// an idle keep-alive connection is not swept as a slow request. The next
+	// `conn_handle_req` stamps the next one.
+	conn.request_started = {}
+
 	if c, ok := close.?; (ok && c) || conn.state == .Will_Close {
 		connection_close(conn)
 	} else {

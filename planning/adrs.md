@@ -1282,7 +1282,13 @@ none; the requirement it keeps is the one nobody disputes.
 
 ## ADR-033 — the transport foundation: keep it, patch it, or own it
 
-- **Status.** **OPEN, with the deciding evidence and the criteria fixed in
+- **Status.** **CLOSED 2026-07-21 — KEEP AND PATCH (option A/B).** Decided by
+  the criteria fixed in advance: WP41's fault laboratory, then WP46's
+  containment result. The reasoning below is left as written, with the outcome
+  appended, because an ADR that is edited to match its conclusion teaches
+  nothing.
+
+  Originally: **OPEN, with the deciding evidence and the criteria fixed in
   advance.** Decided at **WP41**, from the fault laboratory's results, and not
   before. Same treatment ADR-030 (concurrency) gets, for the same reason: the
   question is real, the evidence does not exist yet, and writing the procedure
@@ -1368,11 +1374,34 @@ none; the requirement it keeps is the one nobody disputes.
   **The ADR stays open**, because the second half of its criterion is whether
   the deadline patch stays CONTAINED, and only WP46 can answer that.
 
-- **What is decided today, so the interim is a boundary and not a hole.** Until
-  this closes, the supported deployment is **behind a reverse proxy, under a
-  supervisor**, and WP55 documents it in those words. That is also how Gin is
-  deployed in practice; the difference is that this project writes the boundary
-  down instead of leaving it folklore.
+- **CLOSED, 2026-07-21 — option A/B (KEEP AND PATCH).** WP46 answered the
+  second half of the criterion, and the answer was unambiguous.
+
+  **The deadline patch stayed contained.** It is one option field, one struct
+  field, one periodic sweep beside the server's existing date tick, and two
+  timestamp lines. It did **not** spread across the read path, keep-alive and
+  close — which §the decision procedure named as the evidence for owning the
+  connection layer. Combined with WP41's result (every fault reachable from
+  outside; the lab never had to enter the connection loop), **both criteria
+  point at keep.**
+
+  **Recorded honestly: this is a decision about the work THIS phase needed, not
+  a verdict on the dependency.** The README still says beta and still says the
+  API moves. What changed is that the one intervention Phase 4 required turned
+  out to be small, and a decision to own a connection layer must be paid for by
+  evidence of need rather than by a general unease. **A tie means keep**, and
+  this was not even a tie.
+
+  **What would reopen it** is unchanged and now sharper: a second patch that
+  does NOT stay contained. WP45's connection lifetime work is the next test of
+  it, and the vendor policy's disposition table is where the count lives.
+
+- **What was decided while it was open, and remains true.** The supported
+  deployment is **behind a reverse proxy, under a supervisor**, and WP55
+  documents it in those words. That is also how Gin is deployed in practice; the
+  difference is that this project writes the boundary down instead of leaving it
+  folklore. **The read deadline narrows what the proxy is load-bearing for — it
+  no longer carries slowloris alone — but it does not replace the topology.**
 
 - **Reversibility.** A or B keeps C available at any later date, because the
   boundary and the corpus are what make a swap possible and both already exist.

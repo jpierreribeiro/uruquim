@@ -39,10 +39,9 @@ a standardized JSON envelope.
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available yet** — do not emit any of it: **read and write timeouts**
-(the vendored server has no deadline to configure, so `web.Limits` has no
-timeout field and none may be invented); graceful shutdown with a deadline
-(Phase 4). There is **no request-scoped state** and there will not be one
+**Not available yet** — do not emit any of it: a **write deadline** (the read
+deadline exists as `Limits.max_request_time`; the write side does not, and no
+field for it may be invented); graceful shutdown with a deadline (Phase 4). There is **no request-scoped state** and there will not be one
 (ADR-028): `ctx` is not an extension bag, and a value a middleware computes for
 a handler is passed down or recomputed. Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
@@ -99,9 +98,9 @@ serving.
 ### Limits
 
 ```text
-Limits{max_body, max_request_line, max_headers}   the byte budget, in bytes
-DEFAULT_LIMITS                                    4 MiB, 8000, 8000
-limits(&app, l)                                   set it; before the first request
+Limits{max_body, max_request_line, max_headers, max_request_time}
+DEFAULT_LIMITS                     4 MiB, 8000, 8000, 30 s (in nanoseconds)
+limits(&app, l)                    set it; before the first request
 ```
 
 <!-- fragment: phase3/limits -->
@@ -126,8 +125,13 @@ fail-closed rather than run on a guess.
   not matter;
 - `DEFAULT_LIMITS` is a **constant**, so no library can change another's
   defaults;
-- **there are no timeout fields**, because the server has no deadline to
-  configure. Do not emit `web.Limits{read_timeout = ...}` — it does not exist.
+- **`max_request_time` bounds how long one request may take to ARRIVE**, first
+  byte to last, in **nanoseconds** (30 s by default; `0` disables it). It is a
+  REQUEST deadline, not an idle timeout — a client trickling one byte per second
+  would reset an idle timer forever. It does **not** bound a slow handler: that
+  is your program's own time.
+- **There is still no WRITE deadline**, and no field for one. Do not emit
+  `web.Limits{write_timeout = ...}` — it does not exist.
 
 `Limits` bounds Uruquim's own per-request working memory. It does **not** bound
 connections, accept backlog or process memory; those belong to the transport and

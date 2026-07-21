@@ -564,6 +564,7 @@ be worse than one that refuses to start.
 | `max_body` | 4 MiB | the shared request path — exactly the limit is accepted, one byte more is `413` |
 | `max_request_line` | 8000 | the backend, before the core sees the request |
 | `max_headers` | 8000 | the backend, before the core sees the request |
+| `max_request_time` | 30 s (nanoseconds) | a periodic sweep on the serving loop — the connection is closed when one request takes longer than this to ARRIVE |
 
 - the budget belongs to the **App**, not to `web.serve`, so `web.test_request`
   enforces the same numbers as a socket. A 413 in a test is a 413 in production;
@@ -573,9 +574,15 @@ be worse than one that refuses to start.
   not matter — a limit protects every route equally;
 - `DEFAULT_LIMITS` is a **constant**, so no library can change another's
   defaults;
-- **there are no timeout fields.** The vendored server has no read or write
-  deadline to configure, so none is exposed rather than exposing one that does
-  nothing. Do not write `web.Limits{read_timeout = ...}`.
+- **`max_request_time` is a REQUEST deadline, not an idle timeout**, and the
+  difference is the whole defence: an idle timer is reset by every byte, so a
+  client trickling one byte per second resets it forever. This bounds the total
+  time a request may take to arrive. It does **not** bound a slow handler —
+  that is your program's own time, and killing its connection would turn a slow
+  page into a broken one. Set it to `0` to ask for the old unbounded behaviour
+  explicitly;
+- **there is still no WRITE deadline**, and no field for one. Do not write
+  `web.Limits{write_timeout = ...}`.
 
 `Limits` bounds Uruquim's **own per-request working memory**. It does not bound
 connections, accept backlog, inbound header count or process memory — those are

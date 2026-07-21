@@ -76,6 +76,11 @@ Config :: struct {
 	// backend its own options, not to reimplement its parser's limits.
 	max_request_line: int,
 	max_headers:      int,
+	// WP46 — the request read deadline in NANOSECONDS. The core may not import
+	// `core:time` (FINDING-B), so the neutral boundary carries a plain integer
+	// and the adapter converts, on the side of the line where a clock is
+	// already linked. Zero disables it.
+	max_request_time: i64,
 	dispatch:         Dispatch_Proc,
 	user:             rawptr,
 	on_ready:         proc(user: rawptr),

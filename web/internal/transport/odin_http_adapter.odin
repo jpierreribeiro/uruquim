@@ -15,6 +15,7 @@ package transport
 import http "uruquim:vendor/odin-http"
 import "core:mem"
 import "core:net"
+import "core:time"
 import "core:slice"
 import "core:strings"
 
@@ -85,6 +86,10 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	// is written to.
 	opts.limit_request_line = cfg.max_request_line
 	opts.limit_headers = cfg.max_headers
+	// WP46 / ADR-031: the request read deadline. The conversion to
+	// `time.Duration` happens HERE because this is the side of the boundary
+	// where a clock is already linked — `package web` may not import one.
+	opts.request_read_timeout = time.Duration(cfg.max_request_time)
 	// WP9 D5: Phase 1 implements no interim-response flow. Leaving the backend's
 	// automatic continue on made it answer "100 Continue" and then WAIT for a
 	// body the client may never send. `Expect` is refused with 417 in

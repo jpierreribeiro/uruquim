@@ -244,6 +244,34 @@ control does not freeze.**
   operating system, and configurable limits do not make the framework
   "bounded".
 
+### C-11 — "a request that never finishes arriving is closed"
+
+* **Sentence:** "`Limits.max_request_time` bounds how long one request may take
+  to arrive; a client that stops mid-request, or trickles bytes indefinitely, is
+  disconnected when the deadline passes." **Added by WP46.**
+* **Scope:** the socket transport. `test_request` has no connection and no
+  arrival time, so this claim is deliberately NOT about both transports — the
+  first Phase-4 claim that is not, and it says so rather than implying parity it
+  does not have.
+* **Implemented:** `vendor/odin-http/server.odin` (URUQUIM PATCH 6 — a periodic
+  per-thread sweep beside the existing date tick), `web/limits.odin`,
+  `web/serve.odin` (boot derivation), `web/internal/transport/` (the neutral
+  `i64` and its conversion).
+* **Positive test:**
+  `tests/wp41-fault/fault_test.odin::phase_deadline_ends_a_held_connection` — a
+  truncated request is CLOSED once the deadline passes; and
+  `::phase_deadline_bounds_a_trickling_client`, which an idle timeout would
+  never reach.
+* **Negative control:** the SAME laboratory, against a server with **no**
+  deadline configured — `phase_truncated_hold` and `phase_trickle` still assert
+  the connection is held open. **That is the control: the two behaviours are
+  asserted side by side in one suite, so "the deadline works" cannot be
+  satisfied by a server that closes everything.** The in-suite positive control
+  (a complete request answered 200) runs first for the same reason.
+* **Does NOT guarantee:** anything about a slow HANDLER, a write deadline, or
+  the in-memory transport. And the granularity is a 250 ms sweep, so a request
+  is closed in [deadline, deadline + 250 ms] rather than exactly at it.
+
 ### Claims examined and NOT frozen
 
 * **"the machinery present but unused costs +2,424 bytes … a program that never
@@ -371,7 +399,8 @@ request ID all allocate zero.
 | concurrent connections | transport (`vendor/odin-http`) | **not bounded by this framework** |
 | accept queue / backlog | transport, then the OS | **not bounded by this framework** |
 | inbound header COUNT | transport | **not bounded by this framework** — the header BLOCK's byte size is bounded and configurable (`Limits.max_headers`, WP36); the number of headers is not |
-| read/write timeouts | transport defaults | **still not configurable, and not on a schedule** — WP36 found the vendored server has no read or write deadline to configure, so `Limits` ships without timeout fields (Amendment 12). This row previously deferred them to Phase 3; Phase 3 froze without them, so the deferral is withdrawn rather than renewed. |
+| request READ deadline | the framework | **bounded and configurable — `Limits.max_request_time`, default 30 s** (WP46, Amendment 13). One request's total time to ARRIVE; expiry closes the connection. Zero disables it. |
+| write deadline, and any bound on a slow HANDLER | — | **still absent, deliberately.** The write deadline is a smaller version of the same patch and was not bundled with a security fix; a slow handler is the application's own time, and killing its connection would turn a slow page into a broken one. |
 | middleware chain DEPTH | the application | ~100k on the default stack, and **exceeding it is a segfault, not a diagnostic** |
 | response body size | the application | unbounded — you allocate it |
 | a handler's own allocations | the application | unbounded |

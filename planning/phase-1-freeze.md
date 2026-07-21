@@ -341,7 +341,7 @@ every gate run).
 |---|---|
 | `web` | `core:mem`, `core:strings`, `core:encoding/json`, `uruquim:web/testing`, `uruquim:web/internal/transport` |
 | `web/testing` | `core:mem`, `core:strings` |
-| `web/internal/transport` | `core:mem`, `core:net`, `core:slice`, `core:strings`, `uruquim:vendor/odin-http` |
+| `web/internal/transport` | `core:mem`, `core:net`, `core:slice`, `core:strings`, `core:time`, `uruquim:vendor/odin-http` |
 | `examples/01..03` | `uruquim:web` only |
 
 **Third-party.** Exactly one vendored dependency:
@@ -1198,3 +1198,77 @@ Evidence rows, same schema as §5:
 | `Limits` | A | WP36 | `tests/wp36-public-surface/contract_test.odin::wp36_the_limits_surface_is_pinned` | `tests/wp36-public-surface/contract_test.odin::wp36_a_lowered_body_cap_is_enforced_exactly` | `docs/ai-context.md::web.Limits` | a plain value of three ints; owns nothing, allocates nothing; copied onto the App and onto each request |
 | `DEFAULT_LIMITS` | A | WP36 | `tests/wp36-public-surface/contract_test.odin::wp36_the_defaults_are_the_values_already_shipped` | `tests/wp36-public-surface/contract_test.odin::wp36_an_application_that_never_configures_anything_still_works` | `docs/ai-context.md::web.DEFAULT_LIMITS` | a compile-time constant; unassignable, so no library can change another's defaults |
 | `limits` | A | WP36 | `tests/wp36-public-surface/contract_test.odin::wp36_the_limits_surface_is_pinned` | `tests/wp36-public-surface/contract_test.odin::wp36_limits_after_the_first_dispatch_rejects_the_application` | `docs/ai-context.md::web.limits` | stores three ints on the App; validates at the call so the request path only compares; rejects fail-closed after the first dispatch |
+
+## Amendment 13 — WP46: the request deadline joins `Limits`
+
+**Date: 2026-07-21. Authority: the ADR-029 delegation, over ADR-031 (ACCEPTED,
+as amended).**
+**Ledger effect: NONE. 50 application + 2 test-support = 52, unchanged.**
+No symbol is added. `Limits` gains a FIELD and `DEFAULT_LIMITS` gains the value
+for it, which is a signature amendment rather than a ledger one — and it is
+recorded here for exactly that reason: the snapshot diff was two changed lines,
+and a changed line in a frozen signature needs the same ceremony as a new one.
+
+The two amended rows:
+
+```
+application	const	DEFAULT_LIMITS :: Limits{..., max_request_time = REQUEST_TIME_LIMIT}
+application	type	Limits :: struct {..., max_request_time: i64}
+```
+
+**WHY A FIELD RATHER THAN A NEW SYMBOL.** WP36 established the shape and its
+cost: a public options struct is a promise per field. Adding a field is the
+cheap direction of that asymmetry, and it keeps one answer to "how do I bound
+this server" rather than two.
+
+**WHAT IT BOUNDS, precisely, because the name could be read three ways.**
+`max_request_time` is how long ONE request may take to **arrive** — first byte
+to last. It is a REQUEST deadline, not an idle timeout: an idle timer is reset
+by every byte, so a client trickling one byte per second resets it forever, and
+that client is exactly the attack. It does **not** bound a handler; a slow
+handler is the application's own time, and killing its connection would turn a
+slow page into a broken one.
+
+**THE TYPE IS `i64` NANOSECONDS RATHER THAN `time.Duration`**, and that is
+FINDING-B rather than taste: `package web` may not import `core:time`, because
+an application would then link a clock merely because the framework can
+configure one. The neutral transport boundary carries a plain integer and the
+adapter converts on the side where a clock is already linked.
+
+**THIS IS THE FIRST DEFAULT THAT CHANGES BEHAVIOUR FOR AN APPLICATION THAT NEVER
+MENTIONS LIMITS.** Every previous default restated what already shipped. This
+one closes a connection that would previously have been held open forever. It is
+a security fix rather than a tuning knob, and it is called out here because
+WP36's own rule says tightening a default breaks traffic without breaking a
+build — a rule this deliberately accepts rather than evades.
+
+**THE NUMBER IS JUDGEMENT AND IS RECORDED AS SUCH** (the C-5 honesty rule).
+Thirty seconds: no specification sets it, and the sources that discuss slowloris
+name the technique and no figure. It is far longer than any legitimate client
+needs to send a request over a working network — a large upload is bounded by
+`max_body`, not by this — and far shorter than the "forever" that shipped
+before.
+
+**ZERO MEANS NO DEADLINE, and validation permits it** where the byte budgets
+refuse zero. An operator must be able to ask for the previous behaviour
+explicitly, and asking explicitly is the difference between a deliberate choice
+and a forgotten field.
+
+**ONE NEW DIRECT DEPENDENCY, and the gate made it deliberate.**
+`web/internal/transport` now imports `core:time`. That is the FINDING-B line
+being honoured rather than crossed: the clock lives on the transport side, where
+`core:nbio` and the vendored server already link one, and **`package web` still
+imports no clock** — which is why `max_request_time` is an `i64` and not a
+`time.Duration`. The dependency snapshot and this manifest were updated
+together, which is what the freeze gate refuses to let happen separately.
+
+**Evidence.** `tests/wp41-fault` — the same laboratory that demonstrated the
+hole. Its `phase_truncated_hold` and `phase_trickle` still assert the old
+behaviour against a server with **no** deadline configured, and two new phases
+assert the connection is closed when one **is**. The positive control runs
+first: a deadline that also refused valid traffic would pass the new assertions
+while breaking the server.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `Limits.max_request_time` | A | WP46 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp41-fault/fault_test.odin::phase_deadline_ends_a_held_connection` | `docs/ai-context.md::web.Limits` | a plain `i64` on a value type; owns nothing; converted to a duration at the transport boundary |

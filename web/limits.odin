@@ -21,17 +21,24 @@
 // limits therefore travel with the application, and `serve` DERIVES the
 // backend's options from them.
 //
-// WHAT IS NOT HERE, AND THIS IS A FINDING RATHER THAN AN OMISSION: READ AND
-// WRITE TIMEOUTS. The plan named them and set a stop rule, which this work
-// package hit. The vendored server has NO read or write deadline to configure:
-// `Server_Opts` carries `limit_request_line` and `limit_headers` and nothing
-// temporal, its only `nbio.timeout_poly` uses are a fixed close delay and a
-// one-second date-refresh tick, and `vendor/odin-http/scanner.odin` still
-// carries the literal comment `// TODO: some kinda timeout on this.` on the
-// request read. Real deadlines are therefore surgery inside the vendored event
-// loop, not a field. Shipping `Limits` WITHOUT timeout fields is the reversible
-// arm: adding a field later is an amendment, and shipping a field that silently
-// does nothing would be a lie with a version number on it.
+// AMENDED BY WP46 (2026-07-21): THE REQUEST DEADLINE NOW EXISTS.
+//
+// WP36 shipped this struct with three byte budgets and no time budget, and said
+// why: the vendored server had no deadline to configure, and a field that
+// silently did nothing would have been a lie with a version number on it. That
+// was true and it was a hole — WP41's fault laboratory then DEMONSTRATED it,
+// holding a connection open indefinitely with one trickling client.
+//
+// `max_request_time` closes it. ADR-031 fixed the requirement; ADR-033 left the
+// mechanism to this package; and the mechanism turned out to be a single
+// vendored patch — a periodic sweep beside the server's existing date tick —
+// governed by WP51's policy, which is why that package moved ahead of this one.
+//
+// STILL NOT HERE, and stated so nobody infers it: a WRITE deadline, and any
+// bound on a slow HANDLER. The first is a smaller version of the same patch and
+// is deliberately not bundled with a security fix; the second is not a deadline
+// the framework should own, because a slow handler is the application's own
+// time and killing its connection turns a slow page into a broken one.
 package web
 // uruquim:file application
 
@@ -42,7 +49,7 @@ package web
 // process memory are the transport's and the operating system's, and no
 // document may say otherwise because this type exists.
 //
-// EVERY FIELD IS A PROMISE. There are three, and each is here because something
+// EVERY FIELD IS A PROMISE. There are four, and each is here because something
 // downstream already enforces it — not because a tuning surface felt
 // incomplete. A field with no enforcement behind it would be a knob that lies.
 Limits :: struct {
@@ -60,6 +67,26 @@ Limits :: struct {
 	// The largest header block, in bytes. Same status as the request line: a
 	// practical limit the spec declines to set, enforced by the backend.
 	max_headers:      int,
+
+	// WP46 / ADR-031 — how long ONE request may take to ARRIVE, from its first
+	// byte to its last, in nanoseconds. Zero means no deadline.
+	//
+	// A REQUEST deadline, not an idle timeout, and the difference is the whole
+	// defence: an idle timer is reset by every byte, so a client trickling one
+	// byte per second resets it forever. This bounds the total time a request
+	// may take to arrive, which is what makes slowloris finite.
+	//
+	// IT DOES NOT BOUND A HANDLER. A slow handler is the application's own
+	// time, and killing its connection would turn a slow page into a broken
+	// one. The clock starts when a request begins arriving and stops when it
+	// has arrived.
+	//
+	// The type is `i64` nanoseconds rather than `time.Duration` for a measured
+	// reason: `package web` may not import `core:time` (FINDING-B — an
+	// application would link a clock because the framework configures one), and
+	// `time.Duration` is that package's type. The transport converts at the
+	// boundary, where a clock is already linked.
+	max_request_time: i64,
 }
 
 // DEFAULT_LIMITS is what every application gets without asking.
@@ -77,6 +104,7 @@ DEFAULT_LIMITS :: Limits {
 	max_body         = BODY_LIMIT,
 	max_request_line = REQUEST_LINE_LIMIT,
 	max_headers      = HEADER_BLOCK_LIMIT,
+	max_request_time = REQUEST_TIME_LIMIT,
 }
 
 // REQUEST_LINE_LIMIT and HEADER_BLOCK_LIMIT are the vendored backend's own
@@ -87,6 +115,22 @@ REQUEST_LINE_LIMIT :: 8000
 
 @(private)
 HEADER_BLOCK_LIMIT :: 8000
+
+// REQUEST_TIME_LIMIT is thirty seconds, in nanoseconds.
+//
+// THE NUMBER IS JUDGEMENT AND IS RECORDED AS SUCH (the C-5 honesty rule): no
+// specification sets it, and the sources that discuss slowloris name the
+// technique and no figure. Thirty seconds is chosen to be far longer than any
+// legitimate client needs to send a request over a working network — a large
+// upload is bounded by `max_body`, not by this — and far shorter than the
+// "forever" that shipped before WP46.
+//
+// It is the first default in this framework that CHANGES BEHAVIOUR for an
+// application that never mentions limits: a connection that would previously
+// have been held open indefinitely is now closed. That is the point, it is a
+// security fix rather than a tuning knob, and the capacity ledger records it.
+@(private)
+REQUEST_TIME_LIMIT :: i64(30 * 1_000_000_000)
 
 // LIMITS_MIN_BODY, LIMITS_MIN_TEXT are the floors validation enforces.
 //
@@ -129,6 +173,15 @@ limits :: proc(a: ^App, l: Limits) {
 	}
 	if a.private.dispatched {
 		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_AFTER_DISPATCH)
+		return
+	}
+	// `max_request_time` is validated as NON-NEGATIVE rather than positive,
+	// because zero has a meaning here that the byte budgets do not have: no
+	// deadline. An operator who wants the old behaviour must be able to ask for
+	// it explicitly — and asking explicitly is exactly the difference between a
+	// deliberate choice and a forgotten field.
+	if l.max_request_time < 0 {
+		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
 		return
 	}
 	if l.max_body < LIMITS_MIN_BODY ||
