@@ -719,12 +719,47 @@ enumerable — neither concept becomes public API. **Rollback: HIGH.**
 
 ### WP53 — Load, soak and fault-injection tests
 
+**PARTIALLY DONE, 2026-07-21 — `experiments/13-soak/`,
+`planning/phase-4-soak.md`.**
+
+**800 requests over 8 keep-alive connections: 400 × 200, 400 × 201, zero
+failures.** The keep-alive shape is what makes it worth having — a hundred
+requests per connection exercises exactly the path WP45 repaired, and before
+that fix this load would have failed on request two.
+
+**No latency percentiles, and none will come from this harness.** FINDING-A's
+noise floor is 138%; a p99 from inside that band is a number about the machine.
+
+**RSS was not usefully captured** — the process had been terminated before the
+second read, so the reported growth is meaningless. **Recorded as a broken
+measurement rather than as an improvement**, which is what the arithmetic would
+otherwise have claimed.
+
+**And the run is short.** 800 requests is a smoke test with a plural; the honest
+word for what ran is *load*, not *soak*.
+
 **TESTS.** Includes a slow-client and a slow-writer workload. Methodology
 inherits WP26 wholesale: two instruments, status distribution reported,
 hardware-keyed baselines, distributions never single figures. **Rollback:
 HIGH.**
 
 ### WP54 — Allocator and lifetime audit, whole-system
+
+**NOT DELIVERED, 2026-07-21, with the reason recorded rather than the box
+ticked** — see `planning/phase-4-soak.md`.
+
+**The serve path does not run under an allocator this process controls.** The
+vendored server owns per-connection arenas and a per-thread temp allocator, and
+`web.serve` hands it a `Config`, not an allocator. A tracking allocator over
+that path means either patching the vendored allocator plumbing — **precisely
+the uncontained kind of patch WP44 hit, and what ADR-033 is reopened over** — or
+measuring only the part Uruquim already owns, which WP27 and WP35 measured
+twice.
+
+**This is the same finding arriving a third time:** what this project can
+observe cheaply stops at the boundary of the vendored event loop. Three
+independent packages now say it — WP44's drain, WP46's containment result, and
+this — and it belongs to ADR-033's decision rather than to a test.
 
 **TESTS.** Tracking allocator over the full serve path; baseline is WP35's
 shipped policy. Generational tokens for slots and timers **only if reuse
