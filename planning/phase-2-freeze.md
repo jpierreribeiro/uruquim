@@ -370,8 +370,8 @@ request ID all allocate zero.
 |---|---|---|
 | concurrent connections | transport (`vendor/odin-http`) | **not bounded by this framework** |
 | accept queue / backlog | transport, then the OS | **not bounded by this framework** |
-| inbound header count and sizes | transport | **not bounded by this framework** |
-| read/write timeouts | transport defaults | not configurable until Phase 3 |
+| inbound header COUNT | transport | **not bounded by this framework** — the header BLOCK's byte size is bounded and configurable (`Limits.max_headers`, WP36); the number of headers is not |
+| read/write timeouts | transport defaults | **still not configurable, and not on a schedule** — WP36 found the vendored server has no read or write deadline to configure, so `Limits` ships without timeout fields (Amendment 12). This row previously deferred them to Phase 3; Phase 3 froze without them, so the deferral is withdrawn rather than renewed. |
 | middleware chain DEPTH | the application | ~100k on the default stack, and **exceeding it is a segfault, not a diagnostic** |
 | response body size | the application | unbounded — you allocate it |
 | a handler's own allocations | the application | unbounded |
