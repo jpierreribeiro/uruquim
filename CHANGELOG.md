@@ -16,6 +16,47 @@ freeze amendment, never as a snapshot refresh.
 
 ### Documented
 
+- **Phase 3 is frozen** (WP38): **+6 symbols**, application ledger **44 → 50**
+  (union 52), recorded in `planning/phase-3-freeze.md` and enforced by the new
+  `build/check_phase3_freeze.sh`. The six are `route` (WP34),
+  `app_with_state`/`state` (WP37) and `Limits`/`DEFAULT_LIMITS`/`limits`
+  (WP36). **Nine work packages shipped zero public surface between them** —
+  the benchmark harness, the allocation audit, the representation shootout, the
+  radix index, conflict diagnostics, the path policy, automatic HEAD and
+  OPTIONS, multi-parameter routes and the arena decision. At 5,000 routes
+  dispatch is about **1.7 µs and flat**: the same at 5 routes as at 5,000.
+  **The three ledgers are amended, not appended to.** The claim ledger gains
+  C-10 with its own negative control; the lifetime ledger gains the two
+  borrowed values Phase 3 introduced, one of which — application state — is the
+  single row where the framework is **not** the owner; the capacity ledger's
+  "4 MiB, fixed" row becomes three configurable rows.
+  **Re-running every mutation suite was not ceremony: it found a control that
+  had silently stopped working.** WP18's control 6 removed `mount`'s
+  append-result guard and required the fail-closed tests to go red; at this
+  commit it stayed green, because WP30's conflict detection now rejects the
+  same application for a different reason. The test was strengthened to assert
+  *which* failure it caught — and that still was not enough, because `mount`
+  has four allocation guards on one path that emit the same diagnostic. The
+  append guard is **not independently observable**, which is now recorded
+  rather than implied, and the control pins what Amendment 1 actually promised.
+  **Two measurements failed honestly and are recorded as failures.** `nm`
+  cannot see the new symbols — they inline away and emit nothing *even when
+  used*, which the positive control is how anyone knows — so no "costs nothing
+  when unused" claim was made for any of them. Binary size cannot resolve the
+  question either: the same commit measured twice differs by 4,080 bytes,
+  because output size quantises at roughly a 4 KiB page. An earlier draft
+  reported a "+4,768 byte cost" before the noise was quantified; that number
+  was measurement, not cost, and the freeze records it as an error caught.
+  **The usage laboratory was re-run and its instrument preserved.** Phase 2
+  kept only the number, so this re-run had to reconstruct the programs — and
+  could not reproduce "23" exactly (22 by textual count; the difference is the
+  `Router` type, which a program need never name). Both programs and the
+  counting rule now live in `experiments/11-usage-lab/`. The guarded CRUD
+  service as Phase 3 would write it needs **23 concepts against a ceiling of
+  25**: no breach, so the freeze proceeded under the ADR-029 delegation without
+  stopping for the owner. `check_wp38_controls.sh` proves the gate would have
+  stopped: pushing the lab program past 25 is rejected as a reserved matter.
+
 - **Configurable limits** (Phase 3, WP36): **+3 symbols**, application ledger
   **47 → 50** (union 52), recorded as Amendment 12 of
   `planning/phase-1-freeze.md`. `web.Limits` is the application's byte budget —

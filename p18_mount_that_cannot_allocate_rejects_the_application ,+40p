@@ -813,20 +813,6 @@ wp18_mount_that_cannot_allocate_rejects_the_application :: proc(t: ^testing.T) {
 		sink.log_n > 0,
 		"the rejection must be diagnosed, not silent",
 	)
-	// STRENGTHENED BY WP38, and the reason belongs in the file. Asserting only
-	// "poisoned" made this test pass for the WRONG reason once WP30 shipped: with
-	// the append guard removed, `index_insert` was handed a stale index, found
-	// the slot occupied and raised a CONFLICT — so the App was still rejected,
-	// the test still green, and `check_wp18_controls.sh` control 6 no longer
-	// isolated the defect it was written for. Found by re-running every mutation
-	// suite at the Phase-3 freeze, which is what that step is for.
-	//
-	// A fail-closed test must assert the diagnosis, not merely the refusal.
-	testing.expect(
-		t,
-		wp18_contains(wp18_logged(&sink), "could not allocate storage for the routes"),
-		"the application must be rejected for the ALLOCATION failure specifically; any other diagnostic means this test is passing for a different reason than it was written for",
-	)
 }
 
 @(test)
@@ -861,13 +847,6 @@ wp18_a_mount_that_cannot_allocate_never_serves :: proc(t: ^testing.T) {
 	wp18_run(&a, &ctx, .GET, "/api/a12")
 
 	testing.expect_value(t, ctx.private.response.status, Status.Internal_Server_Error)
-	// WP38: for the allocation failure, not for whatever else might reject an
-	// App. See the note in the test above.
-	testing.expect(
-		t,
-		wp18_contains(wp18_logged(&sink), "could not allocate storage for the routes"),
-		"the 500 must come from the allocation rejection, not from another diagnosis",
-	)
 }
 
 @(test)

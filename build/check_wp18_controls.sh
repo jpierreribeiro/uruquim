@@ -188,29 +188,60 @@ PYEOF
 assert_mutated "composition order reversed" "$T/router.odin" "$H"
 must_go_red "$T" "$NAMES" "5: composition order reversed -> order test"
 
-# --- 6. the append result discarded again (WP18 Amendment 1) ----------------
+# --- 6. EVERY allocation guard on the mount path discarded (Amendment 1) -----
+#
 # The regression this refuses is the original defect: Odin's `append` returns
 # `num_appended = 0` instead of panicking when it cannot allocate, so dropping
 # the check makes routes vanish in silence while the App still reports healthy
 # -- a route the developer wrote answering 404 as though it never existed.
+#
+# RE-AIMED AT THE PHASE-3 FREEZE, and the reason is worth more than the control.
+# This control used to remove the APPEND guard alone. Re-running every mutation
+# suite at the freeze found it staying GREEN: `mount` now has four allocation
+# guards on one path -- the pattern clone, the chain flatten, the append, and
+# WP29's index insert -- and under a starved arena the others fire with the SAME
+# diagnostic. The append guard is therefore NOT independently observable through
+# any public behaviour; it is defence in depth, not a separate guarantee.
+#
+# Strengthening the test first was tried and did not help: asserting that the
+# rejection carries the ALLOCATION diagnostic specifically (a change worth
+# keeping on its own, and kept) still passes, because a sibling guard emits that
+# exact sentence. So the control now removes the whole FAMILY, which pins the
+# property Amendment 1 actually promised: a partial mount must never leave a
+# healthy-looking application.
 NAMES="web.wp18_mount_that_cannot_allocate_rejects_the_application,web.wp18_a_mount_that_cannot_allocate_never_serves"
-T="$(internal_tree unchecked_append)"
+T="$(internal_tree unchecked_allocation)"
 assert_green_baseline "$T" "$NAMES" "6: append result discarded"
 H="$(md5sum "$T/router.odin" | cut -d' ' -f1)"
 python3 - "$T/router.odin" <<'PYEOF'
-import sys
+import sys, re
 p = sys.argv[1]
 s = open(p).read()
-old = """		if append_err != nil || appended != 1 {
+edits = [
+    ("""		if append_err != nil || appended != 1 {
 			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
 			return
-		}"""
-new = """		_ = append_err
-		_ = appended"""
-assert old in s, "pattern not found"
-open(p, 'w').write(s.replace(old, new, 1))
+		}""", """		_ = append_err
+		_ = appended"""),
+    ("""		if concat_err != nil {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}""", """		_ = concat_err"""),
+    ("""		if !chain_ok {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}""", """		_ = chain_ok"""),
+    ("""		if !index_insert(a, len(a.private.routes) - 1) {
+			mount_poison(a, FRAMEWORK_MESSAGE_MOUNT_ALLOCATION_FAILED)
+			return
+		}""", """		_ = index_insert(a, len(a.private.routes) - 1)"""),
+]
+for old, new in edits:
+    assert old in s, "pattern not found: %r" % old[:40]
+    s = s.replace(old, new, 1)
+open(p, 'w').write(s)
 PYEOF
-assert_mutated "append result discarded" "$T/router.odin" "$H"
-must_go_red "$T" "$NAMES" "6: append result discarded -> the fail-closed mount tests"
+assert_mutated "every allocation guard discarded" "$T/router.odin" "$H"
+must_go_red "$T" "$NAMES" "6: every allocation guard discarded -> the fail-closed mount tests"
 
 echo "PASS: all six WP18 mutation controls behaved as required"

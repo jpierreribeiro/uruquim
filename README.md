@@ -102,13 +102,25 @@ examples/                Compiling programs (all built by the gate)
 
 ## Status
 
-Phases 1 and 2 are complete: implementation finished, public contracts frozen
-behind a gate. What "frozen" means, symbol by symbol and with the evidence
-behind each one, is recorded in
-[`planning/phase-1-freeze.md`](planning/phase-1-freeze.md) and
-[`planning/phase-2-freeze.md`](planning/phase-2-freeze.md) — the Phase-2
-freeze covers not only the API but the project's claims, lifetimes and
-capacities. Phase 3 (the performance core) is planned in
+Phases 1, 2 and 3 are complete: implementation finished, public contracts
+frozen behind a gate. What "frozen" means, symbol by symbol and with the
+evidence behind each one, is recorded in
+[`planning/phase-1-freeze.md`](planning/phase-1-freeze.md),
+[`planning/phase-2-freeze.md`](planning/phase-2-freeze.md) and
+[`planning/phase-3-freeze.md`](planning/phase-3-freeze.md) — the Phase-2 freeze
+covers not only the API but the project's claims, lifetimes and capacities, and
+the Phase-3 freeze **amends** those three ledgers rather than appending to them.
+
+**Phase 3 replaced the router wholesale and cost six public symbols.** Nine of
+its work packages — the benchmark harness, the allocation audit, the
+representation shootout, the radix index, registration conflict diagnostics, the
+path policy, automatic HEAD and OPTIONS, multi-parameter routes and the arena
+decision — shipped **zero public surface between them**. At 5,000 routes,
+dispatch went from 883 µs to about 1.7 µs and is now **flat**: it costs the same
+at 5 routes as at 5,000. The six symbols are `route`, `app_with_state`, `state`,
+`Limits`, `DEFAULT_LIMITS` and `limits`.
+
+Phase 4 is planned in
 [`planning/phase-3-plan.md`](planning/phase-3-plan.md) and has not started.
 
 **What works today**

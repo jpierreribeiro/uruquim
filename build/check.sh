@@ -66,6 +66,8 @@ bash -n "$URUQUIM_ROOT/build/check_wp30_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp36_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp37_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase3_freeze.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp38_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
 bash -n "$URUQUIM_ROOT/.githooks/pre-push"
@@ -1018,6 +1020,15 @@ env URUQUIM_ODIN_BIN="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_phase1_
 # bound. Prose has no compiler, and drifts while every test stays green.
 echo "--- WP25 Phase-2 freeze (claims, lifetimes, capacities) ---"
 bash "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
+
+# WP38 — the Phase-3 freeze. Same shape as the Phase-2 gate and one lesson
+# older: it pins Phase 3's totals as HISTORY rather than comparing them to the
+# live count, because a freeze document that must be edited whenever a later
+# phase ships is not a freeze. It also re-runs the usage-laboratory instrument
+# and enforces the ADR-029 stopping condition — a guarded program past 25
+# concepts is a reserved matter and stops for the owner.
+echo "--- WP38 Phase-3 freeze (ledgers amended, suites re-run, budget enforced) ---"
+bash "$URUQUIM_ROOT/build/check_phase3_freeze.sh"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
