@@ -40,7 +40,8 @@ URUQUIM_EXPECTED_EXAMPLES="01-hello-world
 04-middleware
 05-route-groups
 06-authentication
-07-app-state"
+07-app-state
+08-table-stakes"
 
 test -d "$URUQUIM_EXAMPLES" || fail "examples/ does not exist"
 

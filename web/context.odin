@@ -176,6 +176,34 @@ Context_Internal :: struct {
 	peer:    string,
 	trusted: Trusted_Proxies,
 
+	// WP60 — the cross-origin policy, copied from the App by the driver, plus
+	// what `cors_resolve` decided about THIS request.
+	//
+	// `cors_origin` is a VIEW over the arrived `Origin` header, request-scoped
+	// like every other view here. `cors_active` says the origin was allowed and
+	// the response carries the headers; `cors_preflight` says the request was an
+	// OPTIONS carrying `Access-Control-Request-Method`, which is answered
+	// without running a handler.
+	cors:                  Cors_Config,
+	cors_origin:           string,
+	cors_active:           bool,
+	cors_preflight:        bool,
+	// Request-local storage for the rendered `Access-Control-Max-Age`, on the
+	// same terms as `allow_buffer`: the committed response holds a view over it.
+	cors_max_age_buffer:   [CORS_MAX_AGE_DIGITS]u8,
+
+	// WP61 — request-local storage for the rendered ETag, on the `allow_buffer`
+	// terms: the committed response holds a view over it and reads it after
+	// dispatch returns.
+	static_etag_buffer:    [STATIC_ETAG_MAX]u8,
+
+	// WP63 — the parsed multipart form, or the record that it could not be
+	// parsed. A FIXED array rather than an allocation: `max_body` bounds the
+	// bytes but not the work, and a parser that allocated per part would turn a
+	// bounded body into an unbounded loop. Every string in it is a view over
+	// the request body.
+	multipart:             Multipart_Form,
+
 	// WP36 — the byte budget this request is held to, copied from the App by
 	// the driver alongside the observer and the state.
 	//

@@ -179,7 +179,7 @@ response_destroy :: proc(res: ^Response) {
 // every writer is a compile-time-known step, so the bound is a proof rather than
 // a limit, and `#assert` below is what keeps that true.
 @(private)
-RESPONSE_HEADER_MAX :: 6
+RESPONSE_HEADER_MAX :: 12
 
 // The proof that the bound is arithmetic. If a future writer is added without
 // raising the bound, this fails at COMPILE time rather than overflowing
@@ -270,6 +270,11 @@ response_headers_finish :: proc(ctx: ^Context, n: int) -> []Header_Pair {
 		}
 		count += 1
 	}
+
+	// WP60 — the cross-origin headers, at the same funnel and for the same
+	// reason: a browser that cannot read the 404 or the 500 shows its user a
+	// blank page instead of the message the application wrote.
+	count = cors_headers_append(ctx, count)
 
 	if ctx.private.request_id_set {
 		ctx.private.response_headers[count] = Header_Pair {

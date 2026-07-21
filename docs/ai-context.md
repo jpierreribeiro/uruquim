@@ -172,6 +172,103 @@ empty prefix, or more than eight, **rejects the application at boot** — an emp
 prefix would match every peer. The result is a request-scoped view: copy it to
 keep it.
 
+### Multipart forms
+
+```text
+Uploaded_File{field, filename, content_type, bytes}
+form_field(ctx, "title")  -> (string, bool)
+form_file(ctx, "avatar")  -> (Uploaded_File, bool)
+```
+
+Parsed from the body ALREADY IN MEMORY — there is no spool. `file.bytes` is a
+view over the request body and does not outlive the request; copy what you keep.
+`filename` and `content_type` are the client's claims, never checked and never
+used as a path: generate your own storage name.
+
+The readers and `web.body` share ONE single-use capability (ADR-012): whichever
+runs first takes it.
+
+**An upload larger than `max_body` (4 MiB default) is refused with 413 before
+your handler runs**, and no setting makes a 2 GB upload work — the body is held
+whole. Terminate large uploads at a proxy or object store and pass a reference.
+
+A malformed form yields nothing rather than a partial parse, because a missing
+field that looks like a blank one is a bug nobody attributes to the parser.
+
+<!-- fragment: phase5/multipart -->
+```odin
+upload_handler :: proc(ctx: ^web.Context) {
+	file, ok := web.form_file(ctx, "avatar")
+	if !ok {
+		web.bad_request(ctx, "avatar is required")
+		return
+	}
+	// file.bytes is a view over the request body: copy what you keep.
+	web.text(ctx, .OK, file.filename)
+}
+```
+
+### Static files
+
+```text
+Static_Options{max_file_size, index}
+static(&app, "/assets", "public/assets")     before the first request
+```
+
+A mount OWNS its prefix: a request under it is answered from the filesystem or
+answered 404, never falling through to a route. That is the reverse-proxy
+`location` rule, and it means "why is my route shadowed" never depends on
+whether a file happens to exist.
+
+Refused, always, as REJECTIONS rather than repairs: `..`, `%` (the path is never
+decoded, so `%2e%2e` would pass a textual check), `\`, NUL, empty interior
+segments, a leading `.` on any segment, a trailing `/`, anything that is not a
+regular file, and **every symlink whatever it points at**.
+
+Responses are buffered whole (ADR-014), so a file costs its size in memory:
+`max_file_size` defaults to 8 MiB and a larger file is answered 404. No
+`Last-Modified` (it would link a date formatter into every application), no
+ranges, no directory listing. `ETag` and `If-None-Match` work, answering 304.
+
+<!-- fragment: phase5/static -->
+```odin
+app := web.app()
+web.static(&app, "/assets", "public/assets", web.Static_Options{index = "index.html"})
+```
+
+### CORS
+
+```text
+Cors_Options{origins, methods, headers, credentials, max_age}
+cors(&app, o)                      set it; before the first request
+```
+
+Configuration, not middleware: the headers must reach the automatic 404, the
+405 and the driver's 500 too, and the preflight must be answered before any
+handler runs.
+
+The unsafe combinations are refused at REGISTRATION — the application is
+poisoned and `serve` refuses to bind — because a CORS mistake is a hole that
+works perfectly and quietly: `*` with `credentials`, `*` beside named origins,
+and `*` in `headers` with `credentials` (the Fetch standard does not let that
+wildcard cover `Authorization`). An empty origin list is refused too.
+
+A listed origin is echoed back with `Vary: Origin`, never the literal `*`. An
+unlisted origin is SERVED with no CORS header at all, so the browser refuses to
+hand the result to the page — refusing outright would break same-origin browser
+POSTs, which also carry an `Origin`.
+
+<!-- fragment: phase5/cors -->
+```odin
+app := web.app()
+web.cors(&app, web.Cors_Options{
+	origins     = {"https://app.example.com"},
+	headers     = "Content-Type, Authorization",
+	credentials = true,
+	max_age     = 600,
+})
+```
+
 ### Limits
 
 ```text
@@ -711,7 +808,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-55 application symbols.
+62 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

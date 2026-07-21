@@ -71,6 +71,7 @@ bash -n "$URUQUIM_ROOT/build/check_phase4_spec.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase4_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp39_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp41_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_vendor_policy.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp38_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
@@ -1054,6 +1055,10 @@ bash "$URUQUIM_ROOT/build/check_phase4_spec.sh"
 echo "--- WP56 Phase-4 freeze (ledger, deficiencies, undelivered work, repaired controls) ---"
 bash "$URUQUIM_ROOT/build/check_phase4_freeze.sh"
 
+# WP65 — the Phase-5 freeze.
+echo "--- WP65 Phase-5 freeze gate ---"
+bash "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
+
 # WP51 — the vendor maintenance policy. It runs in the gate because it is the
 # PRECONDITION for WP46: a patch that predates the policy governing patches is
 # how a fork starts, and a policy nobody re-reads is how one starts quietly.
@@ -1091,6 +1096,46 @@ echo "--- WP50 observability: the drop policy is observable (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp50-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp50-public-surface"
+
+# WP60 — CORS. The public half: what an application can observe about its own
+# policy, plus the five fail-closed configurations.
+echo "--- WP60 CORS: the policy an application can observe (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp60-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp60-public-surface"
+
+# WP60 — the preflight, internal for the WP32b reason: a preflight is an OPTIONS
+# request and `Method` has no OPTIONS member. A public suite that could send one
+# would be evidence the frozen enum had grown.
+echo "--- WP60 CORS preflight (throwaway package) ---"
+URUQUIM_WP60_TMP="$(mktemp -d -t uruquim-wp60-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP60_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP60_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp60-internal/*.odin "$URUQUIM_WP60_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP60_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp60-internal"
+rm -rf "$URUQUIM_WP60_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP60_TMP" || fail "the throwaway WP60 internal-test package was not removed"
+echo "PASS: WP60 preflight ran against the real sources; throwaway package removed"
+
+# WP63 — multipart forms. Mostly the malformed cases: a parser that salvages
+# what it can hands the handler a missing field that looks like a blank one.
+echo "--- WP63 multipart forms: a malformed form yields nothing (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp63-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp63-public-surface"
+
+# WP61 — static files. Mostly a corpus of what it REFUSES: traversal, encoded
+# traversal, dotfiles, backslashes, empty segments, symlinks, oversized files.
+echo "--- WP61 static files: the rejections are the feature (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp61-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp61-public-surface"
+rm -rf "$URUQUIM_ROOT/tests/wp61-public-surface/fixture"
 
 # WP58/WP59 — the drain deadline. Under an EXTERNAL timeout, because the defect
 # this suite was written against presents as a hang: a suite that hangs here

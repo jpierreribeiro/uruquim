@@ -96,6 +96,23 @@ App_Internal :: struct {
 	// the observer, the state and the limits.
 	trusted: Trusted_Proxies,
 
+	// WP60 — the cross-origin policy (ADR-034). Copied onto each request beside
+	// the limits and the trusted set. Bounded and inline: no allocation, no
+	// teardown, and the origin strings are the caller's on the `trust_proxies`
+	// contract.
+	cors: Cors_Config,
+
+	// WP61 — the static-file mounts (ADR-034). Bounded and inline like the
+	// trusted set and the CORS policy; the prefix and directory strings are the
+	// caller's, read on the request path.
+	static: Static_Mounts,
+
+	// WP61 — the static file server, registered LAZILY by `static` on first
+	// mount (guardrail 3). Nil in every application that mounts no directory,
+	// which is what keeps `core:os` out of those binaries. See the note at the
+	// assignment in `web/static.odin`.
+	static_serve: proc(ctx: ^Context, mounts: ^Static_Mounts) -> bool,
+
 	// WP37 — ADR-004 option A: the application's typed state, as an untyped
 	// pointer plus the `typeid` that makes it typed again at the boundary.
 	//

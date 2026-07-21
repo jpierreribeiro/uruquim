@@ -874,3 +874,82 @@ framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_locat
 
 	logger.procedure(logger.data, .Error, message, logger.options, loc)
 }
+
+// WP60 — the three cross-origin members of the fail-closed family.
+//
+// A CORS misconfiguration is not an error the server notices. It is a policy
+// that works perfectly and quietly shares one origin's authenticated data with
+// another, so it is refused at BOOT, where somebody is watching, rather than
+// discovered later by whoever finds it first.
+@(private)
+FRAMEWORK_MESSAGE_CORS_AFTER_DISPATCH ::
+	"uruquim: web.cors was called after the application had already dispatched " +
+	"a request; the policy is read on the request path, so changing it while " +
+	"serving would let two clients get two different answers about who may " +
+	"read a response. Set the policy before the first request. This " +
+	"application is rejected fail-closed: every request will answer 500 and " +
+	"web.serve will refuse to start."
+
+@(private)
+FRAMEWORK_MESSAGE_CORS_INVALID ::
+	"uruquim: web.cors was given an empty origin list, an empty origin, a " +
+	"negative max_age, or more origins than the framework stores. An " +
+	"allow-list that allows nothing is an unfinished policy rather than a " +
+	"restrictive one, and a dropped entry would leave your configuration " +
+	"quietly untrue. This application is rejected fail-closed: every request " +
+	"will answer 500 and web.serve will refuse to start."
+
+@(private)
+FRAMEWORK_MESSAGE_CORS_WILDCARD ::
+	"uruquim: web.cors was given a wildcard that cannot mean what it looks " +
+	"like. `*` with credentials = true is refused by every browser, and the " +
+	"obvious workaround — echoing whatever Origin arrives — shares " +
+	"authenticated data with whichever site asks. `*` alongside named origins " +
+	"reads as 'these, and also everyone', which is everyone. `*` in headers " +
+	"with credentials does NOT cover Authorization in the Fetch standard, so " +
+	"it permits less than it appears to. Name the origins you mean, or drop " +
+	"credentials. This application is rejected fail-closed: every request will " +
+	"answer 500 and web.serve will refuse to start."
+
+// cors_poison rejects the application with a static diagnostic, reusing the
+// WP17/WP18 mechanism exactly as `limits_poison` does.
+@(private)
+cors_poison :: proc(a: ^App, message: string, loc := #caller_location) {
+	a.private.poisoned = true
+
+	logger := context.logger
+	if logger.procedure == nil {
+		return
+	}
+	logger.procedure(logger.data, .Error, message, logger.options, loc)
+}
+
+// WP61 — the two static-mount members of the fail-closed family.
+@(private)
+FRAMEWORK_MESSAGE_STATIC_AFTER_DISPATCH ::
+	"uruquim: web.static was called after the application had already " +
+	"dispatched a request; a mount owns a path prefix, so adding one while " +
+	"serving would change what a path means between two requests. Mount every " +
+	"directory before the first request. This application is rejected " +
+	"fail-closed: every request will answer 500 and web.serve will refuse to " +
+	"start."
+
+@(private)
+FRAMEWORK_MESSAGE_STATIC_INVALID ::
+	"uruquim: web.static was given a prefix that is not absolute, a prefix " +
+	"ending in a slash, an empty directory, a negative max_file_size, or more " +
+	"mounts than the framework stores. A mount that silently does not work is " +
+	"a 404 nobody traces back to a typo, and one that silently works on the " +
+	"wrong directory is worse. This application is rejected fail-closed: " +
+	"every request will answer 500 and web.serve will refuse to start."
+
+@(private)
+static_poison :: proc(a: ^App, message: string, loc := #caller_location) {
+	a.private.poisoned = true
+
+	logger := context.logger
+	if logger.procedure == nil {
+		return
+	}
+	logger.procedure(logger.data, .Error, message, logger.options, loc)
+}

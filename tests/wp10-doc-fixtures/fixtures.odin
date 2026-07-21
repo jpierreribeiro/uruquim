@@ -416,3 +416,46 @@ limited_app :: proc() -> web.App {
 	web.get(&app, "/ping", ping)
 	return app
 }
+
+// fragment: phase5/cors
+// WP60. Configuration rather than middleware, because the headers have to reach
+// the automatic 404 and the driver's 500 as well, and the preflight has to be
+// answered before any handler runs. The unsafe wildcard combinations are
+// refused here, at registration, rather than at 3 a.m.
+cors_app :: proc() -> web.App {
+	app := web.app()
+	web.cors(
+		&app,
+		web.Cors_Options {
+			origins = {"https://app.example.com"},
+			headers = "Content-Type, Authorization",
+			credentials = true,
+			max_age = 600,
+		},
+	)
+	web.get(&app, "/ping", ping)
+	return app
+}
+
+// fragment: phase5/static
+// WP61. A mount owns its prefix; everything under it is answered from the
+// directory or answered 404. The rejections — traversal, percent encoding,
+// dotfiles, symlinks — are the feature.
+static_app :: proc() -> web.App {
+	app := web.app()
+	web.static(&app, "/assets", "public/assets", web.Static_Options{index = "index.html"})
+	web.get(&app, "/ping", ping)
+	return app
+}
+
+// fragment: phase5/multipart
+// WP63. The body is already in memory — there is no spool — so a part is a view
+// over it. Copy what you keep, and never use the client's filename as a path.
+upload_handler :: proc(ctx: ^web.Context) {
+	file, ok := web.form_file(ctx, "avatar")
+	if !ok {
+		web.bad_request(ctx, "avatar is required")
+		return
+	}
+	web.text(ctx, .OK, file.filename)
+}

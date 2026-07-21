@@ -1622,3 +1622,227 @@ no deadline, no forced close. The vendored patches (9, 10, 11) are marked
 **deleted** when `core:net/http` lands in January 2027, not ported. Patch 10 is
 the exception worth offering upstream regardless: the use-after-free it fixes is
 upstream's, not this project's.
+
+---
+
+## Amendment 20 — WP60: `cors` and `Cors_Options`
+
+**Date: 2026-07-21. Authority: ADR-034 (owner amendment), recorded in
+`planning/phase-5-spec.md` §1 and `decisoes-do-dono.md`.**
+**Ledger effect: application 55 → 57.** 57 application + 2 test-support = 59.
+Two added lines.
+
+```
+application	proc	cors :: proc(a: ^App, o: Cors_Options)
+application	type	Cors_Options :: struct {origins: []string, methods: string, headers: string, credentials: bool, max_age: int}
+```
+
+**`cors` WAS A RESERVED NAME AND THIS IS THE PHASE IT WAS RESERVED FOR.** It sat
+in `check_public_api.sh`'s later-phase list from Phase 1 precisely so nothing
+could take it before a work package argued for it. It leaves that list here,
+which is the list doing its job rather than being overridden.
+
+**WHY IT IS CONFIGURATION AND NOT MIDDLEWARE**, which is the decision the shape
+turns on. Two reasons, both structural:
+
+1. **The headers must reach every response.** Including the automatic 404, the
+   405, an extractor's 400 and the driver's 500. WP22 measured that the driver
+   finalizes a missing response AFTER the chain has unwound, so a stamping
+   middleware misses exactly the responses a browser most needs to read — a
+   page whose error is invisible shows its user a blank screen. The
+   `secure_headers` precedent decided this once; this follows it.
+2. **A preflight must be answered without running a handler.** A middleware
+   cannot stop the chain, and this framework deliberately gives it no way to.
+
+**THE SAFETY RULES ARE ENFORCED AT REGISTRATION**, and that is the whole value
+of the symbol over a hand-written middleware. A CORS misconfiguration is not an
+error the server notices — it works perfectly and quietly shares one origin's
+authenticated data with another. So four configurations fail closed at boot:
+
+| Refused | Why it is not merely wrong |
+|---|---|
+| `*` with `credentials` | The classic hole. No browser honours it, so the application looks broken, and the obvious workaround — echo whatever `Origin` arrives — is a real vulnerability |
+| `*` beside named origins | Reads as "these, and also everyone", which is everyone |
+| `*` in `headers` with `credentials` | The Fetch standard does not let that wildcard cover `Authorization`, so it permits less than it appears to |
+| empty origin list | An allow-list that allows nothing is unfinished, not strict |
+
+**WHAT IT ECHOES.** A listed origin comes back as itself, never the literal `*`,
+always with `Vary: Origin` — echoing the wildcard would make every origin's
+response look identical to a shared cache. An UNLISTED origin gets the response
+with **no CORS header at all**: served, and unreadable by the page. Refusing
+outright would break every same-origin browser POST, which also carries an
+`Origin`, and would leak which origins are listed through the status difference.
+
+**`methods` and `headers` are comma-joined strings rather than slices**, which
+is a deliberate trade. They go on the wire verbatim, so taking them pre-joined
+means the framework never builds a string at request time and never needs a
+buffer to build it in. Slices would read better at the call site and would cost
+an allocation or a copy on every preflight.
+
+**Ownership: the strings are the CALLER's**, on the `trust_proxies` contract
+exactly — read on the request path, so they must outlive the App, and string
+literals are what every real call site passes. Only the LIST is copied, into a
+bounded inline array, so the App never holds a slice header whose backing the
+caller could resize.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `cors` | A | WP60 | `tests/wp60-public-surface/contract_test.odin::wp60_the_signatures_are_pinned` | `tests/wp60-public-surface/contract_test.odin` — twelve cases including the four fail-closed configurations; `tests/wp60-internal/wp60_internal_test.odin` — six preflight cases | `docs/ai-context.md::CORS`, fragment `phase5/cors` with a compiling fixture | stores a bounded inline config on the App; allocates nothing; the origin strings are the caller's |
+| `Cors_Options` | A | WP60 | `build/phase1-public-signatures.txt` (struct shape frozen field-by-field) | `tests/wp60-public-surface/contract_test.odin::wp60_the_signatures_are_pinned` constructs every field | `docs/ai-context.md::CORS` | a by-value policy; owns nothing; `origins` is a caller-owned slice read only at registration |
+
+**The preflight suite is INTERNAL, and that is the design working.** A preflight
+is an OPTIONS request; `test_request` takes a `Method`; `Method` has no OPTIONS
+member because HEAD and OPTIONS are resolved from the raw token before a
+`Method` value exists. A public-surface suite that COULD send a preflight would
+be evidence the frozen six-member enum had grown.
+
+**Rollback.** Removing `cors` removes the feature completely: `Cors_Config` is
+private, the request path reads a flag that is never set, and no other symbol
+references either name. The one shared edit is `RESPONSE_HEADER_MAX`, raised
+from 6 to 12 — a fixed array on the Context, no allocation either way.
+
+---
+
+## Amendment 21 — WP61: `static` and `Static_Options`
+
+**Date: 2026-07-21. Authority: ADR-034, recorded in `planning/phase-5-spec.md` §1.**
+**Ledger effect: application 57 → 59.** 59 application + 2 test-support = 61.
+**Dependency ledger: `web` gains `core:os`** — the first change to
+`build/phase1-direct-dependencies.txt` since Phase 1.
+
+```
+application	proc	static :: proc(a: ^App, prefix: string, dir: string, o: Static_Options = {...})
+application	type	Static_Options :: struct {max_file_size: int, index: string}
+```
+
+**IT IS CONFIGURATION, NOT A ROUTER, for a mechanical reason.** A `Handler` is a
+plain procedure with no captured state, so a handler produced by `static` could
+not know which directory it belonged to. The App holds the mounts and the
+request path reads them — the same shape `cors` takes, for the same reason.
+
+**A MOUNT OWNS ITS PREFIX.** A request under it is answered from the filesystem
+or answered 404; it never falls through to the router. That is the `location`
+rule every reverse proxy already uses. The alternative — try the router, then
+fall back to files — makes "why is my route shadowed?" depend on whether a file
+happens to exist, which is a question nobody can answer from the source.
+
+**THE REJECTIONS ARE THE FEATURE.** Every rule is a refusal, never a repair,
+because a normaliser that gets it wrong produces a path the check already
+approved: `..`, `%`, `\`, NUL, empty interior segments, a leading `.` on any
+segment, a trailing `/`, anything that is not a regular file, and **every
+symlink whatever it points at**.
+
+Two of those deserve their reasons in the ledger:
+
+- **`%` is refused outright.** Uruquim never decodes the path (WP31a,
+  permanent), so `%2e%2e` would sail past a textual `..` check untouched and be
+  decoded by something downstream. A file whose name needs percent encoding is
+  not worth that.
+- **All symlinks are refused, not just escaping ones.** The stat does not follow
+  links, so a link reports its own type and is refused before anything resolves
+  it. Resolving and then comparing against the mount root is a string comparison
+  between paths that may be spelled differently, and **every wrong answer to
+  that comparison serves a file it should not.** This was not theoretical: the
+  first implementation did compare a resolved path against the root, and it
+  silently 404'd *every* file because `stat` returns an absolute path while the
+  mount was configured relative. The corpus caught it; a reviewer would not have.
+
+**GUARDRAIL 3 WAS VIOLATED AND THEN FIXED, and the measurement is why the fix
+exists.** Calling the file server directly from `driver_run` links `core:os`
+into every binary: `examples/01-hello-world`, which serves no files,
+**grew by 20 176 bytes.** The server is now reached through a proc pointer whose
+only assignment is inside `static`, exactly as `test_teardown` is under G-11, so
+the linker drops it — and `core:os` with it — from applications that mount
+nothing. The residual is 1 936 bytes across WP60 and WP61 together: the pointer
+field, the two inline config structs, and nothing executable.
+
+**WHAT IT DOES NOT DO**, each with its reason recorded rather than omitted:
+no file above `max_file_size` (8 MiB default) because responses are buffered
+whole under ADR-014 and a 100 MB download is 100 MB of RSS; no `Last-Modified`
+because an HTTP date needs a formatter linked into every application, and
+`ETag` validates as well without one; no ranges, which need the partial-response
+machinery streaming needs; no directory listing, which is a feature that leaks a
+filesystem.
+
+`STATUS_NOT_MODIFIED` carries 304 **without adding a public `Status` member**,
+on the `STATUS_BODY_TOO_LARGE` precedent: the enum is frozen member-by-member,
+and 304 is a cache negotiation the framework performs on the application's
+behalf — no handler returns it, so no handler needs a name for it.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `static` | A | WP61 | `tests/wp61-public-surface/contract_test.odin::wp61_the_signatures_are_pinned` | `tests/wp61-public-surface/contract_test.odin` — twelve cases, nine of them rejections | `docs/ai-context.md::Static files`, fragment `phase5/static` with a compiling fixture | stores bounded inline mounts on the App; the prefix and directory strings are the caller's; the served bytes are allocated per request and owned by the `Response`, released by `response_destroy` |
+| `Static_Options` | A | WP61 | `build/phase1-public-signatures.txt` (struct shape frozen field-by-field) | `tests/wp61-public-surface/contract_test.odin::wp61_a_file_over_the_cap_is_refused`, `::wp61_the_index_is_served_at_the_mount_root` | `docs/ai-context.md::Static files` | a by-value policy; owns nothing |
+
+**Rollback.** Removing `static` removes the feature and the `core:os`
+dependency with it: the mounts are private, the request path calls through a
+pointer that is never assigned, and no other symbol references either name.
+
+---
+
+## Amendment 22 — WP63: `form_field`, `form_file`, `Uploaded_File`
+
+**Date: 2026-07-21. Authority: ADR-034, scoped by `planning/phase-5-uploads-spec.md`
+(WP62), which answered OQ-20's seven questions before any code was written.**
+**Ledger effect: application 59 → 62.** 62 application + 2 test-support = 64.
+
+```
+application	proc	form_field :: proc(ctx: ^Context, name: string) -> (value: string, ok: bool)
+application	proc	form_file :: proc(ctx: ^Context, name: string) -> (file: Uploaded_File, ok: bool)
+application	type	Uploaded_File :: struct {field: string, filename: string, content_type: string, bytes: []u8}
+```
+
+**OQ-20 CLOSES HERE, and four of its seven questions dissolved rather than
+being answered.** They all presuppose a spool — bytes arriving, the framework
+writing them to a temporary file, the handler receiving a path. This framework
+has no spool: the body arrives WHOLE, bounded by `Limits.max_body`, and a larger
+one is answered 413 before any handler runs (WP8 D3). So there is no temporary
+file to own, nothing to clean up, no disk to fill, and no persistence to
+transfer. The remaining three were already answered by shipped limits —
+`max_body` is the quota, `max_request_time` (WP46) is the timeout, and the
+truncated-body case is covered by `tests/wp41-fault/`.
+
+**THE NEW POLICY IS TWO BOUNDS, and they exist because `max_body` bounds the
+BYTES and not the WORK.** A 4 MiB body can be ten thousand parts, and a parser
+that allocates once per part turns a bounded body into an unbounded loop — a
+denial of service that passes every limit this framework had. So the part count
+(32) and the per-part size (1 MiB) are bounded too, and the parse writes into a
+fixed array on the Context rather than allocating. **The parser allocates
+nothing:** every field it produces is a view over the request body.
+
+**IT IS A BODY CONSUMER, on ADR-012's terms exactly.** The form readers and
+`web.body` take the same single-use capability, and whichever runs first takes
+it. Reading one body twice through two decoders is the ambiguity ADR-012 closed,
+and multipart does not get an exemption from it.
+
+**A MALFORMED FORM YIELDS NOTHING, never a partial parse.** A form parser that
+salvages what it can hands the handler a missing field that looks like a field
+the user left blank — and nobody debugging that suspects the parser.
+
+**`filename` and `content_type` are the client's CLAIMS**, documented as such at
+the field. The framework never uses the filename as a path, never sanitises it,
+and says so: sanitising would imply it was safe afterwards. Generating a storage
+name is the application's job, and OWASP's file-upload guidance is the reason
+the type says "claim" rather than "type".
+
+**THE HONEST LIMITATION, and `docs/operations.md` §3 carries it:** an upload
+larger than `max_body` cannot be accepted at any setting that is not itself a
+memory problem, because the body is held whole. Gin spools to disk through
+`net/http`; this does not spool at all. **A framework that says so is more
+useful than one discovered in production.** Large uploads belong at a proxy or
+an object store, with a reference handed to the application.
+
+**AMEND-P5-3 IS SATISFIED BY CONSTRUCTION:** the parser takes `[]u8` and knows
+nothing else. When `core:net/http` replaces the adapter in January 2027, a
+parser that only ever saw bytes keeps working; one that had learned where the
+bytes came from would not.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `form_field` | A | WP63 | `tests/wp63-public-surface/contract_test.odin::wp63_the_signatures_are_pinned` | `tests/wp63-public-surface/contract_test.odin::wp63_a_form_is_parsed`, `::wp63_a_missing_field_is_reported`, `::wp63_malformed_bodies_yield_nothing` | `docs/ai-context.md::Multipart forms`, fragment `phase5/multipart` | returns a view over the request body; allocates nothing; takes the ADR-012 body capability on first use |
+| `form_file` | A | WP63 | `tests/wp63-public-surface/contract_test.odin::wp63_the_signatures_are_pinned` | `::wp63_a_form_is_parsed`, `::wp63_a_field_is_not_a_file_and_a_file_is_not_a_field`, `::wp63_a_boundary_like_string_inside_content_is_safe` | `docs/ai-context.md::Multipart forms` | as above; `Uploaded_File.bytes` is a view valid for the request only |
+| `Uploaded_File` | A | WP63 | `build/phase1-public-signatures.txt` (struct shape frozen field-by-field) | `::wp63_the_signatures_are_pinned` constructs every field | `docs/ai-context.md::Multipart forms` | a by-value record of views; owns nothing; must be copied to outlive the request (G-05) |
+
+**Rollback.** All three are readers over a private parser and a private Context
+field; removing them removes the feature with no other symbol affected. No
+dependency is added — the parser uses `core:strings`, which `web` already had.
