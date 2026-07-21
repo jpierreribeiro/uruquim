@@ -71,12 +71,33 @@ silêncio. O registro técnico é o `planning/phase-5-spec.md` §1.
 | **Camada tipo LiveView: adiada** | Avaliada e **recusada para agora**. Exigiria mexer na fronteira `Dispatch_Proc`/`Outbound` — justamente o que torna o framework agradável de escrever — e otimizava para uma ideia ainda não confirmada. A ideia não morreu; está fora da Fase 5. |
 | **Portão CE-E4 abriu** | A ADR-032 condicionou trabalho de ecossistema a "depois do WP44". O WP44 mergeou em 2026-07-21 (PR #77). A condição está cumprida e **nenhum documento da árvore registrava isso**. Registrado. O CE-E3 continua intacto: nada da Fase 5 é trabalho de ecossistema. |
 
+## Decisões do dono (2026-07-21) — programa das Fases 6 a 8
+
+O dono pediu que o projeto deixe de apenas enumerar limitações e prepare as
+implementações que tornam o Uruquim um framework completo para aplicações
+reais, preservando a filosofia do Odin e *The Joy of Programming*. O registro
+técnico normativo da próxima fase é `phase-6-spec.md`.
+
+| Decisão | O que ficou decidido, em uma linha |
+|---|---|
+| **Fase 6 é a classe “primeira aplicação real”** | A espera por demanda externa é dispensada para JSON honesto, dependências bloqueantes seguras, PostgreSQL, migrations, validação e o app de referência. G-09 e todos os gates continuam. A dispensa não inclui ORM, DI, GraphQL, OpenAPI, WebSocket, TLS in-process ou um runtime genérico. |
+| **ADR-030 reabre por liveness** | O resultado antigo sobre throughput continua válido. O novo teste é binário e diferente: com uma dependência bloqueada, uma requisição independente consegue terminar? O candidato é servir Handlers síncronos em lanes limitadas; só entra se segurança, shutdown e as features da Fase 5 continuarem verdes. |
+| **SQL-first, fora de `web`** | PostgreSQL, pool, transações, migrations, validação e checker vivem como Crystals; `web` nunca os importa. SQL, ownership e lifecycle ficam explícitos. Não haverá GORM, Active Record, DI container, geração obrigatória nem migration automática no boot. |
+| **`core:net/http` não é bloqueador nem API imaginária** | O contrato continua acima do adapter. A implementação atual é ponte. Quando a stdlib existir, ganha spike e corpus de conformidade próprios; nada será escrito hoje contra formas ainda inexistentes. |
+| **Fase 7 cobre os dois sentidos do streaming** | Não basta server push: a Fase 7 planeja response streaming e um caminho opt-in de request body grande, spool seguro e multipart incremental. O caminho bufferizado simples permanece canônico para corpos pequenos. |
+| **Fase 8 é o sistema de validação que faltava** | Um produto multiusuário em repositório separado usa apenas APIs públicas, sofre deploys, migrations, falhas e evolução reais e transforma fricção em evidência antes de qualquer 1.0. |
+
+Essas decisões aprovam o **programa e seus gates**, não nomes públicos futuros.
+WP66–WP113 ainda devem medir, recusar braços inseguros e congelar cada
+superfície antes de ela virar promessa.
+
 ## Fila de decisões abertas
 
-- **ADR-033 — a fundação de transporte.** Reaberta em 2026-07-21 pelo próprio
-  gatilho que ela escreveu. Com o `core:net/http` datado, a recomendação passa a
-  ser fechar em **manter e remendar, com a transição como saída declarada**. A
-  decisão final volta ao dono no freeze da Fase 5 (WP65) se o patch de drenagem
-  não ficar contido.
+- **ADR-030 — concorrência.** Reaberta apenas para o workload de liveness da
+  Fase 6. WP72 decide entre manter uma lane ou entregar lanes limitadas depois
+  dos protótipos e do fault gate; nenhum ganho de throughput é presumido.
+- **ADR-033 — FECHADA.** WP65 fechou em **manter e remendar, com a transição de
+  janeiro como saída declarada**. Só reabre por nova evidência, não por
+  desconforto geral com o vendor.
 - **Lançar tag ou versão.** Continua parando no dono, como sempre. Nada a
   decidir hoje — o roadmap não permite tag antes do M2.

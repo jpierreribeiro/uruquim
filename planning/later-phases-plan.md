@@ -366,18 +366,26 @@ left this backlog for the core — CORS, static files and uploads — because th
 demand-driven criterion is unsatisfiable at zero users. **Every item still in
 this table keeps that criterion.** The waiver named three items and no others.
 
+**Second amendment, WP66.** The owner approved a new, separately bounded class:
+*first real application*. Honest decoding and Handler-concurrency semantics are
+Phase-6 core work; PostgreSQL, migrations and validation are Crystals and never
+enter `web`. Phase 7 separately spec-gates the minimal transport-owned
+primitives for response streaming and large-body ingestion. This does not turn
+the whole backlog into a promise: WebSocket, OpenAPI, HTTP/2, templates and
+in-process TLS retain their gates.
+
 | Item | Classification | Reasoning |
 |---|---|---|
 | `core:net/http` adapter | **SCHEDULED — January 2027** | **Amended 2026-07-21:** the owner reports the package ships in the standard library in January 2027, expected with limitations. It is no longer a hypothesis with no date. Two consequences: **ADR-033 arm C (own the connection layer) is economically dead** — six months of work superseded by the stdlib — and every Phase-5 package acquires a second acceptance criterion, *it must not make the swap harder*. The vendored drain patches are declared bridge work, expected to be deleted when this lands |
 | OpenAPI generation | SHOULD_BE_OPTIONAL_PACKAGE | a layer over route information; never a generator requirement |
 | Automatic documentation | SHOULD_BE_OPTIONAL_PACKAGE | follows OpenAPI |
-| Validation | NEEDS_PROTOTYPE | tag-based validation edges toward the type-system cleverness Odin's own principles avoid; explicit validation may simply be the answer |
+| Validation | **PHASE 6, CRYSTAL, PROTOTYPE-GATED** | explicit transport-free validation is the canonical arm; tags/reflection and mandatory generation remain rejected unless evidence changes the decision |
 | WebSocket | SHOULD_BE_OPTIONAL_PACKAGE | its own protocol surface (RFC 6455) |
-| Streaming request/response | SHOULD_BE_OPTIONAL_PACKAGE | changes the body-ownership model that ADR-006 and ADR-012 rest on |
+| Streaming request/response | **PHASE 7, SPLIT OWNERSHIP** | the core owns only transport lifecycle, bounded response delivery and opt-in large-body ingestion/spool; SSE and Live remain ecosystem packages; buffered bodies remain canonical for ordinary requests |
 | HTTP/2 | SHOULD_BE_OPTIONAL_PACKAGE | only as the transport permits; RFC 9113 is a large surface |
 | Advanced API (`app_init`, `Advanced_Config`, `serve_transport`) | ACCEPTABLE_WITH_GUARDRAILS | ADR-010 — **ACCEPTED 2026-07-20** under the ADR-029 delegation, with activation deferred: designed, not shipped, until a real external user asks, and never in the Quick Start. (This row said "still PROPOSED" until 2026-07-21; corrected against `adrs.md:202`) |
 | Templates | **REJECT for core** | ecosystem territory |
-| Database integration | **REJECT for core** | ecosystem territory; a Postgres *example* belongs in the release track (M4) instead |
+| Database integration | **PHASE 6 CRYSTALS; STILL REJECTED FOR CORE** | SQL-first PostgreSQL, bounded pool, transactions, migrations and optional checking live outside `web`; the reference application is their integration gate |
 | Package distribution and versioning | product track | C-8: vendoring and a pinned toolchain, tagged against the Odin release. **No package-manager integration, ever** |
 
 ---

@@ -1661,3 +1661,141 @@ none; the requirement it keeps is the one nobody disputes.
   bar. A public symbol is a promise; three of them plus a security surface is a
   promise the project cannot quietly withdraw. This is why B required an owner
   amendment rather than an agent decision.
+
+---
+
+## ADR-032 — Amendment 1: CE-E4 is open; CE-E3 is unchanged
+
+- **Status.** ACCEPTED AMENDMENT, 2026-07-21, recorded by WP66 from the owner
+  decision and the Phase-5 freeze.
+
+- **What changed.** ADR-032 required ecosystem work to wait until after WP44.
+  WP44 merged in PR #77 and Phase 5 subsequently froze at `6b6edbc`. CE-E4 is
+  therefore satisfied. Keeping it marked unmet would turn a sequencing gate
+  into a permanent ban by documentation drift.
+
+- **What did not change.** CE-E3 remains exact: no Crystal may add, widen or
+  change a core symbol. A data package may be used through application-owned
+  `App_State`; `web` may never import or privilege it.
+
+- **First proof.** Before PostgreSQL work, WP73 implements the small Route
+  Crystal required by ADR-032. This tests detached `Router` composition and
+  the documentation/ledger burden on the smallest meaningful integration. It
+  is not waived merely because a larger Crystal is more exciting.
+
+- **What remains undecided.** The old draft's ADR-C001…C008 are not silently
+  accepted here. WP73 refreshes or replaces the minimum charter, ownership,
+  dependency, compatibility and ledger rules needed by actual code.
+
+- **Reversibility. HIGH.** This amendment records a condition already met and
+  preserves the stricter dependency rule.
+
+---
+
+## ADR-030 — Amendment 1: reopened for blocking-I/O liveness
+
+- **Status.** REOPENED FOR PHASE-6 EVIDENCE, 2026-07-21, owner decision. WP72
+  owns the verdict. The Phase-4 decision remains accepted for its measured
+  throughput workload.
+
+- **Why the old evidence does not answer the new question.** Phase 4 compared
+  request throughput and found a 31% difference inside a 138% noise floor. It
+  correctly refused concurrency as an unproved optimisation. Phase 6 needs a
+  synchronous PostgreSQL call. With one event-loop lane, a blocked call can
+  stop every unrelated request. That is a liveness ordering, not a performance
+  percentage:
+
+  > while one external dependency is held at a deterministic latch, does an
+  > independent health request finish before the latch is released?
+
+- **Candidate.** A bounded number of synchronous Handler lanes supported by
+  the private transport. The public contract, if accepted, describes maximum
+  Handler concurrency and its saturation behaviour; it does not expose
+  odin-http threads or promise that arbitrary stuck user code is preemptible.
+
+- **Pre-registered decision procedure.** WP69 must first prove the one-lane
+  negative control. The four-lane candidate then runs with three blocked lanes
+  and one health request under the thresholds in `phase-6-spec.md` §5.2. WP70
+  and WP71 may prepare a candidate only after that result. WP72 accepts it only
+  if framework-owned races, request lifetime, exactly-once commit, CORS,
+  static, multipart, cancellation and stop all pass. Any safety ambiguity keeps
+  the existing one-lane behaviour.
+
+- **Known bound.** Saturating every lane can still stall new Handler progress.
+  The design provides bounded blast radius and explicit capacity, not magic.
+  The canonical database relationship keeps pool capacity below lane capacity
+  so health and control work retain room.
+
+- **Reversibility. MEDIUM before a public concurrency setting, LOW after.** A
+  concurrency promise affects application-state rules and every adapter. That
+  is why the implementation does not ship merely because the lab's liveness
+  arm wins.
+
+---
+
+## ADR-035 — first-real-application work may precede external demand
+
+- **Status.** ACCEPTED, 2026-07-21, owner amendment; normative scope in
+  `phase-6-spec.md` §1.
+
+- **Context.** ADR-034 waived the demand-driven wait only for CORS, static and
+  uploads. The next adoption barrier is now observable: the current execution
+  model makes ordinary blocking dependencies process-wide, JSON shape errors
+  are not fully classified, and there is no accepted database/migration path.
+  Requiring an external production request for the pieces needed to construct
+  the first production application repeats the same circular gate Phase 5
+  removed.
+
+- **Decision.** Waive the wait, not the evidence, for the bounded class
+  **first real application**: honest request decoding, safe synchronous
+  blocking dependencies, PostgreSQL Crystals, migrations, validation, optional
+  SQL checking and one real reference application.
+
+- **Boundary.** This is not a general “adoption” escape hatch. ORM/Active
+  Record, DI, mandatory generation, GraphQL, OpenAPI, WebSocket, HTTP/2,
+  in-process TLS and a general job runtime remain outside. Response streaming
+  and large-body ingestion have their own approved Phase-7 spec gate rather
+  than inheriting this waiver silently.
+
+- **Evidence remains mandatory.** Each core symbol still pays G-09. Each
+  Crystal has a literal independent ledger, ownership and capacity contract,
+  compatibility policy, tests, example and rollback assessment. Phase 8 uses a
+  separate real system to test whether the combined product is actually joyful.
+
+- **Reversibility. MEDIUM.** Planning can be withdrawn; shipped public
+  surfaces cannot. The per-WP refusal gates carry that asymmetry.
+
+---
+
+## ADR-036 — SQL-first data stack outside `web`
+
+- **Status.** ACCEPTED DIRECTION, 2026-07-21, owner decision. Exact driver and
+  public signatures remain prototype-gated in WP74–WP80.
+
+- **Decision.** Uruquim's data path is explicit SQL, positional bindings,
+  fail-closed row decoding, typed errors with SQLSTATE, bounded pooling,
+  explicit transactions and a separate migration executable. Optional CI
+  verification may prepare queries against a disposable PostgreSQL database.
+
+- **Dependency direction.** PostgreSQL, migrations, validation and SQL tools
+  are Crystals. The application owns the pool and stores it in `App_State`.
+  `web` knows nothing about a database and never migrates one during startup.
+
+- **Rejected mechanisms.** Active Record, lazy loading, automatic
+  associations, pluralisation, implicit transactions, zero-skipping updates,
+  UPDATE-to-INSERT fallback, production auto-migration, mandatory code
+  generation, reflection-heavy runtime mapping and a DI container.
+
+- **Error rule.** Infrastructure errors remain database vocabulary; domain
+  services translate them into domain vocabulary; the application maps them at
+  the HTTP boundary. A row/type mismatch is an error, never silent zero. SQL,
+  parameters, credentials and personal data are not default diagnostics.
+
+- **Migration rule.** Migrations are immutable history with checksum, lock and
+  dirty/uncertain state. They are a deploy action, never a side effect of
+  starting replicas.
+
+- **Reversibility. HIGH at direction level.** The contract leaves query
+  builders and ORM-like packages possible outside the canonical path if later
+  evidence justifies them; it does not force their concepts into applications
+  that prefer SQL.

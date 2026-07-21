@@ -1,0 +1,659 @@
+# Phase 7 — Streaming foundation: server push, large bodies and bounded I/O
+
+**Status: OWNER-APPROVED PROGRAM PLAN, 2026-07-21.** Written before Phase 6 has
+run. WP85 must refresh this plan against the Phase-6 freeze; no signature below
+is approved or frozen. Work packages continue at **WP85–WP101**.
+
+The promise:
+
+> A handler may establish a long-lived response and return; later work can
+> enqueue bounded output from any thread, while only the connection-owning lane
+> touches the wire. Separately, a large request body may be consumed or spooled
+> incrementally without occupying RAM proportional to its size, and shutdown
+> can still prove cleanup in both directions.
+
+This phase builds the core primitive Uruquim Live needs and closes Phase 5's
+explicit large-upload limitation. It does not build the Live framework, a
+template language or WebSocket.
+
+---
+
+## 0. Why this is core work
+
+The current private boundary is deliberately buffered:
+
+```text
+Inbound → synchronous Dispatch_Proc → complete Outbound → request teardown
+         → adapter writes status + headers + full body
+```
+
+SSE does not avoid the structural change. Server push requires ownership that
+outlives `Context`, incremental commit and a wake-up path to the event-loop lane
+that owns the connection.
+
+Large uploads require a different structural change: today dispatch starts only
+after the adapter has materialized the entire body as `[]u8`. Phase 5 proved
+bounded in-memory multipart useful and simultaneously proved its perimeter — a
+multi-gigabyte body cannot be supported by raising `max_body` honestly. The
+owner has now made that limitation an explicit Phase-7 requirement; no later
+“real demand” gate remains.
+
+CE-E3 remains unchanged. Uruquim Live is ecosystem work and cannot make the
+core bend. Phase 7 is an explicit **core decision**, through the core's spec,
+ledger and gates. Once the primitive exists, SSE and Live consume it without
+further core growth.
+
+---
+
+## 1. Entry conditions
+
+| ID | Condition |
+|---|---|
+| E7-1 | Phase 6 frozen; WP72 accepted concurrent serving and the full Phase-5 feature corpus passes on multiple lanes. |
+| E7-2 | The final handler-concurrency/default contract and application-state rules are reflected here. |
+| E7-3 | PostgreSQL pool exhaustion is bounded, so the stream lab cannot be invalidated by handlers waiting forever for database capacity. |
+| E7-4 | ADR-008, ADR-009 and ADR-012 are explicitly reopened only for the long-lived path; buffered responses remain unchanged. |
+| E7-5 | The owner records that long-lived response capability is core work while SSE and Uruquim Live remain separate packages/repositories. |
+| E7-6 | Current transport and Odin toolchain are pinned. Official `core:net/http` is used only if its real API exists and passes a spike. |
+
+If concurrent serving is refused by Phase 6, Phase 7 stops. A long-lived
+single-lane system would recreate the global head-of-line failure this program
+exists to remove.
+
+---
+
+## 2. Pre-decisions and open decisions
+
+### Fixed before prototyping
+
+- Buffered `Handler :: proc(^Context)` remains the only Handler shape.
+- Opening a stream is opt-in and must not add concepts to ordinary endpoints.
+- `Context` and every request view die when the Handler returns.
+- The adapter/owning lane is the only writer to a connection.
+- Sending from another thread means bounded enqueue, never direct socket use.
+- User output cannot consume the control capacity required to close/stop.
+- Queue full is a typed, observable result; no unlimited waiting or memory.
+- After first-byte commit, framework errors close the stream and report out of
+  band. They never append a second HTTP envelope.
+- A closed/reused stream rejects stale producers.
+- The current vendored implementation is bridge work and exposes no public
+  backend type.
+- Optional stream/SSE executable code must not link into a buffered-only Hello
+  World. The Phase-5 static-server incident is the control precedent: unused
+  feature code is zero linked executable bytes; unavoidable configuration or
+  dispatch storage is measured and justified explicitly.
+
+### Decided by WP86/WP87 evidence
+
+1. specialised SSE primitive versus generic byte/event stream;
+2. opaque generational token versus pointer-like handle;
+3. per-stream queue versus per-lane queue with stream-indexed entries;
+4. copy-on-enqueue versus an advanced owned-buffer transfer;
+5. disconnect-on-full versus caller-selected policy;
+6. whether the Productive API needs more than open, try-send and close.
+7. incremental body consumer versus adapter-managed spool versus bounded ingest
+   workers;
+8. whether streaming multipart yields parts directly or spools file parts while
+   keeping fields bounded in memory.
+
+The recommended starting arm is a generic, bounded stream primitive with a
+stale-safe value token; SSE is its first Crystal. It is recommended, not
+pre-frozen.
+
+---
+
+## 3. Required state machines
+
+The exact enum is private until evidence requires otherwise, but every
+implementation must account for these states:
+
+```text
+Reserved → Headers_Committed → Open → Closing → Closed
+    │              │             │        │
+    └──────────────┴─────────────┴────────→ Failed
+```
+
+An outbound item has its own ownership path:
+
+```text
+Caller bytes
+  → copied/transferred into bounded stream storage
+  → queued for owner lane
+  → writing
+  → sent and released
+       or
+  → rejected/dropped/closed and released
+```
+
+Every transition names:
+
+- owner of connection, queue node and bytes;
+- legal thread/lane;
+- allocation lifetime;
+- observable result;
+- cleanup on close, cancellation and process drain.
+
+Generation changes when a registry slot is reused. A delayed producer holding
+an old token cannot target the new connection.
+
+Inbound bodies have a separate ownership path:
+
+```text
+Reading → In_Memory | Streaming | Spooling → Ready → Consumed → Released
+   │             │          │          │
+   └─────────────┴──────────┴──────────→ Failed/Cancelled
+```
+
+The default `web.body` and Phase-5 multipart path remain buffered and unchanged.
+The large-body path is opt-in. Its temporary file or consumer buffer is owned,
+bounded and cancelled independently of the response stream registry.
+
+---
+
+## 4. Capacity and backpressure contract
+
+At minimum Phase 7 fixes:
+
+- maximum open streams;
+- maximum queued events and bytes per stream;
+- maximum total queued stream bytes;
+- maximum write progress per lane tick;
+- heartbeat/timer capacity where SSE uses it;
+- separate control reservation for close and shutdown;
+- slow-consumer threshold and terminal policy.
+- maximum simultaneous large-body ingests;
+- maximum in-memory prefix/field bytes during incremental multipart;
+- per-upload and process-wide spool quotas;
+- temporary directory ownership, permissions and cleanup deadline;
+- disk-full, disconnect and shutdown outcomes.
+
+The generic core does not invent semantic coalescing for arbitrary bytes. Its
+canonical full result is refusal or disconnect according to a predeclared
+policy. Uruquim Live may coalesce component patches before enqueue because it
+understands their meaning.
+
+No producer blocks a handler lane indefinitely while waiting for stream space.
+
+---
+
+## 5. Work-package map
+
+| WP | Name | Type |
+|---|---|---|
+| 85 | Phase-7 spec, ADR reopenings and ledger budget | SPEC |
+| 86 | Bidirectional streaming topology and API shootout | PROTOTYPE |
+| 87 | Stream/body lifecycle and ownership corpus | TESTS |
+| 88 | Stream registry and stale-safe identity | IMPLEMENTATION |
+| 89 | Cross-lane bounded delivery | IMPLEMENTATION |
+| 90 | Incremental current-transport adapter, both directions | IMPLEMENTATION |
+| 91 | Commit, partial-write and failure security | TESTS + IMPLEMENTATION |
+| 92 | Response backpressure and slow-consumer policy | IMPLEMENTATION |
+| 93 | Inbound body-source and multipart laboratory | SPEC + TESTS |
+| 94 | Safe spool and incremental multipart | IMPLEMENTATION |
+| 95 | Stream/body stop, drain and forced cancellation | IMPLEMENTATION |
+| 96 | Scale, fairness, sanitizer and fault laboratory | TESTS |
+| 97 | SSE as the first consumer Crystal | IMPLEMENTATION |
+| 98 | Uruquim Live rendering shootout | PROTOTYPE, separate repository |
+| 99 | Uruquim Live vertical slice | INTEGRATION, separate repository |
+| 100 | Operations, protocol and migration documentation | DOCS |
+| 101 | Phase-7 freeze | FREEZE |
+
+Critical path:
+
+```text
+WP84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92
+                              └────────→ 93 → 94
+                    {92, 94} → 95 → 96
+                                    └→ 97
+WP85 → 98
+{96, 97, 98} → 99 → 100 → 101
+```
+
+WP98 may execute in parallel after WP85 because it adds no core symbol and does
+not depend on a wire implementation.
+
+---
+
+## 6. Work packages
+
+### WP85 — Phase-7 spec, ADR reopenings and ledger budget
+
+Create `planning/phase-7-spec.md`. Record:
+
+- ADR-008 amendment: commit for buffered responses stays unchanged; a stream
+  commits headers once and has no second HTTP response;
+- ADR-009 amendment: the private boundary gains a long-lived capability while
+  transport types remain private;
+- ADR-012 amendment: ordinary body binding remains single-consumer and
+  buffered; a distinct opt-in body-source/spool path may consume incrementally;
+- OQ-20 Amendment 1: Phase 5's no-temp-file answer remains true for
+  `form_file`, while the large-body path must answer ownership, cleanup, quotas,
+  persistence transfer, disk-full, timeout and disconnect independently;
+- a new ADR for stream ownership, backpressure and stale identity;
+- core versus SSE/Live ownership under CE-E3;
+- pre-registered thresholds and refusal rules.
+
+Inventory every public concept candidate under G-09. The target is the fewest
+concepts that can express open, bounded send outcome and close, plus one
+ordinary large-upload path that does not expose event-loop mechanics. Names
+wait for WP86.
+
+**Rollback:** HIGH — documents only.
+
+### WP86 — Bidirectional streaming topology and API shootout
+
+Build disposable candidates that send the same ten updates:
+
+- A: Handler remains alive and writes synchronously;
+- B: Handler returns a producer/callback polled by the lane;
+- C: Handler opens a detached stream and later code enqueues using a token;
+- D: SSE-specific API with no generic stream.
+
+Compare:
+
+- whether a Handler lane remains occupied;
+- cross-thread correctness;
+- request-view escape risk;
+- public concepts and call-site clarity;
+- per-event allocation and copy count;
+- bounded-full behaviour;
+- stop/drain feasibility;
+- implementability by test, current and future official adapters.
+
+Candidate A is expected to fail the lane-capacity requirement. Candidate C is
+recommended only if the lab proves ownership and usability.
+
+Negative controls deliberately reuse a closed slot and attempt cross-thread
+direct writes.
+
+In a second arm, ingest the same large multipart body through:
+
+- E: Handler pulls chunks synchronously from the connection;
+- F: adapter incrementally spools before invoking the Handler;
+- G: bounded ingest workers spool and then schedule the ordinary Handler;
+- H: application-provided incremental consumer.
+
+Compare lane occupation, disk/memory bounds, cancellation, user concepts,
+direct-to-object-store feasibility and future-adapter portability. The
+recommended Productive arm is bounded spool; an Advanced consumer ships only
+if its ownership and ergonomics remain recognizably Odin.
+
+**Rollback:** HIGH — experiments only.
+
+### WP87 — Stream/body lifecycle and ownership corpus
+
+Commit RED tests before implementation:
+
+- open commits status/headers exactly once;
+- Handler returns and its arena is destroyed while stream remains valid;
+- enqueue copies or takes ownership exactly as specified;
+- stale token after close/reuse refuses;
+- close is idempotent;
+- send racing close has one terminal owner;
+- queue-full result is deterministic;
+- user capacity full cannot block control close;
+- no send after server drain begins;
+- test transport observes the same semantic transitions as a socket adapter.
+- buffered `web.body`/`form_file` remain byte-identical;
+- large-body bytes never coexist fully in RAM;
+- temp files are generated privately and removed on every non-persisted path;
+- disk-full, timeout and mid-upload disconnect produce typed terminal results;
+- a Handler cannot read a request-backed chunk after its callback/read lifetime;
+- ingest capacity full refuses before accepting unbounded work.
+
+The control mutation removes the generation check and must make the gate fail.
+
+**Rollback:** HIGH — tests only.
+
+### WP88 — Stream registry and stale-safe identity
+
+Implement the private registry selected by WP86. Prefer contiguous slots,
+explicit free list and generation over pointer graphs. A public token, if
+needed, is a value that cannot expose registry memory or adapter handles.
+
+Registration occurs on the connection-owning lane. Closing invalidates the
+generation before releasing queued items. Reuse is tested under forced tiny
+capacity.
+
+**Rollback:** MEDIUM — internal lifecycle foundation plus minimal gated public
+surface.
+
+### WP89 — Cross-lane bounded delivery
+
+Allow any Handler lane or approved application thread to attempt an enqueue.
+The operation:
+
+1. validates token generation;
+2. reserves bounded capacity atomically;
+3. copies/transfers bytes into stream-owned storage;
+4. publishes to the owner lane;
+5. wakes that lane;
+6. returns a closed typed result.
+
+Only the owner lane removes an ordinary event for writing. Close/stop uses a
+separate control route that remains available under user saturation.
+
+No mutex is held during a socket write. No unbounded MPSC queue ships.
+
+**Rollback:** MEDIUM-HIGH — central concurrency mechanism.
+
+### WP90 — Incremental current-transport adapter, both directions
+
+Extend the private odin-http bridge to:
+
+- commit status/headers without a complete body;
+- write incremental body chunks on the owner lane;
+- observe short write/would-block/error;
+- resume only after the backend reports progress;
+- cancel pending writes safely;
+- surface bounded inbound chunks without materializing the complete body;
+- pause/resume socket reads according to spool/consumer capacity;
+- stop reading and retire/cancel correctly on early refusal;
+- remove every vendored hook at future adapter replacement.
+
+Measure vendor diff containment, but do not use “any backend state-machine
+change kills the project” as the criterion. Streaming inherently needs backend
+cooperation. It fails if the implementation leaks backend types publicly,
+cannot be removed with the adapter, or cannot prove lifecycle safety.
+
+If official `core:net/http` exists at execution time, a compile/behaviour spike
+is added here. Its absence does not block the phase.
+
+**Rollback:** MEDIUM — bridge patch governed by vendor policy.
+
+### WP91 — Commit, partial-write and failure security
+
+Reproduce the response-splitting risk predicted by the Phase-2 recovery lab.
+After headers/bytes are committed:
+
+- framework 4xx/5xx responders cannot append;
+- forgotten response finalization cannot append;
+- observer/logging may report safely out of band;
+- panic follows the existing process-fault policy;
+- adapter error closes/cancels the stream;
+- short writes never duplicate bytes on retry;
+- headers reject CR/LF before first commit;
+- body bytes remain body bytes, framed by the adapter.
+
+Middleware unwinds after stream establishment, not after the stream's lifetime;
+post-`next` mutation remains forbidden once committed.
+
+**Rollback:** MEDIUM — security contract and implementation.
+
+### WP92 — Response backpressure and slow-consumer policy
+
+Implement byte and event caps selected in WP85. Tests cover:
+
+- one client that never reads;
+- queue reaching event cap first and byte cap first;
+- many small versus one large event;
+- concurrent producers racing for the final slot;
+- refusal/disconnect metrics;
+- Live-layer coalescing without core semantic knowledge;
+- other streams continuing while one is slow.
+
+Default behaviour must be safe without tuning. Advanced policies are added
+only if they are orthogonal and pay G-09.
+
+**Rollback:** MEDIUM — capacity behaviour is public once used.
+
+### WP93 — Inbound body-source and multipart laboratory
+
+Specify the opt-in large-body contract and commit RED tests before spool code.
+It must answer:
+
+- memory ownership and chunk validity;
+- temporary directory and filename generation;
+- file permissions and symlink policy;
+- per-upload, concurrent-upload and process spool quotas;
+- maximum fields/parts/header bytes;
+- persistence transfer versus automatic deletion;
+- disk-full and filesystem error classification;
+- request deadline and client disconnect;
+- early application refusal and unread-body connection policy;
+- shutdown and crash leftovers;
+- direct-to-object-store consumer feasibility.
+
+The streaming multipart parser is incremental and boundary-correct across every
+fragmentation point. It never trusts filename or part Content-Type. The existing
+in-memory parser remains its compatibility oracle for bodies within both
+perimeters.
+
+**Rollback:** HIGH — spec and committed RED tests.
+
+### WP94 — Safe spool and incremental multipart
+
+Implement the winning Productive arm from WP86/WP93. The expected shape is:
+
+```text
+socket chunks → bounded multipart parser → small fields in bounded memory
+                                     └──→ generated temporary file
+```
+
+The Handler receives an explicitly owned upload resource only after the body is
+ready. Automatic cleanup runs exactly once unless the application explicitly
+persists/transfers ownership. Admission limits concurrent spools below handler
+lane capacity, and aggregate disk quota is checked throughout ingestion.
+
+An Advanced incremental consumer/direct sink is delivered only if WP86 proves
+it without a second Handler model, hidden callback lifetime or unbounded queue.
+Refusing that arm does not refuse safe large uploads.
+
+**Rollback:** MEDIUM-HIGH — new security/lifecycle surface.
+
+### WP95 — Stream/body stop, drain and forced cancellation
+
+Extend lifecycle in order:
+
+1. stop admission of requests, streams and body ingests;
+2. signal existing streams through reserved control capacity;
+3. allow bounded queued output according to policy;
+4. cancel pending reads/writes/spools/timers at deadline;
+5. invalidate tokens;
+6. release queues/session hooks exactly once;
+7. join every lane.
+
+`max_drain_time` must remain one honest process deadline. A stream-specific
+grace field is introduced only if one clock cannot express correct behaviour.
+
+The Phase-5 recv cancellation fix is retained; stream writes, body reads,
+temporary files, timers and queue storage join its proof.
+
+**Rollback:** MEDIUM-HIGH — lifecycle integration.
+
+### WP96 — Scale, fairness, sanitizer and fault laboratory
+
+Required cases:
+
+- 3,000 idle open streams;
+- 3,000 streams receiving heartbeat/control close;
+- updates from every lane to streams owned by every other lane;
+- one slow consumer among fast consumers;
+- queue saturation plus shutdown;
+- stale completion after slot reuse;
+- client disconnect before/after enqueue and during write;
+- seeded short writes, write failures and delayed wakeups;
+- one blocked database-like Handler while stream patches on other lanes flow;
+- allocator tracking, sanitizer and repeated startup/shutdown.
+- concurrent large uploads mixed with ordinary JSON and SSE;
+- disk quota and disk-full injection under active streams;
+- disconnect at every multipart boundary and spool lifecycle state;
+- process drain with streams and spools active together.
+
+Pre-register liveness and memory thresholds after the harness baseline. Report
+per-stream and per-queued-byte memory, not only process RSS.
+
+**Rollback:** HIGH — tests; failures veto the feature.
+
+### WP97 — SSE as the first consumer Crystal
+
+Ship an SSE package outside `web` using only the accepted stream surface:
+
+- event, data, id and retry encoding;
+- newline-safe multi-line data;
+- heartbeat comments;
+- Last-Event-ID parsing/reconnection contract;
+- proxy buffering guidance;
+- bounded send outcomes surfaced to the application;
+- no backend import and no core amendment.
+
+Raw-wire tests verify framing and reconnection. SSE proves the core abstraction
+can support a real protocol without privileged access.
+
+**Rollback:** HIGH — separate package.
+
+### WP98 — Uruquim Live rendering shootout
+
+In the separate Live repository, render the same 50×6 table and one-cell
+mutation with:
+
+- full region HTML + client morph;
+- generated static/dynamic split;
+- manual string building baseline.
+
+Measure wire bytes, allocations, render time, generated/build complexity and
+the real code a user writes. Use a valid noise methodology and predeclared tie
+arm. No result can change core Phase-7 signatures.
+
+**Rollback:** HIGH — disposable research.
+
+### WP99 — Uruquim Live vertical slice
+
+Build the smallest end-to-end separate application:
+
+- browser opens SSE stream;
+- ordinary POST carries an event;
+- server updates session state;
+- patch is enqueued to the owning lane;
+- two clients receive independent state;
+- reconnect restores current state;
+- slow client reaches a bounded policy;
+- deploy drain closes/reconnects cleanly.
+
+This is not Live 1.0. It decides whether the primitive is sufficient without
+core escape hatches.
+
+**Rollback:** HIGH — separate integration prototype.
+
+### WP100 — Operations, protocol and migration documentation
+
+Document common API separately from streams. Add:
+
+- stream ownership/lifetime diagram;
+- queue sizing and metrics;
+- slow-client policy;
+- proxy buffering/timeouts;
+- heartbeat and reconnect guidance;
+- shutdown semantics;
+- the rule after first-byte commit;
+- adapter replacement obligations;
+- known absence of WebSocket and arbitrary full-duplex protocols;
+- buffered versus spooled upload paths;
+- temp ownership, quota, persistence and crash-remnant cleanup;
+- direct object-store guidance.
+
+No stream concept enters the ordinary Quick Start.
+
+**Rollback:** HIGH — docs.
+
+### WP101 — Phase-7 freeze
+
+Freeze only if:
+
+- all lifecycle, ownership, fault and scale gates pass;
+- SSE uses no internal/core escape hatch;
+- the Live vertical slice uses no backend type;
+- public ledger growth is justified symbol by symbol;
+- buffered endpoints remain byte-identical;
+- common-path binary/API cost is measured;
+- large multipart never requires RAM proportional to body size;
+- spool cleanup, disk-full and disconnect gates pass;
+- every non-delivered item and limitation is recorded.
+
+Close or retain open the stream ADRs based on evidence. A failed Phase 7 leaves
+Phase 6 usable and refuses Uruquim Live; it does not weaken the gates.
+
+**Rollback:** HIGH — freeze records; implementation rollback varies by WP.
+
+---
+
+## 7. Phase-7 exit gates
+
+### G7-1 — Detached lifetime
+
+Handler and request arena are gone while stream output remains valid; no request
+view escapes.
+
+### G7-2 — Single writer
+
+Only the owning lane touches transport state. Cross-lane producers can only
+enqueue through the bounded mechanism.
+
+### G7-3 — Stale safety
+
+Delayed send/completion against a reused slot refuses and cannot affect the new
+stream.
+
+### G7-4 — Bounded backpressure
+
+All queue memory has named caps. Slow clients cannot grow memory indefinitely
+or stop unrelated streams.
+
+### G7-5 — Post-commit security
+
+No second response, error envelope or header mutation appears after incremental
+commit.
+
+### G7-6 — Honest drain
+
+Three thousand open streams terminate or are cancelled within the declared
+deadline, while active body ingests/spools are cancelled or completed by the
+same lifecycle with exactly-once cleanup.
+
+### G7-7 — Ecosystem proof
+
+SSE and the Live vertical slice work only through public accepted contracts.
+
+### G7-8 — Pay only when used
+
+A buffered-only application links no stream writer, registry or SSE protocol
+code. Any unavoidable base-layout cost is measured against the Phase-5 frozen
+binary and entered in the capacity/cost ledger.
+
+### G7-9 — Large-body boundedness
+
+A body larger than memory limits is processed with bounded memory. Temporary
+storage has per-upload and aggregate quotas; disk-full, timeout, disconnect and
+shutdown leave no falsely persistent file and no unbounded waiter.
+
+### G7-10 — Buffered compatibility
+
+Existing `web.body`, `form_field`, `form_file` and their request-lifetime view
+contracts remain byte- and behaviour-compatible. Large-body support is a
+distinct opt-in path, not a silent ownership change.
+
+---
+
+## 8. Non-goals
+
+- arbitrary full-duplex request/response protocols;
+- WebSocket or HTTP/2/3;
+- Live template/session framework in core;
+- automatic semantic patch coalescing in `web`;
+- background job system;
+- arbitrary user callbacks running on event-loop internals;
+- blocking send-until-space;
+- per-connection application pointer bags;
+- transport types in public API;
+- promise that a process can recover from memory corruption/panic.
+
+---
+
+## 9. The honest product result
+
+After Phase 7, Uruquim is still a microframework. Ordinary users still see
+app, route, extract, respond and serve; small bodies keep the Phase-5 path.
+Advanced server-driven applications gain bounded response streams, while
+large-body applications gain an explicit spool/consumer path without RAM
+proportional to upload size. Uruquim Live can then be built as a separate
+product rather than as privileged access to framework internals.
