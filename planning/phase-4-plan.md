@@ -261,6 +261,38 @@ at WP56. **Rollback: HIGH.**
 
 ### WP41 — Deterministic transport fault laboratory (RG-P4-C)
 
+**DONE, 2026-07-21 — `tests/support/fault_lab/`, `tests/wp41-fault/`,
+`build/check_wp41_controls.sh`.** Both halves of the success criterion are met:
+**the same seed replays the same trail**, and the lab **found a defect the
+existing tests miss.**
+
+**THE FINDING, and it is the evidence ADR-031 and ADR-033 were waiting for.**
+Every case in the WP9 corpus is a COMPLETE transmission — bytes arrive, the
+parser rejects them, the connection is retired. None of them ever asks what
+happens when the bytes simply **stop**. They stop here, and the server:
+
+> never responds, never closes, and holds the connection open until the LAB
+> runs out of patience.
+
+Two shapes, both live: a client that sends a valid prefix and says nothing more,
+and a client that trickles one byte at a time. **One socket, no bandwidth, held
+indefinitely, and nothing counts it, bounds it or ends it.** That is slowloris,
+and it is now a test rather than an inference.
+
+**Recorded for ADR-033's decision at this package:** the lab did NOT have to
+reach into the connection loop to make these faults reachable — a hostile client
+over a real socket was sufficient. That is evidence toward the **keep/patch**
+arm rather than the own-it arm, and it is one input rather than the verdict;
+§2c's criterion also asks whether the deadline patch stays contained, which is
+WP46's to answer.
+
+**One defect in the lab itself, recorded because it is the same defect:** the
+first version hung, because `net.recv_tcp` blocks and a patience loop around a
+blocking read never re-evaluates its own deadline. **The lab reproduced, in its
+own client, exactly the unbounded-wait bug it exists to find in the server.** A
+timeout set on only one side of a connection is a timeout somebody is relying on
+the other side to have.
+
 **TESTS.** This is **P-T5**, deferred here by name from the Phase-3 plan.
 Seeded and reproducible: fragmentation, slow reader/writer, timeout before and
 after completion, concurrent close, failure after N bytes, slot reuse, an
