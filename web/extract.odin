@@ -310,8 +310,23 @@ body :: proc(ctx: ^Context, dst: ^$T) -> bool {
 		return false
 	}
 
-	// 3. The fixed cap, before the arena and the parser.
-	if len(raw) > BODY_LIMIT {
+	// 3. The cap, before the arena and the parser. WP36 made it CONFIGURABLE:
+	// the value is the one `web.limits` validated at boot and the driver copied
+	// onto this Context, so both transports enforce the same number.
+	//
+	// A ZERO BUDGET MEANS THE DEFAULT, and that is a deliberate asymmetry with
+	// the public API rather than a contradiction of it. `web.limits` REFUSES a
+	// partially-filled `Limits`, so an application can never reach this line
+	// with a zero it chose — the only way a zero arrives is a Context the
+	// framework itself built without a budget. Reading that as "reject every
+	// body" would turn a framework-internal omission into an application that
+	// refuses all traffic, which is not failing closed; it is just broken. The
+	// public contract refuses ambiguity; the read path is defensive.
+	cap := ctx.private.limits.max_body
+	if cap <= 0 {
+		cap = BODY_LIMIT
+	}
+	if len(raw) > cap {
 		error_commit_static(ctx, STATUS_BODY_TOO_LARGE, ERROR_BODY_TOO_LARGE)
 		return false
 	}

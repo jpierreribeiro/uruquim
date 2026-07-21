@@ -1076,3 +1076,125 @@ Evidence rows, same schema as §5:
 |---|---|---|---|---|---|---|
 | `app_with_state` | A | WP37 | `tests/wp37-public-surface/contract_test.odin::wp37_the_state_signatures_are_pinned` | `tests/wp37-public-surface/contract_test.odin::wp37_a_nil_state_rejects_the_application` | `docs/ai-context.md::web.app_with_state` | stores the CALLER's pointer and a `typeid`; owns nothing and allocates nothing; the caller owns the value and must outlive the App; `destroy` releases nothing here |
 | `state` | A | WP37 | `tests/wp37-public-surface/contract_test.odin::wp37_the_requested_type_decides_the_result_type` | `tests/wp37-public-surface/contract_test.odin::wp37_a_handler_mutates_the_original_value` | `docs/ai-context.md::web.state` | returns the caller's own pointer, typed; asserts registration and exact `typeid` before the cast; borrows, owns nothing, allocates nothing |
+
+## Amendment 12 — WP36: configurable limits (`Limits`, `DEFAULT_LIMITS`, `limits`)
+
+**Date:** 2026-07-20. **Authority:** the **ADR-029 delegation**
+(`planning/phase-3-plan.md` §2b: *"Approved: options struct + package default
+constant; boot-derived immutable runtime"*).
+**Ledger effect: application 47 → 50.** 50 application + 2 test-support = 52.
+The snapshot diff for this amendment was exactly three added lines; no existing
+row changed a byte.
+
+The three recorded lines:
+
+```
+application	const	DEFAULT_LIMITS :: Limits{max_body = BODY_LIMIT, max_request_line = REQUEST_LINE_LIMIT, max_headers = HEADER_BLOCK_LIMIT}
+application	proc	limits :: proc(a: ^App, l: Limits)
+application	type	Limits :: struct {max_body: int, max_request_line: int, max_headers: int}
+```
+
+**THIS IS THE LEAST REVERSIBLE CHANGE IN PHASE 3 and the struct's size is the
+whole defence.** A public options type is a promise per FIELD: once an
+application writes `max_body`, removing or renaming that field breaks its build,
+and *tightening a default* breaks its traffic without breaking its build — which
+is worse. Adding a field later is cheap. Three fields ship, each because
+something downstream already enforces it.
+
+**THE DEFAULTS ARE THE SHIPPED VALUES, NOT NEW OPINIONS.** 4 MiB is the cap
+Phase 1 fixed; 8000 is the vendored backend's own default for both text budgets.
+An application that never mentions limits therefore behaves exactly as it did
+before this amendment — the property that makes shipping the type safe. The
+freeze snapshot records `DEFAULT_LIMITS` by the NAMES of its constants, so
+`build/check_public_api.sh` additionally pins all three numbers; without that,
+a default could change with the snapshot unmoved.
+
+**IT ATTACHES TO THE APP, NOT TO `serve`, AND R-10 IS THE REASON.**
+`test_request` never calls `serve`. A cap living on `serve` would make an
+in-memory test answer 200 where a socket answers 413 — on exactly the boundary
+a test suite exists to prove. The limits travel with the application, the shared
+driver copies them onto every request beside the observer and the state, and
+`serve` DERIVES the backend's options from them at boot. No `Limits` value
+crosses the transport boundary: the adapter receives resolved integers, because
+a public `web` type there would be the back-edge ADR-009 forbids.
+
+**THE CONCURRENCY DECISION, recorded here because this is where the snapshot is
+taken.** `limits` after the first dispatch **REJECTS** the application through
+the existing poison mechanism. The snapshot model **sits beside ADR-019 and
+ADR-023 and does not replace them**: `use()` after the first dispatch is still
+refused for its own reason, and a test asserts that it still is. Nothing shipped
+became weaker. Order relative to *routes* is deliberately unconstrained — a
+limit protects every route equally, so there is no ordering hazard of the kind
+ADR-019 exists for, and rejecting a safe program for resembling an unsafe one
+would be a worse error than the one it prevented.
+
+**A ZERO FIELD IS REJECTED.** `Limits{max_body = 1024}` leaves two fields at
+zero, and the struct has no unset state to tell a forgotten field from a
+deliberate one. Guessing would mean an application silently running on a mix of
+its own values and the framework's. Start from `DEFAULT_LIMITS`.
+
+**READ AND WRITE TIMEOUTS ARE NOT HERE, AND THAT IS A FINDING.** The plan named
+them and set a stop rule, which this work package hit. The vendored server has
+**no read or write deadline to configure**: `Server_Opts` carries
+`limit_request_line` and `limit_headers` and nothing temporal, its only
+`nbio.timeout_poly` uses are a fixed close delay and a one-second date tick, and
+the request read in `vendor/odin-http/scanner.odin` still carries an unfinished-
+work comment saying a timeout is wanted there. Real deadlines are
+surgery inside the vendored event loop, not a field. Shipping without those
+fields is the reversible arm: adding a field later is an amendment, while
+shipping one that silently does nothing would be a lie with a version number on
+it. **No document may claim Uruquim has configurable timeouts.**
+
+**THE DERIVATION WAS MEASURED, as the plan required, and the measurement does
+not distinguish the shapes on cost.** Consumer built at `-o:speed`, one POST
+route binding a JSON body:
+
+| Shape | Binary | Δ vs baseline | Request-path branches added | Allocations |
+|---|---|---|---|---|
+| `origin/main` (fixed 4 MiB constant) | 744,744 B | — | — | 0 |
+| **Boot-resolved budget on the Context** (shipped) | 745,216 B | +472 B | **0** — a constant comparison became a field comparison | 0 |
+| Configuration re-derived per request | 745,216 B | +472 B | 3 | 0 |
+
+**Byte-identical**, so the amendment's reasoning is not vindicated by size and
+this amendment says so. What separates the shapes is the branch count and the
+semantics behind it: a per-request derivation can *discover a contradiction
+under load*, which is the failure the boot-time validation exists to move to
+boot. The evidence supports the choice on the second ground and is silent on the
+first.
+
+**ONE DECISION EMERGED DURING IMPLEMENTATION and is recorded rather than
+smoothed over: a ZERO budget on the read path resolves to the default.** The
+first cut compared directly against `ctx.private.limits.max_body`, which turned
+every hand-built `Context` — every internal test suite that constructs one
+without the driver — into an application that answers 413 to every body. That is
+not failing closed; it is broken. The public contract is unchanged: `web.limits`
+still REFUSES a partially-filled `Limits`, so an application can never choose a
+zero, and the only way one arrives is a framework-internal omission. The public
+API refuses ambiguity; the read path is defensive. `check_public_api.sh` §8c
+still requires every constructor to set `DEFAULT_LIMITS`, now as defence in
+depth rather than as the only thing standing between a slip and a dead
+application — and `check_wp36_controls.sh` control 4 is a PAIR that pins both
+halves: with a forgetful constructor the application must still serve (positive),
+and with the safety net also removed it must not (negative).
+
+**FINDING-C is discharged in this change.** The capacity ledger's row —
+*"request body: 4 MiB, fixed, not configurable until Phase 3"* — is amended in
+`planning/phase-2-freeze.md`, and the claim ledger gains a row for the new
+promise with its own negative control.
+
+**Freezing this exposed a hole in the freeze gate itself, closed in the same
+change.** The signature extractor read procedures, procedure groups and types —
+**never constants**. An exported constant is a public symbol whose VALUE is the
+contract, so `DEFAULT_LIMITS` would have been invisible to the snapshot and its
+value changeable with the frozen inventory unmoved. It is the same class of hole
+the proc-group branch was written for. Constants are now extracted from the
+FULL `odin doc` view, because the short view renders a struct constant as
+`Limits{...}` and elides exactly the values that are the promise.
+
+Evidence rows, same schema as §5:
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `Limits` | A | WP36 | `tests/wp36-public-surface/contract_test.odin::wp36_the_limits_surface_is_pinned` | `tests/wp36-public-surface/contract_test.odin::wp36_a_lowered_body_cap_is_enforced_exactly` | `docs/ai-context.md::web.Limits` | a plain value of three ints; owns nothing, allocates nothing; copied onto the App and onto each request |
+| `DEFAULT_LIMITS` | A | WP36 | `tests/wp36-public-surface/contract_test.odin::wp36_the_defaults_are_the_values_already_shipped` | `tests/wp36-public-surface/contract_test.odin::wp36_an_application_that_never_configures_anything_still_works` | `docs/ai-context.md::web.DEFAULT_LIMITS` | a compile-time constant; unassignable, so no library can change another's defaults |
+| `limits` | A | WP36 | `tests/wp36-public-surface/contract_test.odin::wp36_the_limits_surface_is_pinned` | `tests/wp36-public-surface/contract_test.odin::wp36_limits_after_the_first_dispatch_rejects_the_application` | `docs/ai-context.md::web.limits` | stores three ints on the App; validates at the call so the request path only compares; rejects fail-closed after the first dispatch |

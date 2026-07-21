@@ -58,12 +58,19 @@ app_with_state :: proc(state: ^$T) -> App {
 		// dispatch answers 500. The diagnostic is emitted here because there is
 		// no later moment at which the caller is still looking at this call.
 		state_poison_nil()
-		return App{private = App_Internal{default_responses = true, poisoned = true}}
+		return App {
+			private = App_Internal {
+				default_responses = true,
+				poisoned = true,
+				limits = DEFAULT_LIMITS,
+			},
+		}
 	}
 
 	return App {
 		private = App_Internal {
 			default_responses = true,
+			limits = DEFAULT_LIMITS,
 			state = rawptr(state),
 			state_type = typeid_of(T),
 		},

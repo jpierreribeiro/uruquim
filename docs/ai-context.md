@@ -17,7 +17,8 @@ a standardized JSON envelope.
 - **Routing:** static and `:param` segments; a static route always wins over a
   parametric one, regardless of registration order.
 - **Extractors:** path and query values; a fallible one answers `400` itself.
-- **Bodies:** JSON decoded into a value you own, capped at a fixed **4 MiB**.
+- **Bodies:** JSON decoded into a value you own, capped at **4 MiB** by
+  default and configurable with `web.limits`.
 - **Responses:** JSON, text, `204`, and five error responders.
 - **Automatic errors:** `404` for an unknown path, `405` with an exact `Allow`
   header for a known path under another method — both with a JSON envelope.
@@ -38,11 +39,12 @@ a standardized JSON envelope.
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available yet** — do not emit any of it:
-configurable limits and read/write timeouts (Phase 3); graceful shutdown with
-a deadline (Phase 4). There is **no request-scoped state** and there will not
-be one (ADR-028): `ctx` is not an extension bag, and a value a middleware
-computes for a handler is passed down or recomputed. Panic recovery does not exist and never will: Odin has
+**Not available yet** — do not emit any of it: **read and write timeouts**
+(the vendored server has no deadline to configure, so `web.Limits` has no
+timeout field and none may be invented); graceful shutdown with a deadline
+(Phase 4). There is **no request-scoped state** and there will not be one
+(ADR-028): `ctx` is not an extension bag, and a value a middleware computes for
+a handler is passed down or recomputed. Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
 
 **Fault behaviour — state it accurately, both halves (ADR-020).**
@@ -58,13 +60,13 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **47** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **50** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
-`logger` and `request_id` from Phase 2, and `route`, `app_with_state` and
-`state` from Phase 3). The test-support API is a separate ledger of exactly
-**2**. Union: **49**. Do not fold them together and do not invent a third
-form.
+`logger` and `request_id` from Phase 2, and `route`, `app_with_state`,
+`state`, `Limits`, `DEFAULT_LIMITS` and `limits` from Phase 3). The
+test-support API is a separate ledger of exactly **2**. Union: **52**. Do not
+fold them together and do not invent a third form.
 
 ## Application
 
@@ -93,6 +95,43 @@ main :: proc() {
 `serve(a: ^App, port: int)` validates the port (1..65535), binds IPv4 Any and
 blocks. An invalid port or a bind failure is logged and returns without
 serving.
+
+### Limits
+
+```text
+Limits{max_body, max_request_line, max_headers}   the byte budget, in bytes
+DEFAULT_LIMITS                                    4 MiB, 8000, 8000
+limits(&app, l)                                   set it; before the first request
+```
+
+<!-- fragment: phase3/limits -->
+```odin
+budget := web.DEFAULT_LIMITS
+budget.max_body = 64 * 1024
+web.limits(&app, budget)
+```
+
+**Start from `web.DEFAULT_LIMITS` and change what you mean to change.** A
+`Limits` with a zero field is rejected: there is no unset state, so a forgotten
+field cannot be told from a deliberate one, and the application is refused
+fail-closed rather than run on a guess.
+
+- the budget belongs to the **App**, not to `web.serve`, so `web.test_request`
+  enforces the same numbers as a socket — a 413 in a test is a 413 in
+  production;
+- exactly the limit is accepted; one byte more is `413`;
+- `web.limits` **after the first request** rejects the application: the budget
+  is read on the request path, and changing it while serving would give two
+  clients two different answers to the same body. Order relative to routes does
+  not matter;
+- `DEFAULT_LIMITS` is a **constant**, so no library can change another's
+  defaults;
+- **there are no timeout fields**, because the server has no deadline to
+  configure. Do not emit `web.Limits{read_timeout = ...}` — it does not exist.
+
+`Limits` bounds Uruquim's own per-request working memory. It does **not** bound
+connections, accept backlog or process memory; those belong to the transport and
+the operating system.
 
 ### Application state
 
@@ -584,7 +623,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-47 application symbols.
+50 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

@@ -82,6 +82,15 @@ App_Internal :: struct {
 	closed:      bool,
 	has_mounted: bool,
 
+	// WP36 — the application's byte budget (ADR-029 §2b shape: options struct +
+	// package default constant). It is NOT lazy and cannot be: the zero value
+	// of `Limits` is three zeros, which would mean "answer 413 to every body".
+	// Every constructor therefore initialises it to `DEFAULT_LIMITS`, and
+	// `build/check_public_api.sh` asserts that every one of them does — a new
+	// constructor that forgot would ship an application that rejects all
+	// traffic. Three ints, no allocation; the laziness claim is unaffected.
+	limits: Limits,
+
 	// WP37 — ADR-004 option A: the application's typed state, as an untyped
 	// pointer plus the `typeid` that makes it typed again at the boundary.
 	//
@@ -144,7 +153,7 @@ App_Internal :: struct {
 //
 // It allocates nothing. The route table is created on the first registration.
 app :: proc() -> App {
-	return App{private = App_Internal{default_responses = true}}
+	return App{private = App_Internal{default_responses = true, limits = DEFAULT_LIMITS}}
 }
 
 // bare creates an application with none of the default middleware or policies,
@@ -155,7 +164,12 @@ app :: proc() -> App {
 // automatic 405: an unmatched request simply leaves the response uncommitted,
 // and deciding what to do about it belongs to the caller.
 bare :: proc() -> App {
-	return App{}
+	// `bare()` installs no POLICY. Limits are not policy — they are the byte
+	// budget that keeps a request from consuming the process — so a bare
+	// application gets the same defaults. There is no way to ask for none, and
+	// there should not be: "unlimited" is not a configuration, it is a denial
+	// of service waiting for one request.
+	return App{private = App_Internal{limits = DEFAULT_LIMITS}}
 }
 
 // destroy releases everything the application owns.

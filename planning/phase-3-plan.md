@@ -908,6 +908,86 @@ capacity-ledger amendment.**
   field is a promise kept for as long as the type exists. Adding a field later
   is easy; that asymmetry is the whole argument for starting small.
 
+**WP36 DONE, 2026-07-20 — `web/limits.odin`, `tests/wp36-public-surface`,
+`build/check_wp36_controls.sh`, Amendment 12 of `planning/phase-1-freeze.md`.**
+**+3 symbols, ledger 47 → 50** (union 52). Options struct + package default
+CONSTANT + boot-derived runtime, exactly the §2b shape.
+
+**TIMEOUTS DID NOT SHIP, AND THE STOP RULE IS WHY.** The plan said: prototype
+first, and if deadlines need surgery in the vendored server, ship `Limits`
+without timeout fields and record the finding. The prototype was conclusive.
+`Server_Opts` carries `limit_request_line` and `limit_headers` and **nothing
+temporal**; the only `nbio.timeout_poly` uses are a fixed close delay and a
+one-second date tick; and the request read in `vendor/odin-http/scanner.odin`
+still carries an unfinished-work comment asking for a timeout there. So a read
+deadline is work inside the event loop, not a field. Shipping without those
+fields is the reversible arm — adding a field later is an amendment, while
+shipping one that silently does nothing would be a lie with a version number on
+it. **The ADR-029 stop condition was honoured: the finding is recorded rather
+than the arm forced.**
+
+**THE MEASUREMENT THE PLAN REQUIRED, and it does not say what the amendment
+assumed.** Consumer at `-o:speed`, one POST route binding a JSON body:
+`origin/main` 744,744 B; boot-resolved budget 745,216 B; config re-derived per
+request **745,216 B — byte-identical**. Zero allocations either way. The shapes
+differ only in branch count (0 added versus 3) and in what a contradiction
+costs: a per-request derivation can discover one under load, which is the
+failure boot-time validation exists to move to boot. **The amendment chose
+correctly, for a reason the measurement supports and on a cost basis it does
+not.** Recorded that way rather than as a vindication.
+
+**The concurrency decision, as the plan demanded it be written down:** `limits`
+after the first dispatch is **REJECTED via the existing poison mechanism**, and
+the snapshot model **sits beside ADR-019/ADR-023 rather than replacing them** —
+`wp36_the_older_use_after_dispatch_guard_is_untouched` fails if a shipped
+fail-closed guarantee is ever silently withdrawn. Order relative to ROUTES is
+deliberately unconstrained: a limit protects every route equally, and rejecting
+a safe program for resembling an unsafe one would be a worse error than the one
+it prevented.
+
+**R-10 is structural, not a coincidence, and control 2 proves it.** The budget
+lives on the App and the shared driver copies it onto every request beside the
+observer and the state; delete that one line and the configurable-cap tests go
+red. If the cap had lived on `serve`, `test_request` would have answered 200
+where a socket answers 413 — on exactly the boundary a test suite exists to
+prove.
+
+**FINDING-C discharged in this change:** the capacity ledger's body row is
+amended and two rows added, and the claim ledger gains C-10 with its own
+negative control. The WP35 tripwire stayed green — nothing here pools anything.
+
+**A gate finding, fixed here because it BLOCKED the freeze.** The signature
+extractor read procedures, procedure groups and types and **never constants**.
+An exported constant is a public symbol whose VALUE is the contract, so
+`DEFAULT_LIMITS` was invisible to the snapshot and its value changeable with the
+frozen inventory unmoved — the same class of hole the proc-group branch was
+written for. Constants are now read from the FULL `odin doc` view, because the
+short view renders a struct constant as `Limits{...}` and elides exactly the
+values that are the promise. The three numbers behind the names are separately
+pinned in `check_public_api.sh`.
+
+**A decision that emerged from the gate, recorded rather than smoothed over.**
+The first cut compared directly against `ctx.private.limits.max_body`, and the
+WP7 internal suite went red: those tests construct a `Context` by hand, never
+through the driver, so their budget was three zeros and every body was
+over-limit. The fix was NOT to edit ten test files. A zero budget on the read
+path resolves to the default, because turning a framework-internal omission into
+an application that refuses all traffic is not failing closed — it is broken.
+The public contract is untouched: `web.limits` still refuses a partially-filled
+`Limits`, so an application can never choose a zero. **The public API refuses
+ambiguity; the read path is defensive.** Control 4 became a PAIR that pins both
+halves — forgetful constructor must still serve, forgetful constructor with no
+safety net must not.
+
+**The ritual took twelve files.** The ten WP37 measured, plus
+`planning/phase-2-freeze.md` — the first Phase-3 package to amend a Phase-2
+ledger rather than only the Phase-1 signature freeze — and
+`build/check_wp3_mutations.sh`, whose WP7 mutations 32-34 were all written
+against the literal `BODY_LIMIT` comparison and had to be re-aimed at the
+resolved budget. **WP38 should expect that shape:** a behaviour change ripples
+into the mutation suites that pinned the old behaviour, and re-aiming them is
+part of the change, not a follow-up.
+
 ### WP37 — Typed application state, and the request-scope question
 
 **Type: PROTOTYPE + IMPLEMENTATION. Requires owner approval — public surface.**

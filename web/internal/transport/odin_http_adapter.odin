@@ -47,6 +47,13 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	opts := http.Default_Server_Opts
 	opts.thread_count = 1
 	opts.redirect_head_to_get = false
+	// WP36: the caller's resolved text budgets replace the backend's own
+	// defaults. `Default_Server_Opts` is a mutable package VARIABLE in the
+	// vendored server — assigning to it would change the defaults for anything
+	// else in the process — so the copy above is taken first and only the copy
+	// is written to.
+	opts.limit_request_line = cfg.max_request_line
+	opts.limit_headers = cfg.max_headers
 	// WP9 D5: Phase 1 implements no interim-response flow. Leaving the backend's
 	// automatic continue on made it answer "100 Continue" and then WAIT for a
 	// body the client may never send. `Expect` is refused with 417 in

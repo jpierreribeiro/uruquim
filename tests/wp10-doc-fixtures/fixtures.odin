@@ -349,6 +349,14 @@ wp10_fixtures_compile_and_run :: proc(t: ^testing.T) {
 	configured := web.test_request(&stateful, .GET, "/config")
 	testing.expect_value(t, configured.status, web.Status.OK)
 	testing.expect_value(t, configured.body, `{"greeting":"hi"}`)
+
+	// The documented limits fragment builds a working application — a Limits
+	// with a zero field would have rejected it, which is what makes this
+	// assertion about the fragment rather than about the framework.
+	limited := limited_app()
+	defer web.destroy(&limited)
+	pinged := web.test_request(&limited, .GET, "/ping")
+	testing.expect_value(t, pinged.status, web.Status.OK)
 }
 
 // fragment: phase3/route-identity
@@ -393,5 +401,18 @@ show_config :: proc(ctx: ^web.Context) {
 state_app :: proc(state: ^Doc_App_State) -> web.App {
 	app := web.app_with_state(state)
 	web.get(&app, "/config", show_config)
+	return app
+}
+
+// fragment: phase3/limits
+// WP36. Start from the default and change one field: a Limits with a zero
+// field is refused, because there is no unset state to tell a forgotten field
+// from a deliberate one.
+limited_app :: proc() -> web.App {
+	app := web.app()
+	budget := web.DEFAULT_LIMITS
+	budget.max_body = 64 * 1024
+	web.limits(&app, budget)
+	web.get(&app, "/ping", ping)
 	return app
 }

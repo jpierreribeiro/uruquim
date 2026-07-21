@@ -1,3 +1,4 @@
+application	const	DEFAULT_LIMITS :: Limits{max_body = BODY_LIMIT, max_request_line = REQUEST_LINE_LIMIT, max_headers = HEADER_BLOCK_LIMIT}
 application	proc	app :: proc() -> App
 application	proc	app_with_state :: proc(state: ^$T) -> App
 application	proc	bad_request :: proc(ctx: ^Context, message: string)
@@ -12,6 +13,7 @@ application	proc	get :: proc(a: ^App, pattern: string, handler: Handler)
 application	proc	header :: proc(ctx: ^Context, name: string) -> (value: string, ok: bool)
 application	proc	internal_error :: proc(ctx: ^Context)
 application	proc	json :: proc(ctx: ^Context, status: Status, value: $T)
+application	proc	limits :: proc(a: ^App, l: Limits)
 application	proc	logger :: proc(ctx: ^Context)
 application	proc	mount :: proc(a: ^App, prefix: string, r: ^Router)
 application	proc	next :: proc(ctx: ^Context)
@@ -41,6 +43,7 @@ application	type	Framework_Error :: enum {None, Response_Marshal_Failed, Body_De
 application	type	Framework_Event :: struct {kind: Framework_Error, method: Method, route: string, status: Status, payload_type: typeid}
 application	type	Handler :: proc(ctx: ^Context)
 application	type	Header_View :: struct {private: Header_View_Internal}
+application	type	Limits :: struct {max_body: int, max_request_line: int, max_headers: int}
 application	type	Method :: enum u8 {UNKNOWN, GET, POST, PUT, PATCH, DELETE}
 application	type	Request :: struct {method: Method, path: string, query: string, headers: Header_View, body: []u8}
 application	type	Router :: struct {using app: App}

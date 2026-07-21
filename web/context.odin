@@ -158,6 +158,15 @@ Context_Internal :: struct {
 	state:      rawptr,
 	state_type: typeid,
 
+	// WP36 — the byte budget this request is held to, copied from the App by
+	// the driver alongside the observer and the state.
+	//
+	// RESOLVED, NOT RE-DERIVED. `limits` validated these values once, before
+	// any request existed; the request path only COMPARES against them. Nothing
+	// here re-interprets a limit or discovers a contradiction under load, which
+	// is the whole point of validating at the call rather than at the read.
+	limits: Limits,
+
 	// WP19 — the ADR-027 request-header OVERLAY, read by `web.header` before
 	// the arrived headers ("the effective request header"). ONE slot, on
 	// purpose: Phase 2 has exactly one writer — WP23's request-ID middleware —

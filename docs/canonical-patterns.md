@@ -15,11 +15,11 @@ these forms. If a pattern here conflicts with any other document except
 > They are NOT available today and their code blocks are marked accordingly —
 > do not copy them.
 >
-> Still ahead: configurable limits and read/write timeouts (Phase 3); graceful
-> shutdown with a deadline (Phase 4). Typed application state shipped in Phase 3
-> (WP37); request-scoped state is not on that list and never will be, because
-> ADR-028 decided against it. Panic recovery is not on it either and never will
-> be: Odin has no recoverable
+> Still ahead: graceful shutdown with a deadline (Phase 4). Typed application
+> state (WP37) and configurable limits (WP36) shipped in Phase 3; **read and
+> write timeouts did not**, because the vendored server has no deadline to
+> configure. Request-scoped state is not ahead either and never will be, because
+> ADR-028 decided against it, and panic recovery never will be: Odin has no recoverable
 > panic, a faulting handler aborts the process, and ADR-020 records why.
 
 ## The one rule
@@ -542,6 +542,45 @@ is still uncommitted. It never returns a silent 500 or a partial body.
 `web.json`/`web.ok`/`web.created` set `Content-Type: application/json`;
 `web.text` sets `text/plain; charset=utf-8`; `web.no_content` sets none. There
 is no public way to set a response header in Phase 1.
+
+## Limits (delivered in Phase 3, WP36)
+
+**Start from `web.DEFAULT_LIMITS` and change what you mean to change.**
+
+<!-- fragment: phase3/limits -->
+```odin
+budget := web.DEFAULT_LIMITS
+budget.max_body = 64 * 1024
+web.limits(&app, budget)
+```
+
+Never build a `Limits` from scratch: a zero field is **rejected**, because the
+struct has no unset state to tell a forgotten field from a deliberate one, and
+an application running on a silent mix of its values and the framework's would
+be worse than one that refuses to start.
+
+| Field | Default | Enforced by |
+|---|---|---|
+| `max_body` | 4 MiB | the shared request path — exactly the limit is accepted, one byte more is `413` |
+| `max_request_line` | 8000 | the backend, before the core sees the request |
+| `max_headers` | 8000 | the backend, before the core sees the request |
+
+- the budget belongs to the **App**, not to `web.serve`, so `web.test_request`
+  enforces the same numbers as a socket. A 413 in a test is a 413 in production;
+- `web.limits` **after the first request** rejects the application fail-closed:
+  the budget is read on the request path, and changing it mid-flight would give
+  two clients different answers to the same body. Order relative to routes does
+  not matter — a limit protects every route equally;
+- `DEFAULT_LIMITS` is a **constant**, so no library can change another's
+  defaults;
+- **there are no timeout fields.** The vendored server has no read or write
+  deadline to configure, so none is exposed rather than exposing one that does
+  nothing. Do not write `web.Limits{read_timeout = ...}`.
+
+`Limits` bounds Uruquim's **own per-request working memory**. It does not bound
+connections, accept backlog, inbound header count or process memory — those are
+the transport's and the operating system's, and no document may say the
+framework is "bounded" because this type exists.
 
 ## Application state (delivered in Phase 3, WP37)
 

@@ -1,0 +1,155 @@
+// WP36 — CONFIGURABLE LIMITS: `Limits`, `DEFAULT_LIMITS`, `limits`.
+//
+// THREE SYMBOLS, and the ledger moves 47 → 50. This is the least reversible
+// change in Phase 3 and the file says so at the top: a public struct is a
+// promise per FIELD. Once an application writes `max_body`, removing or
+// renaming that field breaks its build, and tightening a DEFAULT breaks its
+// traffic without breaking its build — which is worse. Adding a field later is
+// cheap. That asymmetry is the entire argument for the size of this struct.
+//
+// THE SHAPE IS `core:net`'s. An options struct plus a package default
+// CONSTANT — `DEFAULT_TCP_OPTIONS` is the precedent — and not a builder, not a
+// setter per field, not a general system specification. The vendored backend's
+// own `Default_Server_Opts` is a mutable package VARIABLE, and that is the
+// counter-example rather than the model: a global anyone can assign is a
+// setting whose value depends on who ran last.
+//
+// WHY IT ATTACHES TO THE APP AND NOT TO `serve`. `test_request` never calls
+// `serve`, and R-10 is the property both transports exist to keep. If the body
+// cap lived on `serve`, an in-memory test would answer 200 where a socket
+// answers 413 — on exactly the boundary a test suite is supposed to prove. The
+// limits therefore travel with the application, and `serve` DERIVES the
+// backend's options from them.
+//
+// WHAT IS NOT HERE, AND THIS IS A FINDING RATHER THAN AN OMISSION: READ AND
+// WRITE TIMEOUTS. The plan named them and set a stop rule, which this work
+// package hit. The vendored server has NO read or write deadline to configure:
+// `Server_Opts` carries `limit_request_line` and `limit_headers` and nothing
+// temporal, its only `nbio.timeout_poly` uses are a fixed close delay and a
+// one-second date-refresh tick, and `vendor/odin-http/scanner.odin` still
+// carries the literal comment `// TODO: some kinda timeout on this.` on the
+// request read. Real deadlines are therefore surgery inside the vendored event
+// loop, not a field. Shipping `Limits` WITHOUT timeout fields is the reversible
+// arm: adding a field later is an amendment, and shipping a field that silently
+// does nothing would be a lie with a version number on it.
+package web
+// uruquim:file application
+
+// Limits is the application's byte budget for one request.
+//
+// It bounds URUQUIM'S OWN per-request working memory. It does NOT bound the
+// server: connections, accept backlog, the number of inbound headers and total
+// process memory are the transport's and the operating system's, and no
+// document may say otherwise because this type exists.
+//
+// EVERY FIELD IS A PROMISE. There are three, and each is here because something
+// downstream already enforces it — not because a tuning surface felt
+// incomplete. A field with no enforcement behind it would be a knob that lies.
+Limits :: struct {
+	// The largest request body `web.body` will decode, in bytes. Exactly this
+	// many is allowed; a strictly larger body is answered 413 and never reaches
+	// the arena or the parser. Enforced on the SHARED request path, so the
+	// in-memory transport and the socket agree by construction (R-10).
+	max_body:         int,
+
+	// The largest request line — the first line, carrying the method, target
+	// and version. RFC 7230 §3.1.1 recommends supporting at least 8000 octets
+	// and specifies no maximum; the backend enforces this one.
+	max_request_line: int,
+
+	// The largest header block, in bytes. Same status as the request line: a
+	// practical limit the spec declines to set, enforced by the backend.
+	max_headers:      int,
+}
+
+// DEFAULT_LIMITS is what every application gets without asking.
+//
+// The values are the SHIPPED ones, not new opinions: 4 MiB is the body cap
+// Phase 1 fixed and the capacity ledger has recorded since, and 8000 is the
+// vendored backend's own default for both text limits. This constant therefore
+// changes nothing for an application that never mentions it — which is the
+// property that makes shipping it safe.
+//
+// It is a CONSTANT. Assigning to it is a compile error, so a library cannot
+// change another library's defaults, and two applications in one process cannot
+// disagree about what "default" means.
+DEFAULT_LIMITS :: Limits {
+	max_body         = BODY_LIMIT,
+	max_request_line = REQUEST_LINE_LIMIT,
+	max_headers      = HEADER_BLOCK_LIMIT,
+}
+
+// REQUEST_LINE_LIMIT and HEADER_BLOCK_LIMIT are the vendored backend's own
+// defaults, restated here so `DEFAULT_LIMITS` does not silently inherit a
+// number from a package the public surface must never name (G-06).
+@(private)
+REQUEST_LINE_LIMIT :: 8000
+
+@(private)
+HEADER_BLOCK_LIMIT :: 8000
+
+// LIMITS_MIN_BODY, LIMITS_MIN_TEXT are the floors validation enforces.
+//
+// They are ONE, not a taste. A zero or negative budget is not a strict
+// configuration, it is an application that answers 413 to every request with a
+// body — and an operator who typed `Limits{max_body = 1024}` deserves that
+// value, while one who left a field at its zero value has almost certainly
+// forgotten it. The struct has no "unset" state to distinguish those, so the
+// zero value is refused rather than guessed at.
+@(private)
+LIMITS_MIN_BODY :: 1
+
+@(private)
+LIMITS_MIN_TEXT :: 1
+
+// limits sets the application's byte budget.
+//
+// Call it BEFORE the first request; after that the application is rejected
+// fail-closed. Registration order relative to routes and middleware does not
+// matter — a limit protects every route equally, so there is no ordering
+// hazard of the kind ADR-019 exists for.
+//
+// THE CONCURRENCY DECISION, recorded here because this is where the snapshot is
+// taken. Limits are read on the request path, so a change during serving would
+// be a data race and, worse, a request-dependent one: two clients could get two
+// different answers to the same body. Rather than make that impossible by
+// construction — which would mean a second immutable App type — this REJECTS
+// it, through the mechanism ADR-019 and ADR-023 already use. The snapshot model
+// therefore SITS BESIDE those guards and does not replace them: `use()` after
+// the first dispatch is still refused for its own reason, and this refusal adds
+// a second offence rather than subsuming the first. Nothing shipped becomes
+// weaker.
+//
+// A ZERO OR NEGATIVE FIELD IS REJECTED the same way. It allocates nothing and
+// stores three integers.
+limits :: proc(a: ^App, l: Limits) {
+	if a.private.poisoned {
+		// Already rejected and already reported; the first diagnosis stands.
+		return
+	}
+	if a.private.dispatched {
+		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_AFTER_DISPATCH)
+		return
+	}
+	if l.max_body < LIMITS_MIN_BODY ||
+	   l.max_request_line < LIMITS_MIN_TEXT ||
+	   l.max_headers < LIMITS_MIN_TEXT {
+		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
+		return
+	}
+
+	a.private.limits = l
+}
+
+// limits_poison rejects the application with a static diagnostic, reusing the
+// WP17/WP18 mechanism rather than inventing a second one.
+@(private)
+limits_poison :: proc(a: ^App, message: string, loc := #caller_location) {
+	a.private.poisoned = true
+
+	logger := context.logger
+	if logger.procedure == nil {
+		return
+	}
+	logger.procedure(logger.data, .Error, message, logger.options, loc)
+}

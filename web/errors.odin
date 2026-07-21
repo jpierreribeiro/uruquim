@@ -797,6 +797,28 @@ FRAMEWORK_MESSAGE_NIL_STATE ::
 	"rejected fail-closed: every request will answer 500 and web.serve will " +
 	"refuse to start."
 
+// WP36 — the two limits members of the fail-closed family.
+//
+// Neither adds a `Framework_Error` member, for the WP30 reason: the enum names
+// failures that reach an OBSERVER, and an observer cannot be alive to see a
+// boot-time rejection.
+@(private)
+FRAMEWORK_MESSAGE_LIMITS_AFTER_DISPATCH ::
+	"uruquim: web.limits was called after the application had already dispatched " +
+	"a request; the byte budget is read on the request path, so changing it " +
+	"while serving would make two clients get two different answers to the same " +
+	"body. Set every limit before the first request. This application is " +
+	"rejected fail-closed: every request will answer 500 and web.serve will " +
+	"refuse to start."
+
+@(private)
+FRAMEWORK_MESSAGE_LIMITS_INVALID ::
+	"uruquim: web.limits was given a zero or negative budget; a Limits value " +
+	"must set every field, because there is no unset state to tell a forgotten " +
+	"field apart from a deliberate one. Start from web.DEFAULT_LIMITS and " +
+	"change what you mean to change. This application is rejected fail-closed: " +
+	"every request will answer 500 and web.serve will refuse to start."
+
 @(private)
 framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_location) {
 	report := Framework_Report {
