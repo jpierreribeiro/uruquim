@@ -37,6 +37,30 @@ import testing "uruquim:web/testing"
 Recorded_Response :: struct {
 	status: Status,
 	body:   string,
+
+	// WP49 — the response headers, as `"Name: value"` lines.
+	//
+	// **D-14.3 IS DECIDED HERE, AND THIS WORK PACKAGE IS WHY.** Phase 2
+	// deliberately kept this type at two fields and recorded the pressure as an
+	// open question: an assertion about a response header had to be written as
+	// an INTERNAL `package web` test, because the public test transport could
+	// not see one. That was tolerable while the only header in question was one
+	// the framework set for itself.
+	//
+	// It stops being tolerable here. `secure_headers` exists so an application
+	// can assert its own security posture — and an application that cannot
+	// observe the headers it asked for has to test through a socket, which is
+	// exactly what `test_request` exists to avoid. **A test-support API that
+	// cannot see what the framework sets is a test-support API that pushes
+	// people back to the thing it replaced.**
+	//
+	// LINES RATHER THAN PAIRS, and that is a deliberate refusal of surface: a
+	// `Header_Pair` here would export the pair type, and a map would export a
+	// lookup contract and an allocation. `"Name: value"` is the wire form, it
+	// needs no new type, and `strings.contains` is the whole API. The slice and
+	// its strings are owned by the recorder and are valid until the next
+	// `test_request` on the same App — the same lifetime `body` already has.
+	headers: []string,
 }
 
 // test_request drives one in-memory request through dispatch and returns the
@@ -172,7 +196,13 @@ test_request :: proc(
 	// 6. The facade returns the public shape. `body` is the recorder's own copy,
 	//    valid until `web.destroy(&app)`, so it is unaffected by the teardowns
 	//    above.
-	return Recorded_Response{status = Status(status_int), body = body}
+	return Recorded_Response {
+		status = Status(status_int),
+		body = body,
+		// WP49 / D-14.3: the machinery owns the copies; this is a view over
+		// them, valid until the next `test_request` on this App.
+		headers = testing.last_headers(recorder),
+	}
 }
 
 // test_header_split parses one `"Name: value"` line: the name is everything

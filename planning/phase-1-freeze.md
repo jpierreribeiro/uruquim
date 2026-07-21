@@ -1443,3 +1443,65 @@ however the App is configured.
 |---|---|---|---|---|---|---|
 | `client_ip` | A | WP48 | `tests/wp48-public-surface/contract_test.odin::wp48_the_signatures_are_pinned` | `tests/wp48-public-surface/contract_test.odin::wp48_an_untrusted_request_ignores_a_forwarded_header` | `docs/ai-context.md::web.client_ip` | returns a request-scoped VIEW over the peer string or the header; allocates nothing; copy to keep (G-05) |
 | `trust_proxies` | A | WP48 | `tests/wp48-public-surface/contract_test.odin::wp48_the_signatures_are_pinned` | `tests/wp48-public-surface/contract_test.odin::wp48_an_empty_prefix_rejects_the_application` | `docs/ai-context.md::web.trust_proxies` | stores up to 8 caller-owned string views on the App; no allocation, no teardown; the caller's strings must outlive the App |
+
+## Amendment 17 — WP49: `secure_headers`, and D-14.3 decided
+
+**Date: 2026-07-21. Authority: the ADR-029 delegation.**
+**Ledger effect: application 53 → 54.** 54 application + 2 test-support = 56.
+The snapshot diff was one added line and **one CHANGED line** — the second is
+the amendment that matters.
+
+```
+application  proc  secure_headers :: proc(ctx: ^Context)
+test-support type  Recorded_Response :: struct {status: Status, body: string, headers: []string}
+```
+
+**THE MIDDLEWARE.** Three headers, chosen by a harsh rule: **a header is
+included only if it has one correct value that needs no configuration and cannot
+break an ordinary application.** `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`.
+
+**What is absent is the more careful half.** CSP is the most valuable header
+here and is *pure policy* — a CSP not written for the application breaks it, and
+one loose enough not to break anything protects nothing. HSTS is meaningful only
+over TLS, which this framework deliberately does not terminate; the proxy
+holding the certificate is what should assert it. Cookie attributes need a
+cookie API, and inventing one to have somewhere to put them would be accretion.
+
+**It sets a FLAG the response builder reads**, not a stamp applied as the chain
+unwinds — so the headers reach the automatic 404, the 405 and the driver's 500.
+WP22 measured that the driver finalizes a missing response AFTER the chain has
+unwound, and a 500 is exactly the response an attacker is most likely to read.
+
+**D-14.3 IS DECIDED: `Recorded_Response` gains `headers`.** Phase 2 kept the
+type at two fields and recorded the pressure as an open question. That was right
+while the only response header worth asserting was one the framework set for
+itself — an internal `package web` test could see it.
+
+`secure_headers` ends that. Its entire purpose is letting an APPLICATION assert
+its own security posture, and **an application that cannot observe the headers
+it asked for has to test through a socket, which is exactly what `test_request`
+exists to avoid.** A test-support API that cannot see what the framework sets
+pushes people back to the thing it replaced.
+
+**`[]string` in wire form**, not pairs and not a map: a pair type would export
+`Header_Pair`, and a map would export a lookup contract and an allocation.
+Strings are the vocabulary the bridge already shares.
+
+**Two gate widenings, both recorded rather than absorbed.** The bridge gained
+`last_headers` — the alternative was exporting a machinery type onto the public
+surface, a far larger change. And `RESPONSE_HEADER_MAX` went 3 → 6, which is
+arithmetic (2 + 1 + 3) rather than headroom, with an `#assert` that fails at
+COMPILE time if a future writer is added without raising it.
+
+**A defect in the gate itself, found by this amendment.** The
+`Recorded_Response` field extractor used a bare `sed` substitution, which
+REPLACES matching lines and passes everything else through — so a struct with
+doc comments yielded comment text as though it were field names. It went
+unnoticed because the struct had no comments until a field arrived that needed
+explaining. Now `sed -n ... p`.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `secure_headers` | A | WP49 | `tests/wp49-public-surface/contract_test.odin::wp49_the_signature_is_pinned` | `tests/wp49-public-surface/contract_test.odin::wp49_the_headers_are_on_a_404` | `docs/ai-context.md::web.secure_headers` | a `Handler` value; sets one boolean; every name and value is a compile-time constant, so nothing is allocated and nothing torn down |
+| `Recorded_Response.headers` | T | WP49 | `build/phase1-public-signatures.txt` (the changed row) | `tests/wp49-public-surface/contract_test.odin::wp49_recorded_response_exposes_header_lines` | `docs/ai-context.md::Recorded_Response` | owned by the recorder, valid until the next `test_request` on that App — the same lifetime `body` already has |

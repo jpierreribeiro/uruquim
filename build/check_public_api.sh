@@ -122,6 +122,7 @@ query_int_or
 request_id
 route
 router
+secure_headers
 serve
 state
 stop
@@ -145,12 +146,19 @@ test_request"
 # INTERNALS, not a second public API: they are not part of the 34-symbol web
 # surface, are undocumented for direct consumption, and this list exists to stop
 # the bridge from growing silently. Growth here is a human-review item.
+#
+# GROWN BY ONE AT WP49, and recorded here rather than absorbed: `last_headers`
+# lets the facade return response headers without naming a machinery type. The
+# alternative was exporting `Header` into `Recorded_Response`, which would have
+# put a machinery type on the PUBLIC surface — a far larger widening than one
+# private bridge procedure returning strings.
 URUQUIM_EXPECTED_BRIDGE_EXPORTS="Header
 Request
 Test_Transport
 build_request
 capture
-destroy"
+destroy
+last_headers"
 
 test -d "$URUQUIM_WEB" || fail "web/ does not exist; WP1 has not created the public package"
 URUQUIM_TESTING="$URUQUIM_WEB/testing"
@@ -455,7 +463,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 53 symbols (32 Phase-1 + Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies)"
+echo "public API contract: application ledger is exactly 54 symbols (32 Phase-1 + Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies + WP49 secure_headers)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -481,17 +489,40 @@ if test -n "$URUQUIM_TS_MISSING"; then
   fail "the test-support facade is missing part of the test-support ledger"
 fi
 
-# `Recorded_Response` exposes exactly `status` and `body`, in that order, and NO
-# other field — no `headers`, `committed`, allocator or transport.
+# `Recorded_Response` exposes exactly `status`, `body` and `headers`, in that
+# order, and NO other field — no `committed`, no allocator, no transport.
+#
+# AMENDED BY WP49, and the amendment is the decision D-14.3 deferred. This check
+# previously forbade `headers` BY NAME, which was right for as long as the only
+# response header worth asserting was one the framework set for itself: an
+# internal `package web` test could see it, and the type stayed at two fields.
+#
+# `secure_headers` ends that. Its entire purpose is letting an APPLICATION
+# assert its own security posture, and an application that cannot observe the
+# headers it asked for has to test through a socket — which is exactly what
+# `test_request` exists to avoid. **A test-support API that cannot see what the
+# framework sets pushes people back to the thing it replaced.**
+#
+# The field is `[]string` in wire form rather than a pair type or a map: a pair
+# type would export `Header_Pair`, and a map would export a lookup contract and
+# an allocation. Strings are the vocabulary the bridge already shares.
+#
+# The list stays EXACT in both directions. This is a widening by one field with
+# a recorded reason, not a relaxation.
+# EXTRACTED WITH `sed -n ... p`, not with a bare substitution, and WP49 is why.
+# A substitution REPLACES matching lines and passes everything else through
+# unchanged — so a struct with doc comments in it yielded the comment text as
+# though it were field names. That went unnoticed because this struct had no
+# comments until a field arrived that needed explaining.
 URUQUIM_RECORDED_FIELDS="$(awk '/^Recorded_Response :: struct \{/{f=1;next} /^\}/{f=0} f' \
-  <<<"$URUQUIM_TESTSUPPORT_PUBLIC_CODE" | sed -E 's/^[[:space:]]*([a-z_]+):.*/\1/' | grep -v '^$')"
-URUQUIM_RECORDED_EXPECTED="$(printf 'status\nbody\n')"
+  <<<"$URUQUIM_TESTSUPPORT_PUBLIC_CODE" | sed -nE 's/^[[:space:]]*([a-z_]+):[[:space:]]*[^=].*/\1/p')"
+URUQUIM_RECORDED_EXPECTED="$(printf 'status\nbody\nheaders\n')"
 if test "$URUQUIM_RECORDED_FIELDS" != "$URUQUIM_RECORDED_EXPECTED"; then
   echo "--- expected Recorded_Response fields ---" >&2
   echo "$URUQUIM_RECORDED_EXPECTED" >&2
   echo "--- actual Recorded_Response fields ---" >&2
   echo "$URUQUIM_RECORDED_FIELDS" >&2
-  fail "Recorded_Response must expose exactly status and body"
+  fail "Recorded_Response must expose exactly status, body and headers (WP49 / D-14.3). The list is exact in both directions: a new field is a decision, not an edit."
 fi
 
 # 2c. The exported union is EXACTLY 34 (32 application + 2 test-support), and the
@@ -499,16 +530,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 53; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 53 (32 Phase-1 + the Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies)"
+if test "$URUQUIM_APP_COUNT" -ne 54; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 54 (32 Phase-1 + the Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies + WP49 secure_headers)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 55; then
-  fail "exported union is $URUQUIM_UNION, not 55 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 56; then
+  fail "exported union is $URUQUIM_UNION, not 56 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 55"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 56"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -1382,7 +1413,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 53 + test-support ledger 2 = union 55"
+echo "public API contract: application ledger 54 + test-support ledger 2 = union 56"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"

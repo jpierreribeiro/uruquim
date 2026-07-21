@@ -59,13 +59,13 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **53** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **54** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
 `logger` and `request_id` from Phase 2, and `route`, `app_with_state`,
 `state`, `Limits`, `DEFAULT_LIMITS`, `limits`, `stop`, `client_ip` and
-`trust_proxies` from Phases 3-4). The test-support API is a separate ledger of
-exactly **2**. Union: **55**. Do not
+`trust_proxies` and `secure_headers` from Phases 3-4). The test-support API is
+a separate ledger of exactly **2**. Union: **56**. Do not
 fold them together and do not invent a third form.
 
 ## Application
@@ -109,6 +109,30 @@ kill, and do not build a control plane that assumes `stop` always completes.
 **A blocking handler blocks the drain**, because the event loop is
 single-threaded (ADR-030). A handler that sleeps or makes a synchronous call
 holds the loop, and nothing — no deadline, no stop — runs until it returns.
+
+### Security headers
+
+```text
+use(&app, web.secure_headers)
+```
+
+Opt-in middleware. Sets three headers on **every** response — including the
+automatic 404, the 405 and the driver's 500:
+
+```text
+X-Content-Type-Options: nosniff
+X-Frame-Options: DENY
+Referrer-Policy: no-referrer
+```
+
+Only headers with **one correct value that needs no configuration** are here.
+**There is no CSP and no HSTS**, and none may be invented: a CSP not written for
+your application breaks it, and HSTS belongs to whatever terminates TLS, which
+this framework does not. Do not emit `web.csp` or `web.hsts` — they do not
+exist.
+
+`Recorded_Response.headers` is a `[]string` of `"Name: value"` lines, so a test
+can assert what was set without a socket.
 
 ### The client address
 
@@ -673,11 +697,11 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-53 application symbols.
+54 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
-Recorded_Response{status, body}
+Recorded_Response{status, body, headers}
 ```
 
 <!-- fragment: phase1/test-request -->

@@ -230,21 +230,27 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp3-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp3-public-surface"
 
-# WP3 negative probe — `Recorded_Response` has no public `headers` field.
+# WP3 negative probe — RE-AIMED BY WP49. `Recorded_Response.headers` now
+# exists (D-14.3 decided), so the probe pins its SHAPE instead of its absence:
+# entries are wire-form strings, never a pair type or a map. A negative probe
+# that is deleted is a guarantee that quietly disappeared.
 URUQUIM_WP3_PROBE="$URUQUIM_ROOT/tests/wp3-public-surface/probes/recorded_response_has_no_headers.odin"
-echo "--- WP3 probe: Recorded_Response has no public headers field (expected compile failure) ---"
+echo "--- WP3 probe: Recorded_Response.headers carries strings, not pairs (expected compile failure) ---"
 if URUQUIM_WP3_OUT="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
   PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" check "$URUQUIM_WP3_PROBE" -file \
   "-collection:uruquim=$URUQUIM_ROOT" -no-entry-point 2>&1)"; then
   echo "$URUQUIM_WP3_OUT" >&2
-  fail "probe compiled; Recorded_Response.headers is reachable and must not be"
+  fail "probe compiled; Recorded_Response.headers entries are addressable as pairs. They must be wire-form strings: a pair type would export Header_Pair onto the public surface, and a map would export a lookup contract and an allocation (WP49)."
 fi
-if ! grep -qF "has no field 'headers'" <<<"$URUQUIM_WP3_OUT"; then
+# The expected diagnostic moved with the probe (WP49). Matching on the message
+# is what stops a probe passing because of an unrelated compile error — a
+# BROKEN PROBE that reports a guarantee it never tested.
+if ! grep -qF "of type 'string' has no field 'name'" <<<"$URUQUIM_WP3_OUT"; then
   echo "$URUQUIM_WP3_OUT" >&2
-  fail "the no-headers probe failed for the wrong reason; expected: has no field 'headers'"
+  fail "the recorded-headers probe failed for the wrong reason; expected the entry to be a string with no 'name' field"
 fi
-echo "PASS: Recorded_Response exposes no public headers field"
+echo "PASS: Recorded_Response.headers carries strings, not pairs"
 
 # Probe C5 — the back-edge `web/testing -> web` is a COMPILE CYCLE. Copy the two
 # packages into a throwaway tree, inject the committed back-edge fixture into the
@@ -1063,6 +1069,13 @@ echo "--- WP48 trusted proxies: the peer, never the header (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp48-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp48-public-surface"
+
+# WP49 — secure headers, and the D-14.3 decision that made them testable from a
+# public suite at all: `Recorded_Response.headers`.
+echo "--- WP49 secure headers: opt-in, on every response (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp49-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp49-public-surface"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"

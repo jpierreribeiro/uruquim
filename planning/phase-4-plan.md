@@ -573,6 +573,29 @@ implementation.**
 
 ### WP49 — Secure headers and cookies
 
+**DONE, 2026-07-21 — `web/secure.odin`, `tests/wp49-public-surface`, Amendment
+17. +1 symbol, ledger 53 → 54, plus a FIELD on `Recorded_Response`.**
+
+**D-14.3 IS DECIDED, and this package is what forced it.** Phase 2 kept
+`Recorded_Response` at two fields and recorded the pressure as an open question.
+`secure_headers` ends it: the feature exists so an APPLICATION can assert its
+own security posture, and an application that cannot observe the headers it
+asked for has to test through a socket — the thing `test_request` exists to
+avoid.
+
+**Three headers, chosen by a harsh rule:** one correct value, no configuration,
+cannot break an ordinary application. **CSP and HSTS are deliberately absent** —
+CSP is pure policy and a wrong one breaks the app; HSTS belongs to whatever
+terminates TLS, which this framework does not. **Cookies: there is no cookie
+API, so there is nothing to secure**, and inventing one to have somewhere to put
+`SameSite` would be accretion. That half of the package's title is answered by
+refusing it.
+
+**A gate defect found on the way:** the `Recorded_Response` field extractor used
+a bare `sed` substitution, which passes non-matching lines through — so a struct
+with doc comments yielded comment text as field names. Unnoticed because the
+struct had no comments until a field arrived that needed explaining.
+
 **SPEC + IMPLEMENTATION.** Forces the `Recorded_Response` header decision that
 Phase 2 deferred (D-14.3) — resolve it in the spec half, not in passing.
 **Rollback: MEDIUM.**
