@@ -1115,6 +1115,14 @@ trap - EXIT
 test ! -d "$URUQUIM_WP60_TMP" || fail "the throwaway WP60 internal-test package was not removed"
 echo "PASS: WP60 preflight ran against the real sources; throwaway package removed"
 
+# WP63 — multipart forms. Mostly the malformed cases: a parser that salvages
+# what it can hands the handler a missing field that looks like a blank one.
+echo "--- WP63 multipart forms: a malformed form yields nothing (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp63-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp63-public-surface"
+
 # WP61 — static files. Mostly a corpus of what it REFUSES: traversal, encoded
 # traversal, dotfiles, backslashes, empty segments, symlinks, oversized files.
 echo "--- WP61 static files: the rejections are the feature (odin test) ---"

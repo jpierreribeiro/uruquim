@@ -197,6 +197,13 @@ Context_Internal :: struct {
 	// dispatch returns.
 	static_etag_buffer:    [STATIC_ETAG_MAX]u8,
 
+	// WP63 — the parsed multipart form, or the record that it could not be
+	// parsed. A FIXED array rather than an allocation: `max_body` bounds the
+	// bytes but not the work, and a parser that allocated per part would turn a
+	// bounded body into an unbounded loop. Every string in it is a view over
+	// the request body.
+	multipart:             Multipart_Form,
+
 	// WP36 — the byte budget this request is held to, copied from the App by
 	// the driver alongside the observer and the state.
 	//

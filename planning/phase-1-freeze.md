@@ -1777,3 +1777,72 @@ behalf — no handler returns it, so no handler needs a name for it.
 **Rollback.** Removing `static` removes the feature and the `core:os`
 dependency with it: the mounts are private, the request path calls through a
 pointer that is never assigned, and no other symbol references either name.
+
+---
+
+## Amendment 22 — WP63: `form_field`, `form_file`, `Uploaded_File`
+
+**Date: 2026-07-21. Authority: ADR-034, scoped by `planning/phase-5-uploads-spec.md`
+(WP62), which answered OQ-20's seven questions before any code was written.**
+**Ledger effect: application 59 → 62.** 62 application + 2 test-support = 64.
+
+```
+application	proc	form_field :: proc(ctx: ^Context, name: string) -> (value: string, ok: bool)
+application	proc	form_file :: proc(ctx: ^Context, name: string) -> (file: Uploaded_File, ok: bool)
+application	type	Uploaded_File :: struct {field: string, filename: string, content_type: string, bytes: []u8}
+```
+
+**OQ-20 CLOSES HERE, and four of its seven questions dissolved rather than
+being answered.** They all presuppose a spool — bytes arriving, the framework
+writing them to a temporary file, the handler receiving a path. This framework
+has no spool: the body arrives WHOLE, bounded by `Limits.max_body`, and a larger
+one is answered 413 before any handler runs (WP8 D3). So there is no temporary
+file to own, nothing to clean up, no disk to fill, and no persistence to
+transfer. The remaining three were already answered by shipped limits —
+`max_body` is the quota, `max_request_time` (WP46) is the timeout, and the
+truncated-body case is covered by `tests/wp41-fault/`.
+
+**THE NEW POLICY IS TWO BOUNDS, and they exist because `max_body` bounds the
+BYTES and not the WORK.** A 4 MiB body can be ten thousand parts, and a parser
+that allocates once per part turns a bounded body into an unbounded loop — a
+denial of service that passes every limit this framework had. So the part count
+(32) and the per-part size (1 MiB) are bounded too, and the parse writes into a
+fixed array on the Context rather than allocating. **The parser allocates
+nothing:** every field it produces is a view over the request body.
+
+**IT IS A BODY CONSUMER, on ADR-012's terms exactly.** The form readers and
+`web.body` take the same single-use capability, and whichever runs first takes
+it. Reading one body twice through two decoders is the ambiguity ADR-012 closed,
+and multipart does not get an exemption from it.
+
+**A MALFORMED FORM YIELDS NOTHING, never a partial parse.** A form parser that
+salvages what it can hands the handler a missing field that looks like a field
+the user left blank — and nobody debugging that suspects the parser.
+
+**`filename` and `content_type` are the client's CLAIMS**, documented as such at
+the field. The framework never uses the filename as a path, never sanitises it,
+and says so: sanitising would imply it was safe afterwards. Generating a storage
+name is the application's job, and OWASP's file-upload guidance is the reason
+the type says "claim" rather than "type".
+
+**THE HONEST LIMITATION, and `docs/operations.md` §3 carries it:** an upload
+larger than `max_body` cannot be accepted at any setting that is not itself a
+memory problem, because the body is held whole. Gin spools to disk through
+`net/http`; this does not spool at all. **A framework that says so is more
+useful than one discovered in production.** Large uploads belong at a proxy or
+an object store, with a reference handed to the application.
+
+**AMEND-P5-3 IS SATISFIED BY CONSTRUCTION:** the parser takes `[]u8` and knows
+nothing else. When `core:net/http` replaces the adapter in January 2027, a
+parser that only ever saw bytes keeps working; one that had learned where the
+bytes came from would not.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `form_field` | A | WP63 | `tests/wp63-public-surface/contract_test.odin::wp63_the_signatures_are_pinned` | `tests/wp63-public-surface/contract_test.odin::wp63_a_form_is_parsed`, `::wp63_a_missing_field_is_reported`, `::wp63_malformed_bodies_yield_nothing` | `docs/ai-context.md::Multipart forms`, fragment `phase5/multipart` | returns a view over the request body; allocates nothing; takes the ADR-012 body capability on first use |
+| `form_file` | A | WP63 | `tests/wp63-public-surface/contract_test.odin::wp63_the_signatures_are_pinned` | `::wp63_a_form_is_parsed`, `::wp63_a_field_is_not_a_file_and_a_file_is_not_a_field`, `::wp63_a_boundary_like_string_inside_content_is_safe` | `docs/ai-context.md::Multipart forms` | as above; `Uploaded_File.bytes` is a view valid for the request only |
+| `Uploaded_File` | A | WP63 | `build/phase1-public-signatures.txt` (struct shape frozen field-by-field) | `::wp63_the_signatures_are_pinned` constructs every field | `docs/ai-context.md::Multipart forms` | a by-value record of views; owns nothing; must be copied to outlive the request (G-05) |
+
+**Rollback.** All three are readers over a private parser and a private Context
+field; removing them removes the feature with no other symbol affected. No
+dependency is added — the parser uses `core:strings`, which `web` already had.
