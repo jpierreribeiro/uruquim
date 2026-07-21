@@ -365,6 +365,47 @@ HIGH while internal — defend that classification exactly as WP29 does.**
 
 ### WP44 — Lifecycle: stop, shutdown with a deadline, exactly-once cleanup
 
+**PARTIALLY DONE, 2026-07-21 — `web/lifecycle.odin`, Amendment 14.
+`stop` SHIPS (+1 symbol, ledger 50 → 51). THE DEADLINE DOES NOT.**
+
+**What ships.** `web.stop(&app)`: admission ceases, in-flight work finishes,
+`serve` returns when the drain completes. It returns IMMEDIATELY rather than
+joining — the shape a signal handler needs, since a `stop` that blocked could
+not be called from one. Idempotent and thread-safe, which is how obligation 4
+(cleanup exactly once) is satisfied: the test calls `stop` twice and requires
+the serve thread to still join.
+
+**Obligations 1 and 4 are MET.** Obligation 2 (close-after-send) is inherited
+from the vendored `Will_Close` state and is unchanged.
+
+**OBLIGATION 3 IS UNMET, AND IS NAMED AS UNMET.** An absolute drain deadline was
+attempted as a vendored patch and **withdrawn**. Bounding the drain loop is not
+enough: the `nbio.run()` that follows it waits on every pending operation, and a
+connection a client holds open has one. Closing those connections hard at the
+deadline did not help either. **The measured result was a drain that never
+terminated — worse than the unbounded wait it was meant to replace.**
+
+Shipping a `max_drain_time` field anyway would have been the knob that lies this
+project refuses — the same rule that made WP36 ship without timeout fields. So
+the budget's second concept was NOT spent.
+
+**ADR-033 IS REOPENED on this result.** It closed hours earlier on WP46's
+contained patch; this is the counter-evidence it named in advance. One contained
+patch and one uncontained one is not a verdict — it locates the boundary
+somewhere between "a periodic sweep beside an existing tick" and "the operation
+lifecycle of the event loop", and WP45 is the next test of where the line falls.
+
+**A SECOND FINDING, and it belongs to ADR-030 rather than here.** A handler that
+BLOCKS — `time.sleep`, a synchronous call — blocks the event loop, and therefore
+blocks the drain and any deadline check running on it. The first version of the
+obligation-3 test used a sleeping handler and measured 3.3 s against an 800 ms
+deadline; no deadline could have helped, because the code that checks it never
+ran. That is a documented consequence of the single-threaded decision, and it is
+now in `docs/ai-context.md` where an application author will meet it.
+
+**Still outstanding:** the drain deadline, and with it the last third of the
+lifecycle spec.
+
 **SPEC + IMPLEMENTATION, public surface.** The smallest surface that gives:
 admission stop first, an **absolute** deadline (never "wait forever"), and
 cleanup proven exactly-once by the WP41 lab. G-09 evidence per symbol at spec

@@ -513,6 +513,10 @@ wp41_fault_laboratory :: proc(t: ^testing.T) {
 	// a test runner it presents as a hang rather than as a failure.
 	phase_deadline_ends_a_held_connection(t)
 	phase_deadline_bounds_a_trickling_client(t)
+
+	// WP44 — stop and drain. Same one-listener rule.
+	phase_stop_is_idempotent_and_stops_admission(t)
+	phase_a_clean_stop_completes_promptly(t)
 }
 
 // ---------------------------------------------------------------------------
@@ -756,5 +760,163 @@ phase_deadline_bounds_a_trickling_client :: proc(t: ^testing.T) {
 		outcome == .Closed_Without_Response,
 		"a trickling client must be bounded by the REQUEST deadline, which an idle timeout would never reach; got %v",
 		outcome,
+	)
+}
+
+// ---------------------------------------------------------------------------
+// 8. WP44 — STOP AND DRAIN, and the four proof obligations of spec §1.3.
+//
+// The spec wrote each obligation as a FAILURE so a test could trip it. These
+// phases are those tests. They run inside the one owning test for the reason
+// every other server-owning phase does: one listener at a time in this process.
+// ---------------------------------------------------------------------------
+
+STOP_PORTS :: [?]int{57171, 57613}
+SLOW_PORTS :: [?]int{58171, 58613}
+
+start_configured_server :: proc(
+	s: ^Server,
+	ports: []int,
+	drain_nanos: i64,
+	unused_slow: bool,
+) -> bool {
+	g_server = s
+	for candidate in ports {
+		s.app = web.app()
+		budget := web.DEFAULT_LIMITS
+		_ = drain_nanos
+		web.limits(&s.app, budget)
+		_ = unused_slow
+		web.get(&s.app, "/ping", deadline_ping)
+		s.port = candidate
+		s.thread = thread.create_and_start(serve_thread)
+		sync.wait(&s.ready)
+
+		if wait_until_accepting(candidate) {
+			return true
+		}
+
+		web.stop(&s.app)
+		thread.join(s.thread)
+		thread.destroy(s.thread)
+		s.thread = nil
+		web.destroy(&s.app)
+	}
+	return false
+}
+
+// OBLIGATIONS 1 AND 4: admission stops, and cleanup runs exactly once.
+//
+// The positive control is a connection served BEFORE the stop — without it, a
+// server that accepted nothing at all would pass. Obligation 4 is exercised by
+// requesting the stop TWICE: a second stop while the first is draining must be
+// a no-op rather than a second drain, and the observable proof is that the
+// serve thread still joins.
+phase_stop_is_idempotent_and_stops_admission :: proc(t: ^testing.T) {
+	server: Server
+	ports := STOP_PORTS
+	if !start_configured_server(&server, ports[:], 0, false) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+
+	l: lab.Lab
+	lab.lab_init(&l, LAB_SEED, 2 * time.Second)
+
+	{
+		sock, ok := lab.dial(server.port, l.patience)
+		testing.expect(t, ok, "the server must accept before the stop")
+		if ok {
+			lab.send_fragmented(sock, lab.GET_PING, 1, 0)
+			outcome, status := lab.read_status(&l, sock)
+			net.close(sock)
+			testing.expect_value(t, outcome, lab.Outcome.Responded)
+			testing.expect_value(t, status, 200)
+		}
+	}
+
+	port := server.port
+
+	// Obligation 4: two stops, one drain. A second drain or a double free would
+	// hang the join below or kill the process.
+	web.stop(&server.app)
+	web.stop(&server.app)
+
+	thread.join(server.thread)
+	thread.destroy(server.thread)
+	server.thread = nil
+	web.destroy(&server.app)
+	g_server = nil
+
+	refused := false
+	for _ in 0 ..< 40 {
+		sock, connected := lab.dial(port, 100 * time.Millisecond)
+		if !connected {
+			refused = true
+			break
+		}
+		net.close(sock)
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect(
+		t,
+		refused,
+		"a stopped server must stop accepting; admission-stop is proof obligation 1",
+	)
+}
+
+// OBLIGATION 3 COULD NOT BE SATISFIED, AND THIS PHASE RECORDS THAT RATHER THAN
+// ASSERTING SOMETHING WEAKER.
+//
+// The WP39 spec requires an ABSOLUTE drain deadline. WP44 tried to build one as
+// a vendored patch and **it did not stay contained** — the full account is in
+// `planning/phase-4-plan.md` under WP44. In short: bounding the drain loop is
+// not enough, because the `nbio.run()` that follows it waits on every pending
+// operation, and a connection the client is holding open has one.
+//
+// So there is no drain deadline to test. What IS true is tested here — a stop
+// with no stuck connection completes promptly — and the gap is named rather
+// than papered over, because a phase that asserted the weaker property would
+// read, later, as though the obligation had been met.
+phase_a_clean_stop_completes_promptly :: proc(t: ^testing.T) {
+	server: Server
+	ports := SLOW_PORTS
+	if !start_configured_server(&server, ports[:], 0, false) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+
+	l: lab.Lab
+	lab.lab_init(&l, LAB_SEED, 2 * time.Second)
+
+	// A complete request/response cycle, fully finished on both sides. This is
+	// the case a stop must handle promptly, and it is the common one.
+	{
+		sock, ok := lab.dial(server.port, l.patience)
+		testing.expect(t, ok, "the lab must be able to connect")
+		if ok {
+			lab.send_fragmented(sock, lab.GET_PING, 1, 0)
+			outcome, status := lab.read_status(&l, sock)
+			net.close(sock)
+			testing.expect_value(t, outcome, lab.Outcome.Responded)
+			testing.expect_value(t, status, 200)
+		}
+	}
+
+	started := time.now()
+	web.stop(&server.app)
+	thread.join(server.thread)
+	elapsed := time.diff(started, time.now())
+
+	thread.destroy(server.thread)
+	server.thread = nil
+	web.destroy(&server.app)
+	g_server = nil
+
+	testing.expectf(
+		t,
+		elapsed < 3 * time.Second,
+		"a stop with no connection left in flight must complete promptly; took %v",
+		elapsed,
 	)
 }

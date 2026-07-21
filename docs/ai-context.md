@@ -59,12 +59,12 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **50** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **51** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
 `logger` and `request_id` from Phase 2, and `route`, `app_with_state`,
-`state`, `Limits`, `DEFAULT_LIMITS` and `limits` from Phase 3). The
-test-support API is a separate ledger of exactly **2**. Union: **52**. Do not
+`state`, `Limits`, `DEFAULT_LIMITS`, `limits` and `stop` from Phases 3-4). The
+test-support API is a separate ledger of exactly **2**. Union: **53**. Do not
 fold them together and do not invent a third form.
 
 ## Application
@@ -94,6 +94,20 @@ main :: proc() {
 `serve(a: ^App, port: int)` validates the port (1..65535), binds IPv4 Any and
 blocks. An invalid port or a bind failure is logged and returns without
 serving.
+
+`web.stop(&app)` asks the running server to stop. It **returns immediately** —
+it is a request, not a join — so it is safe to call from a signal handler. The
+`web.serve` call returns when the drain finishes. Calling it twice, or with no
+server running, is a no-op.
+
+**It has no deadline.** A connection a client holds open can delay the drain
+indefinitely; `Limits.max_request_time` bounds how long a request may take to
+arrive, but it does not bound the drain itself. Run under a supervisor that can
+kill, and do not build a control plane that assumes `stop` always completes.
+
+**A blocking handler blocks the drain**, because the event loop is
+single-threaded (ADR-030). A handler that sleeps or makes a synchronous call
+holds the loop, and nothing — no deadline, no stop — runs until it returns.
 
 ### Limits
 
@@ -627,7 +641,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-50 application symbols.
+51 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

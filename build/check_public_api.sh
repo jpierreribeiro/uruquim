@@ -123,6 +123,7 @@ route
 router
 serve
 state
+stop
 text
 unauthorized
 use"
@@ -452,7 +453,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 50 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state + WP36 Limits/DEFAULT_LIMITS/limits)"
+echo "public API contract: application ledger is exactly 51 symbols (32 Phase-1 + Phase-2 twelve + WP34 route + WP37 app_with_state/state + WP36 Limits/DEFAULT_LIMITS/limits + WP44 stop)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -496,16 +497,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 50; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 50 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state + WP36 Limits/DEFAULT_LIMITS/limits)"
+if test "$URUQUIM_APP_COUNT" -ne 51; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 51 (32 Phase-1 + the Phase-2 twelve + WP34 route + WP37 app_with_state/state + WP36 Limits/DEFAULT_LIMITS/limits + WP44 stop)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 52; then
-  fail "exported union is $URUQUIM_UNION, not 52 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 53; then
+  fail "exported union is $URUQUIM_UNION, not 53 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 52"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 53"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -1379,7 +1380,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 50 + test-support ledger 2 = union 52"
+echo "public API contract: application ledger 51 + test-support ledger 2 = union 53"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"

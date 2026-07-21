@@ -1272,3 +1272,64 @@ while breaking the server.
 | Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
 |---|---|---|---|---|---|---|
 | `Limits.max_request_time` | A | WP46 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp41-fault/fault_test.odin::phase_deadline_ends_a_held_connection` | `docs/ai-context.md::web.Limits` | a plain `i64` on a value type; owns nothing; converted to a duration at the transport boundary |
+
+## Amendment 14 — WP44: `stop`
+
+**Date: 2026-07-21. Authority: the ADR-029 delegation.**
+**Ledger effect: application 50 → 51.** 51 application + 2 test-support = 53.
+The snapshot diff was exactly one added line.
+
+```
+application	proc	stop :: proc(a: ^App)
+```
+
+**ONE SYMBOL, from a budget of two.** The WP38 usage lab measured the guarded
+program at 23 of 25, and WP44 was allotted the remaining two concepts. It spends
+one. The second was reserved for a drain-deadline field and **was not spent** —
+see §"what could not be built" below, which is the more useful half of this
+amendment.
+
+**WHAT IT DOES.** `Serving → Draining`: admission ceases immediately, work
+already in flight is allowed to finish, and `web.serve` returns when the drain
+completes. It returns IMMEDIATELY rather than joining — **that is the shape a
+signal handler needs**, and a `stop` that blocked could not be called from one.
+
+**Safe from another thread and safe to call twice.** The backend's shutdown is
+an atomic flag plus an event-loop wake-up, so a second `stop` during a drain is
+a no-op rather than a second drain. That is what makes "cleanup runs exactly
+once" (spec §1.3 obligation 4) true rather than hoped for, and it is tested by
+calling `stop` twice and requiring the serve thread to still join.
+
+**It does not destroy the App.** `stop` ends the server; `destroy` releases
+storage. Merging them would make `stop` a teardown that cannot be called from a
+signal handler — the exact case it exists for.
+
+**WHAT COULD NOT BE BUILT, and this is recorded rather than quietly dropped.**
+Spec §1.3 obligation 3 requires an ABSOLUTE drain deadline, and WP44 attempted
+one as a vendored patch. **It did not stay contained, and it was withdrawn.**
+
+Bounding the drain LOOP is not sufficient: the `nbio.run()` that follows it
+waits on every pending operation, and a connection a client is holding open has
+one. Closing those connections hard at the deadline did not help either. The
+measured result was a drain that never terminated — worse than the unbounded
+wait it was meant to replace.
+
+**So obligation 3 is UNMET, and it is named as unmet.** Shipping a
+`max_drain_time` field that did not bound the drain would have been precisely
+the knob that lies this project refuses — the same rule that made WP36 ship
+without timeout fields in the first place.
+
+**The consequence for ADR-033 is not small: this is the counter-evidence that
+ADR named in advance.** WP46's patch stayed contained and closed the ADR on
+"keep"; WP44's did not. **ADR-033 is REOPENED** on exactly the trigger it wrote
+for itself.
+
+**A second finding, from the same work.** A handler that BLOCKS — `time.sleep`,
+a synchronous call — blocks the event loop, and therefore blocks the drain and
+any deadline check running on it. No deadline can bound that; it needs the
+handler not to block. That is a documented consequence of ADR-030's
+single-threaded decision and belongs with it.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `stop` | A | WP44 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp41-fault/fault_test.odin::phase_stop_is_idempotent_and_stops_admission` | `docs/ai-context.md::web.stop` | owns nothing; signals the running server and returns; idempotent and thread-safe |
