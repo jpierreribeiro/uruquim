@@ -123,6 +123,20 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	return .None
 }
 
+// _refused_connections reads the running server's admission-refusal total.
+//
+// Through `g_server` — the one named global exception (WP43) — because the
+// count belongs to the SERVER rather than to any request, and there is no
+// request in hand when an operator asks for it.
+@(private)
+_refused_connections :: proc() -> int {
+	server := g_server
+	if server == nil {
+		return 0
+	}
+	return server.refused_total
+}
+
 // request_stop asks the running server to stop. Idempotent and thread-safe: the
 // backend's shutdown is an atomic flag plus an event-loop wake-up, and calling
 // it when no server is running is a no-op.

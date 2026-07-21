@@ -253,3 +253,109 @@ Therefore:
 * **The shedding algorithm.** WP47 — deterministic before adaptive.
 * **Per-server or per-process limits.** ADR-030's, via WP43.
 * **How counts are exported.** WP50's, and it inherits the redaction rule.
+
+---
+
+# §3 — The redaction policy (WP50)
+
+**Status: ACCEPTED 2026-07-21 under the ADR-029 delegation.** The SPEC half of
+WP50, landing before its implementation half exactly as the plan required —
+because separating redaction from observability invites shipping them in the
+wrong order, and the wrong order is the one where data leaves the process first.
+
+## 3.1 The decision
+
+**No request-derived byte reaches a log line, a metric label, a span name or an
+observer event.**
+
+Not "no secrets" — **no request-derived byte at all**. The distinction is the
+whole policy, and it is what makes it enforceable rather than aspirational:
+
+* a policy that says "do not log secrets" needs a definition of secret, and
+  every definition is a list somebody has to keep current against attackers who
+  read it too;
+* a policy that says "log nothing derived from the request" needs no list. It is
+  checkable by reading one line of code, and it fails CLOSED — an engineer who
+  wants to add a field has to argue for it rather than merely not think about
+  it.
+
+**What may be recorded** is therefore a closed set, and every member is
+framework-generated or low-cardinality by construction:
+
+| Recorded | Why it is safe |
+|---|---|
+| the **route pattern** (`web.route`) | App-owned, written at registration, never request-derived. `/users/:id`, never `/users/42` |
+| the **method** | one of a closed six-member enum |
+| the **status** | an integer the framework chose |
+| the **request ID** | framework-generated, or a client value that passed WP23's charset and length validation |
+| a **`Framework_Error`** member | a closed enum |
+| a **`typeid`** | a type name, never a value |
+| framework **counts** | integers |
+
+**What may never be recorded:** the path, the query string, any header name or
+value, any body byte, any extracted parameter, any application value, and any
+message text derived from any of those.
+
+## 3.2 Why OWASP's do-not-log list is NOT the mechanism here
+
+The plan named it — tokens, session identifiers, passwords, connection strings,
+keys, PII, payment data. **Every item on that list is already excluded by §3.1,
+because every item arrives in a request.** Reproducing the list as a set of
+checks would be weaker than the rule that already covers it: a list can be
+incomplete, and the framework would then be enforcing the list rather than the
+property.
+
+**So the list is recorded as motivation and the rule is what is enforced.** That
+is the honest relationship between them, and stating it stops a later reader
+adding a `is_password_like()` check that gives false comfort.
+
+## 3.3 CR/LF escaping — the second half, and it is not the same problem
+
+Even permitted text can carry a newline. **A log field with a CR or LF in it
+forges additional log records**, which turns a reader's evidence into an
+attacker's writing surface (OWASP log injection).
+
+The only permitted field that is application text is the **route pattern**, and
+it is escaped. Nothing else needs escaping because nothing else is text a person
+authored — but the rule is stated as a rule rather than as a coincidence of the
+current field set: **any permitted field that is not framework-generated is
+escaped, and truncation stops on a unit boundary** so a cut never leaves a
+dangling backslash that re-opens the injection.
+
+## 3.4 What was already true, and why that matters
+
+**This spec ratifies a property the framework already had, and records that
+rather than claiming new work.** Verified at this commit:
+
+* `Framework_Event` carries no request-derived string except `route`, and
+  `build/check_public_api.sh` fails the build if any other field is a `string`;
+* `web.route` returns the registered pattern, with the gate asserting that
+  **every write** to the slot is `entry.pattern`;
+* `web.logger` writes `METHOD pattern status` and escapes the pattern, with a
+  derived line bound rather than a guessed one;
+* `web.request_id` validates a client-supplied ID against a charset that
+  excludes CR and LF, and **discards** rather than sanitises — a repaired
+  attacker value is still an attacker value;
+* the framework's diagnostics are compile-time constants, so no formatted line
+  can carry request bytes.
+
+**The property was preserved deliberately, package by package, before there was
+a policy naming it.** §3.5 is what stops that being luck from here on.
+
+## 3.5 The standing rule for every later package
+
+**A new observability field is a spec amendment, not an edit.** Any package that
+wants to record something must place it in §3.1's permitted table with a reason,
+and the gate enforces the table's shape.
+
+**Metrics and spans key on the route pattern, never the raw path.** This is not
+only a redaction rule — a metric keyed on the path has unbounded cardinality and
+takes the metrics backend down, which is why C-2 required it independently.
+
+**The drop policy is observable.** Any component that can discard records must
+count what it discarded and expose the count, because a metric that silently
+stops being emitted is worse than no metric — it reads as "nothing happened".
+
+**A logger may never apply backpressure to a request.** A component that can
+slow the serving path has inverted the hierarchy: observation exists to describe
+the system, never to become the reason it is slow.

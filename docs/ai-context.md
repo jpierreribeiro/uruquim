@@ -59,13 +59,13 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **54** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **55** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
 `logger` and `request_id` from Phase 2, and `route`, `app_with_state`,
 `state`, `Limits`, `DEFAULT_LIMITS`, `limits`, `stop`, `client_ip` and
-`trust_proxies` and `secure_headers` from Phases 3-4). The test-support API is
-a separate ledger of exactly **2**. Union: **56**. Do not
+`trust_proxies`, `secure_headers` and `refused_connections` from Phases 3-4).
+The test-support API is a separate ledger of exactly **2**. Union: **57**. Do not
 fold them together and do not invent a third form.
 
 ## Application
@@ -109,6 +109,19 @@ kill, and do not build a control plane that assumes `stop` always completes.
 **A blocking handler blocks the drain**, because the event loop is
 single-threaded (ADR-030). A handler that sleeps or makes a synchronous call
 holds the loop, and nothing — no deadline, no stop — runs until it returns.
+
+### Observability
+
+```text
+refused_connections() -> int    connections refused for admission, running total
+```
+
+`web.refused_connections()` returns zero when no server is running and zero
+when nothing was refused — those are deliberately not distinguished. It carries no request data, which is why it
+exists at all: **the framework records the route pattern, the method, the
+status, the request ID and its own counts, and never a path, header, body or
+parameter.** Key your metrics on `web.route(ctx)`, never on
+`ctx.request.path`.
 
 ### Security headers
 
@@ -697,7 +710,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-54 application symbols.
+55 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response
