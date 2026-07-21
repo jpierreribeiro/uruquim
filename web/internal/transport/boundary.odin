@@ -81,6 +81,9 @@ Config :: struct {
 	// and the adapter converts, on the side of the line where a clock is
 	// already linked. Zero disables it.
 	max_request_time: i64,
+	// WP47 — bounded admission. Zero is unbounded.
+	max_connections:  int,
+	reserved_conns:   int,
 	dispatch:         Dispatch_Proc,
 	user:             rawptr,
 	on_ready:         proc(user: rawptr),

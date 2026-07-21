@@ -272,6 +272,33 @@ control does not freeze.**
   the in-memory transport. And the granularity is a 250 ms sweep, so a request
   is closed in [deadline, deadline + 250 ms] rather than exactly at it.
 
+### C-12 — "admission is bounded, and a shutdown always has room"
+
+* **Sentence:** "`Limits.max_connections` bounds concurrent connections;
+  `reserved_conns` slots are held back from admission, so admission is refused
+  at or below `max_connections - reserved_conns` and never at zero." **Added by
+  WP47.**
+* **Scope:** the socket transport, per serving thread. `test_request` has no
+  connections, so this claim is not about both transports and says so.
+* **Implemented:** `vendor/odin-http/server.odin` (URUQUIM PATCH 8 — the accept
+  path and a per-thread refusal counter), `web/limits.odin` (the two fields and
+  their boot validation), `web/serve.odin`, `web/internal/transport/`.
+* **Positive test:**
+  `tests/wp41-fault/fault_test.odin::phase_admission_is_bounded_with_a_reservation`
+  — with a budget of 6 and 2 reserved, the fifth connection is refused **while
+  two slots are still free**. It proves the GAP, not the ceiling: testing at
+  zero would prove the wrong rule.
+* **Negative control:**
+  `::phase_admission_below_the_limit_is_unaffected`, which runs FIRST — a
+  server whose limit is far above the load must serve everything. Without it,
+  the positive test would pass against a server that refused every connection.
+  And `::phase_a_reservation_larger_than_the_budget_is_rejected` proves the
+  boot refusal, since a reservation that swallows its budget would otherwise be
+  a server that accepts nothing while looking configured.
+* **Does NOT guarantee:** a bound on the accept BACKLOG (the kernel's), on
+  inbound header COUNT, or on anything per-process rather than per-thread. Nor
+  does it make the framework "bounded" — the gated word still applies.
+
 ### Claims examined and NOT frozen
 
 * **"the machinery present but unused costs +2,424 bytes … a program that never
@@ -396,8 +423,8 @@ request ID all allocate zero.
 
 | Thing | Owner | Status |
 |---|---|---|
-| concurrent connections | transport (`vendor/odin-http`) | **not bounded by this framework** |
-| accept queue / backlog | transport, then the OS | **not bounded by this framework** |
+| concurrent connections | the framework | **bounded and configurable — `Limits.max_connections`, default 1024**, with `reserved_conns` (16) held back from admission so a shutdown always has room (WP47, Amendment 15). A connection past the budget is CLOSED, not queued. |
+| accept queue / backlog | the OS | still not bounded by this framework — the listen backlog is the kernel's, and the framework's own refusal now arrives before it |
 | inbound header COUNT | transport | **not bounded by this framework** — the header BLOCK's byte size is bounded and configurable (`Limits.max_headers`, WP36); the number of headers is not |
 | request READ deadline | the framework | **bounded and configurable — `Limits.max_request_time`, default 30 s** (WP46, Amendment 13). One request's total time to ARRIVE; expiry closes the connection. Zero disables it. |
 | write deadline, and any bound on a slow HANDLER | — | **still absent, deliberately.** The write deadline is a smaller version of the same patch and was not bundled with a security fix; a slow handler is the application's own time, and killing its connection would turn a slow page into a broken one. |

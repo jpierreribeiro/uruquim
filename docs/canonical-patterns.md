@@ -565,6 +565,8 @@ be worse than one that refuses to start.
 | `max_request_line` | 8000 | the backend, before the core sees the request |
 | `max_headers` | 8000 | the backend, before the core sees the request |
 | `max_request_time` | 30 s (nanoseconds) | a periodic sweep on the serving loop — the connection is closed when one request takes longer than this to ARRIVE |
+| `max_connections` | 1024 | the accept path — a connection past the budget is closed, not queued |
+| `reserved_conns` | 16 | slots held back from admission so a shutdown always has room; admission stops **at or below** `max_connections - reserved_conns`, never at zero |
 
 - the budget belongs to the **App**, not to `web.serve`, so `web.test_request`
   enforces the same numbers as a socket. A 413 in a test is a 413 in production;

@@ -819,6 +819,16 @@ FRAMEWORK_MESSAGE_LIMITS_INVALID ::
 	"change what you mean to change. This application is rejected fail-closed: " +
 	"every request will answer 500 and web.serve will refuse to start."
 
+// WP47 — a reservation that swallows its own budget.
+@(private)
+FRAMEWORK_MESSAGE_LIMITS_RESERVATION ::
+	"uruquim: web.limits was given a connection reservation at least as large " +
+	"as the connection limit, so admission would refuse every connection while " +
+	"looking like a working configuration. The reservation is slots held back " +
+	"for shutdown, not the budget itself: reserved_conns must be smaller than " +
+	"max_connections. This application is rejected fail-closed: every request " +
+	"will answer 500 and web.serve will refuse to start."
+
 @(private)
 framework_report :: proc($T: typeid, kind: Framework_Error, loc := #caller_location) {
 	report := Framework_Report {

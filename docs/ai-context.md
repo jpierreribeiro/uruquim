@@ -112,8 +112,9 @@ holds the loop, and nothing — no deadline, no stop — runs until it returns.
 ### Limits
 
 ```text
-Limits{max_body, max_request_line, max_headers, max_request_time}
-DEFAULT_LIMITS                     4 MiB, 8000, 8000, 30 s (in nanoseconds)
+Limits{max_body, max_request_line, max_headers, max_request_time,
+       max_connections, reserved_conns}
+DEFAULT_LIMITS   4 MiB, 8000, 8000, 30 s (ns), 1024 conns, 16 reserved
 limits(&app, l)                    set it; before the first request
 ```
 
@@ -146,6 +147,11 @@ fail-closed rather than run on a guess.
   is your program's own time.
 - **There is still no WRITE deadline**, and no field for one. Do not emit
   `web.Limits{write_timeout = ...}` — it does not exist.
+- **`max_connections` bounds concurrent connections** (1024 by default; `0` is
+  unbounded), and **`reserved_conns` holds slots back from admission** (16) so
+  a shutdown always has room to work in. Admission is refused **at or below**
+  `max_connections - reserved_conns`, never at zero. A `reserved_conns` at least
+  as large as `max_connections` is rejected at boot.
 
 `Limits` bounds Uruquim's own per-request working memory. It does **not** bound
 connections, accept backlog or process memory; those belong to the transport and

@@ -37,6 +37,31 @@ Server_Opts :: struct {
 	// The HTTP spec does not specify any limits but in practice it is safer.
 	// defaults to 8000.
 	limit_headers:           int,
+	// URUQUIM PATCH 8 (WP47) — bounded admission.
+	//
+	// The maximum number of concurrent connections ONE THREAD will hold. Zero
+	// means unbounded, which is the upstream behaviour and the default here.
+	//
+	// WHY: without it, concurrent connections are bounded only by the operating
+	// system's file-descriptor limit, and reaching that limit is not a graceful
+	// degradation — it is an `accept` failing for reasons the server did not
+	// choose, at a moment it did not choose, with whatever consequence the rest
+	// of the process happens to have.
+	//
+	// A REFUSAL IS THE POINT. A server that refuses a connection is degraded and
+	// honest; one that accepts everything until the kernel stops it is a server
+	// whose failure mode is an accident.
+	max_connections:         int,
+	// URUQUIM PATCH 8 (WP47) — the stop reservation.
+	//
+	// How many connection slots are held back from ADMISSION so that a drain
+	// always has room to work in. Admission is refused at or below
+	// `max_connections - reserved_connections`, never at zero.
+	//
+	// This is WP40's reservation rule, and the rule exists because **the fatal
+	// failure is not running out of capacity — it is running out and having none
+	// left to shut down with.**
+	reserved_connections:    int,
 	// URUQUIM PATCH 6 (WP46 / ADR-031) — the request read deadline.
 	//
 	// How long ONE request may take to arrive, from its first byte to its last.
@@ -118,6 +143,15 @@ Server_Thread :: struct {
 	conns:      map[net.TCP_Socket]^Connection,
 	state:      Server_State,
 	accept:     ^nbio.Operation,
+
+	// URUQUIM PATCH 8 (WP47) — refusals since admission was last available.
+	//
+	// COUNTED, not logged per event, and the transition is what gets logged:
+	// once on entering the exhausted state and once on leaving it. Ten thousand
+	// refused connections must not produce ten thousand log lines — that turns
+	// a load spike into an I/O storm, which is a denial of service the server
+	// performs on itself (WP40 §2.5).
+	refused_connections: int,
 
 	// free_temp_blocks:       map[int]queue.Queue(^Block),
 	// free_temp_blocks_count: int,
@@ -459,6 +493,48 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 
 	// Accept next connection.
 	td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+
+	// URUQUIM PATCH 8 (WP47) — BOUNDED ADMISSION, and the inequality is the
+	// whole design.
+	//
+	// The budget compared against is `max_connections - reserved_connections`,
+	// not `max_connections`: admission stops while there is still room, so a
+	// drain always has slots to work in. Refusing only at zero would mean a
+	// server that is full is a server that cannot shut down — which is the
+	// failure WP40's reservation rule was written to prevent.
+	//
+	// The refusal CLOSES the accepted socket immediately rather than queueing
+	// it. A queue would be a second, invisible limit with its own exhaustion
+	// behaviour, and the client learns the same thing either way: this server
+	// is not taking work. The count is not logged per event (WP40 §2.5): ten
+	// thousand refusals must not become ten thousand log lines, which is a
+	// denial of service the server would be performing on itself.
+	if server.opts.max_connections > 0 {
+		budget := server.opts.max_connections - server.opts.reserved_connections
+		if budget < 1 {
+			budget = 1
+		}
+		if len(td.conns) >= budget {
+			td.refused_connections += 1
+			if td.refused_connections == 1 {
+				log.warnf(
+					"uruquim: admission limit reached (%i of %i slots, %i reserved for shutdown); refusing connections. This is logged ONCE per exhausted period, not per refusal.",
+					len(td.conns),
+					server.opts.max_connections,
+					server.opts.reserved_connections,
+				)
+			}
+			net.close(op.accept.client)
+			return
+		}
+		if td.refused_connections > 0 {
+			log.infof(
+				"uruquim: admission resumed after refusing %i connection(s)",
+				td.refused_connections,
+			)
+			td.refused_connections = 0
+		}
+	}
 
 	c := new(Connection, server.conn_allocator)
 	c.state = .New

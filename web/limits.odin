@@ -49,7 +49,7 @@ package web
 // process memory are the transport's and the operating system's, and no
 // document may say otherwise because this type exists.
 //
-// EVERY FIELD IS A PROMISE. There are four, and each is here because something
+// EVERY FIELD IS A PROMISE. There are six, and each is here because something
 // downstream already enforces it — not because a tuning surface felt
 // incomplete. A field with no enforcement behind it would be a knob that lies.
 Limits :: struct {
@@ -88,6 +88,29 @@ Limits :: struct {
 	// boundary, where a clock is already linked.
 	max_request_time: i64,
 
+	// WP47 — the maximum number of concurrent connections the server will hold.
+	// Zero means unbounded, which is what shipped before this field existed.
+	//
+	// WITHOUT IT, connections are bounded only by the operating system's
+	// file-descriptor limit — and reaching that limit is not a graceful
+	// degradation. It is an `accept` failing for a reason the server did not
+	// choose, at a moment it did not choose. **A server that refuses a
+	// connection is degraded and honest; one that accepts everything until the
+	// kernel stops it has a failure mode that is an accident.**
+	max_connections:  int,
+
+	// WP47 / WP40 — connection slots held back from ADMISSION so that a
+	// shutdown always has room to work in.
+	//
+	// **Admission is refused at or below `max_connections - reserved_conns`,
+	// never at zero**, and that inequality is the whole reservation rule: the
+	// fatal failure is not running out of capacity, it is running out and
+	// having none left to shut down with. A server that is full and cannot
+	// drain is a process an operator must kill.
+	//
+	// Ignored when `max_connections` is zero — there is nothing to reserve from
+	// an unbounded pool.
+	reserved_conns:   int,
 }
 
 // DEFAULT_LIMITS is what every application gets without asking.
@@ -106,6 +129,8 @@ DEFAULT_LIMITS :: Limits {
 	max_request_line = REQUEST_LINE_LIMIT,
 	max_headers      = HEADER_BLOCK_LIMIT,
 	max_request_time = REQUEST_TIME_LIMIT,
+	max_connections  = CONNECTION_LIMIT,
+	reserved_conns   = RESERVED_CONNECTION_LIMIT,
 }
 
 // REQUEST_LINE_LIMIT and HEADER_BLOCK_LIMIT are the vendored backend's own
@@ -132,6 +157,22 @@ HEADER_BLOCK_LIMIT :: 8000
 // security fix rather than a tuning knob, and the capacity ledger records it.
 @(private)
 REQUEST_TIME_LIMIT :: i64(30 * 1_000_000_000)
+
+// CONNECTION_LIMIT and RESERVED_CONNECTION_LIMIT are the admission budget.
+//
+// JUDGEMENT, RECORDED AS SUCH. 1024 sits comfortably below a typical default
+// file-descriptor limit — and the process needs descriptors for more than
+// sockets — so the framework's own refusal arrives BEFORE the kernel's. That
+// ordering is the entire point of having a limit rather than inheriting one.
+//
+// 16 reserved is small on purpose: enough for a drain to close what is open and
+// write final responses, large enough not to be a rounding error. It is a slot
+// count, not a rate.
+@(private)
+CONNECTION_LIMIT :: 1024
+
+@(private)
+RESERVED_CONNECTION_LIMIT :: 16
 
 
 
@@ -183,6 +224,19 @@ limits :: proc(a: ^App, l: Limits) {
 	// deadline. An operator who wants the old behaviour must be able to ask for
 	// it explicitly — and asking explicitly is exactly the difference between a
 	// deliberate choice and a forgotten field.
+	// Negative is refused everywhere; zero means "unbounded" for the admission
+	// fields, as it does for the deadline.
+	if l.max_connections < 0 || l.reserved_conns < 0 {
+		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
+		return
+	}
+	// A reservation that swallows its own budget would refuse EVERY connection
+	// while looking like a configuration. Caught at BOOT, where an operator is
+	// watching, rather than at 3 a.m. as a server that accepts nothing.
+	if l.max_connections > 0 && l.reserved_conns >= l.max_connections {
+		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_RESERVATION)
+		return
+	}
 	if l.max_request_time < 0 {
 		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
 		return
