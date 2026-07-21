@@ -67,6 +67,8 @@ bash -n "$URUQUIM_ROOT/build/check_wp36_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp37_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase3_freeze.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase4_spec.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp39_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp38_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
@@ -1029,6 +1031,12 @@ bash "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 # concepts is a reserved matter and stops for the owner.
 echo "--- WP38 Phase-3 freeze (ledgers amended, suites re-run, budget enforced) ---"
 bash "$URUQUIM_ROOT/build/check_phase3_freeze.sh"
+
+# WP39/WP40 — the Phase-4 specs. They ship no symbol, which is exactly why they
+# need a gate: a zero-symbol package's deliverable is a guarantee plus a
+# statement, and an unchecked statement decays into folklore (the WP21 lesson).
+echo "--- WP39/WP40 Phase-4 spec (lifecycle states, capacity rows, the reservation) ---"
+bash "$URUQUIM_ROOT/build/check_phase4_spec.sh"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
