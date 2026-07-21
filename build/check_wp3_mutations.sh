@@ -392,24 +392,25 @@ echo "PASS: WP6 mutation checks (9 forbidden response states all rejected)"
 # exercised against a tree that actually contains the defect.
 # ---------------------------------------------------------------------------
 
-# 32. The 4 MiB cap removed entirely.
+# 32. The body cap removed entirely. AMENDED BY WP36: the guard compares against
+#     the request's RESOLVED budget now, not the fixed constant.
 T="$(fresh_tree)"; TREES+=("$T")
 python3 - "$T/web/extract.odin" <<'PY2'
 import sys, re
 p = sys.argv[1]; s = open(p).read()
 # Drop the whole "if len(raw) > BODY_LIMIT { ... }" block.
-s = re.sub(r"\tif len\(raw\) > BODY_LIMIT \{\n(?:.*\n)*?\t\}\n", "", s, count=1)
+s = re.sub(r"\tcap := ctx\.private\.limits\.max_body\n(?:.*\n)*?\tif len\(raw\) > cap \{\n(?:.*\n)*?\t\}\n", "", s, count=1)
 open(p, "w").write(s)
 PY2
-expect_reject "$T" "4 MiB cap removed" \
-  "does not compare the body length against BODY_LIMIT"
+expect_reject "$T" "body cap removed" \
+  "does not read the request's resolved max_body"
 
-# 33. `>` weakened to `>=`, which would reject exactly 4 MiB.
+# 33. `>` weakened to `>=`, which would reject a body of exactly the limit.
 T="$(fresh_tree)"; TREES+=("$T")
 mutate_sed "cap comparison weakened to >=" "$T/web/extract.odin" \
-  's/len(raw) > BODY_LIMIT/len(raw) >= BODY_LIMIT/'
+  's/len(raw) > cap/len(raw) >= cap/'
 expect_reject "$T" "cap comparison weakened to >=" \
-  "exactly 4 MiB would be rejected"
+  "a body of exactly the limit would be rejected"
 
 # 34. Parsing before the limit check — swap the two so unmarshal precedes the cap.
 T="$(fresh_tree)"; TREES+=("$T")
@@ -418,8 +419,11 @@ import sys
 p = sys.argv[1]; s = open(p).read()
 # Move the limit guard to AFTER the unmarshal by deleting it and re-inserting a
 # copy below the unmarshal line. Simplest: relocate the guard past the parse.
-guard_start = s.index("\tif len(raw) > BODY_LIMIT {")
-guard_end = s.index("\t}\n", guard_start) + len("\t}\n")
+guard_start = s.index("\tcap := ctx.private.limits.max_body")
+# WP36: the guard is now two blocks -- the zero-budget fallback and the
+# comparison -- so the end is the brace closing the SECOND one, not the first.
+compare_at = s.index("\tif len(raw) > cap {", guard_start)
+guard_end = s.index("\t}\n", compare_at) + len("\t}\n")
 guard = s[guard_start:guard_end]
 s = s[:guard_start] + s[guard_end:]
 anchor = "\terr := encoding_json.unmarshal("
@@ -430,7 +434,7 @@ s = s[:line_end] + guard + s[line_end:]
 open(p, "w").write(s)
 PY2
 expect_reject "$T" "parse before the cap" \
-  "parses before checking the 4 MiB cap"
+  "parses before checking the body cap"
 
 # 35. Decoding with context.allocator instead of the request arena.
 T="$(fresh_tree)"; TREES+=("$T")

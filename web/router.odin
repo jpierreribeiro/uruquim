@@ -54,7 +54,10 @@ Router :: struct {
 // created by the first `use` or registration. The zero value installs no
 // default responses — a Router owns routes, not miss policy.
 router :: proc() -> Router {
-	return Router{}
+	// The embedded App carries the same default budget as any other. A Router
+	// does not serve, but it IS an App by embedding, and an App whose limits
+	// are three zeros is one that answers 413 to everything.
+	return Router{app = App{private = App_Internal{limits = DEFAULT_LIMITS}}}
 }
 
 // mount attaches every route of `r` to the application at `prefix`, with the

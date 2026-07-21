@@ -16,6 +16,55 @@ freeze amendment, never as a snapshot refresh.
 
 ### Documented
 
+- **Configurable limits** (Phase 3, WP36): **+3 symbols**, application ledger
+  **47 → 50** (union 52), recorded as Amendment 12 of
+  `planning/phase-1-freeze.md`. `web.Limits` is the application's byte budget —
+  `max_body`, `max_request_line`, `max_headers` — `web.DEFAULT_LIMITS` is the
+  package default **constant**, and `web.limits(&app, budget)` sets it. The
+  shape is `core:net`'s `DEFAULT_TCP_OPTIONS` precedent, not a builder.
+  **The defaults are the values already shipped:** 4 MiB is the cap Phase 1
+  fixed, 8000 is the backend's own default for both text budgets. An
+  application that never mentions limits behaves exactly as before — the
+  property that makes shipping a public options type safe. This is the least
+  reversible change in the phase, and the struct is three fields for that
+  reason: every field is a promise kept for as long as the type exists, adding
+  one later is cheap, and *tightening a default* would break traffic without
+  breaking a build.
+  **The budget belongs to the App, not to `serve`,** so `web.test_request`
+  enforces the same numbers as a socket — a 413 in a test is a 413 in
+  production (R-10). `serve` derives the backend's options from it at boot; no
+  `Limits` value crosses the transport boundary.
+  **`web.limits` after the first request rejects the application** fail-closed:
+  the budget is read on the request path, and changing it mid-flight would give
+  two clients different answers to the same body. That guard **sits beside**
+  ADR-019/ADR-023 rather than replacing them, and a test asserts the older
+  `use`-after-dispatch rejection still fires. A `Limits` with a zero field is
+  rejected too: there is no unset state, so a forgotten field cannot be told
+  from a deliberate one.
+  **There are no timeout fields, and that is a finding rather than an
+  omission.** The vendored server has no read or write deadline to configure —
+  its options carry only the two text limits, and its request read still carries
+  an unfinished-work comment asking for a timeout. Real deadlines are surgery
+  inside the event loop, not a field, so `Limits` ships without them: adding a
+  field later is an amendment, while shipping one that silently does nothing
+  would be a lie with a version number on it. **No document claims Uruquim has
+  configurable timeouts.**
+  The derivation was **measured**, as the plan required, and the measurement
+  does not distinguish the two shapes: a boot-resolved budget and a
+  re-derived-per-request one produce **byte-identical** binaries (745,216 B,
+  +472 B over the fixed-constant baseline) with zero allocations either way.
+  What separates them is branch count — 0 added versus 3 — and the semantics
+  behind it: a per-request derivation can discover a contradiction under load,
+  which is the failure boot-time validation exists to move to boot. The
+  amendment's reasoning is supported on the second ground and is unsupported on
+  the first, and it says so.
+  The capacity ledger's *"4 MiB, fixed, not configurable until Phase 3"* row is
+  amended and two rows added (FINDING-C), and the claim ledger gains **C-10**
+  with its own negative control. Freezing this also closed a hole in the freeze
+  gate: the signature extractor read procedures, groups and types but **never
+  constants**, so an exported constant's value could have changed with the
+  frozen inventory unmoved.
+
 - **Typed application state** (Phase 3, WP37): **+2 symbols**, application
   ledger **45 → 47** (union 49), recorded as Amendment 11 of
   `planning/phase-1-freeze.md`. `web.app_with_state(&state)` attaches ONE value

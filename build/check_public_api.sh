@@ -78,10 +78,12 @@ URUQUIM_MACHINERY_MARKER='// uruquim:file test-machinery'
 # ---------------------------------------------------------------------------
 URUQUIM_EXPECTED_EXPORTS="App
 Context
+DEFAULT_LIMITS
 Framework_Error
 Framework_Event
 Handler
 Header_View
+Limits
 Method
 Request
 Router
@@ -100,6 +102,7 @@ get
 header
 internal_error
 json
+limits
 logger
 mount
 next
@@ -449,7 +452,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 47 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state)"
+echo "public API contract: application ledger is exactly 50 symbols (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state + WP36 Limits/DEFAULT_LIMITS/limits)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -493,16 +496,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 47; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 47 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state)"
+if test "$URUQUIM_APP_COUNT" -ne 50; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 50 (32 Phase-1 + WP17 + WP18 + WP19 + WP20 observe/Framework_Event/Framework_Error + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state + WP36 Limits/DEFAULT_LIMITS/limits)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 49; then
-  fail "exported union is $URUQUIM_UNION, not 49 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 52; then
+  fail "exported union is $URUQUIM_UNION, not 52 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 49"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 52"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -551,7 +554,7 @@ echo "public API contract: web/testing bridge exports match the locked minimal s
 # ---------------------------------------------------------------------------
 for URUQUIM_FUTURE in group \
   serve_with serve_transport app_init \
-  redirect conflict bytes recovery cors \
+  redirect conflict bytes recovery cors body_limit \
   Response Header Header_Pair Header_View_Internal Params Route_Info \
   Transport method_raw headers commit; do
   if grep -qx "$URUQUIM_FUTURE" <<<"$URUQUIM_ACTUAL_EXPORTS"; then
@@ -882,6 +885,37 @@ test "$URUQUIM_REPORT_CALLS" -gt 0 ||
 echo "public API contract: Framework_Event admits no request-derived string; $URUQUIM_REPORT_CALLS reports, $URUQUIM_OBSERVE_CALLS emissions"
 
 # ---------------------------------------------------------------------------
+# 8c. WP36 — EVERY CONSTRUCTOR SETS THE BUDGET.
+#
+# `Limits`'s zero value is three zeros, which does not mean "unset": it means
+# "answer 413 to every request with a body". The field therefore cannot be lazy
+# like the rest of `App_Internal`, and every constructor must initialise it.
+#
+# There are four today — `app`, `bare`, `app_with_state` and `router` — and the
+# fifth is the one this check exists for: a constructor added by a later work
+# package that forgets, and ships an application which rejects all traffic while
+# every behavioural test that uses `app()` stays green.
+#
+# DEFENCE IN DEPTH, and it should be read as that. `web.body` resolves a zero
+# budget to the default, so a forgetful constructor produces an application that
+# runs on the DEFAULTS rather than one that rejects all traffic — the safe
+# outcome, and the right one for a framework-internal slip. This check exists so
+# the slip is still caught at the gate instead of being silently absorbed.
+#
+# The check is a count rather than a list of names, so it needs no maintenance
+# when a constructor is added: every literal `App_Internal` value built anywhere
+# in the package must carry `limits = DEFAULT_LIMITS`.
+# ---------------------------------------------------------------------------
+URUQUIM_APP_INTERNAL_LITERALS="$(grep -cE 'App_Internal[[:space:]]*\{' <<<"$URUQUIM_WEB_CODE" || true)"
+URUQUIM_LIMITS_INITS="$(grep -cE 'limits[[:space:]]*=[[:space:]]*DEFAULT_LIMITS' <<<"$URUQUIM_WEB_CODE" || true)"
+test "$URUQUIM_APP_INTERNAL_LITERALS" -gt 0 ||
+  fail "no App_Internal literal was found; the WP36 constructor check would be vacuous"
+if test "$URUQUIM_APP_INTERNAL_LITERALS" -ne "$URUQUIM_LIMITS_INITS"; then
+  fail "web/ builds $URUQUIM_APP_INTERNAL_LITERALS App_Internal value(s) but sets limits = DEFAULT_LIMITS in $URUQUIM_LIMITS_INITS of them. A constructor that leaves Limits at its zero value ships an application that answers 413 to every request with a body, and every test written against app() would stay green (WP36)."
+fi
+echo "public API contract: all $URUQUIM_APP_INTERNAL_LITERALS App constructors initialise Limits to DEFAULT_LIMITS"
+
+# ---------------------------------------------------------------------------
 # 9. WP4 route registration and dispatch (planning/phase-1-plan.md §WP4 D1-D5)
 #
 # WP4 adds BEHAVIOR, not surface. The inventory above already proves the ledger
@@ -1169,27 +1203,58 @@ if test -n "$URUQUIM_ARENA_EXPORTS"; then
   fail "web/request_arena.odin exports a symbol; the arena machinery must be package-private (WP7 D1)"
 fi
 
-# 10d-ii. The cap is EXACTLY 4 MiB, spelled as the arithmetic the reviewer saw,
-#         and the comparison rejects only a STRICTLY larger body (WP7 D3).
+# 10d-ii. The DEFAULT cap is EXACTLY 4 MiB, spelled as the arithmetic the
+#         reviewer saw, and the comparison rejects only a STRICTLY larger body
+#         (WP7 D3).
+#
+# AMENDED BY WP36, which made the cap configurable. What the check pinned was
+# two different things wearing one expression: the DEFAULT value, and the
+# boundary rule. Both survive, separately.
+#
+#   * `BODY_LIMIT` is still exactly `4 * 1024 * 1024` — it is now the source of
+#     `DEFAULT_LIMITS.max_body`, so an application that never calls
+#     `web.limits` is held to the number Phase 1 fixed, and a silent change to
+#     the default fails here;
+#   * `DEFAULT_LIMITS.max_body` must BE `BODY_LIMIT`, so the constant and the
+#     ledger row cannot drift apart;
+#   * `web.body` compares against the PER-REQUEST resolved budget with `>`,
+#     never `>=`: exactly the limit is accepted, at whatever number the
+#     application chose.
 grep -qE '^BODY_LIMIT :: 4 \* 1024 \* 1024$' <<<"$URUQUIM_ARENA_CODE" ||
-  fail "BODY_LIMIT is not exactly '4 * 1024 * 1024' (WP7 D3)"
-# The over-limit test uses `>`, never `>=`: exactly 4 MiB must be accepted.
-if grep -nE 'len\([a-z_]+\) >= BODY_LIMIT' <<<"$URUQUIM_WEB_PUBLIC_CODE"; then
-  fail "the body cap uses '>=', so exactly 4 MiB would be rejected; it must be '>' (WP7 D3)"
+  fail "BODY_LIMIT is not exactly '4 * 1024 * 1024' (WP7 D3); it is the value DEFAULT_LIMITS.max_body carries"
+grep -qE 'max_body[[:space:]]*=[[:space:]]*BODY_LIMIT' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "DEFAULT_LIMITS.max_body is not BODY_LIMIT; the shipped default and the capacity ledger's row would drift apart (WP36)"
+
+# The other two defaults are pinned the same way and for the same reason. The
+# freeze snapshot records `DEFAULT_LIMITS` by the NAMES of its constants, so
+# without these three lines the numbers behind those names could change with the
+# snapshot unmoved — and a changed default is a behaviour change for every
+# application that never mentioned limits.
+grep -qxE 'REQUEST_LINE_LIMIT :: 8000' <<<"$URUQUIM_WEB_CODE" ||
+  fail "REQUEST_LINE_LIMIT is not exactly 8000, the vendored backend's own default (WP36)"
+grep -qxE 'HEADER_BLOCK_LIMIT :: 8000' <<<"$URUQUIM_WEB_CODE" ||
+  fail "HEADER_BLOCK_LIMIT is not exactly 8000, the vendored backend's own default (WP36)"
+if grep -nE 'len\([a-z_]+\) >= (BODY_LIMIT|cap|ctx\.private\.limits\.max_body)' <<<"$URUQUIM_WEB_PUBLIC_CODE"; then
+  fail "the body cap uses '>=', so a body of exactly the limit would be rejected; it must be '>' (WP7 D3)"
 fi
-grep -qE 'len\([a-z_]+\) > BODY_LIMIT' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
-  fail "web.body does not compare the body length against BODY_LIMIT with '>' (WP7 D3)"
+grep -qE 'cap[[:space:]]*:=[[:space:]]*ctx\.private\.limits\.max_body' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "web.body does not read the request's resolved max_body. A hard-coded constant here would make web.limits a knob that lies (WP7 D3, as amended by WP36)."
+grep -qE 'len\([a-z_]+\) > cap' <<<"$URUQUIM_WEB_PUBLIC_CODE" ||
+  fail "web.body does not compare the body length against the resolved cap with '>' (WP7 D3)"
 
 # 10d-iii. The cap is checked BEFORE the parser. `unmarshal` must appear AFTER
-#          the `len(raw) > BODY_LIMIT` guard in the source of `body`, so an
-#          over-limit body is never handed to the decoder (WP7 D3).
+#          the budget guard in the source of `body`, so an over-limit body is
+#          never handed to the decoder (WP7 D3). WP36 changed what the guard
+#          compares against, not where it sits — and this is the check that
+#          keeps that true, because a configurable limit checked after the parse
+#          would be a limit that bounds nothing.
 URUQUIM_BODY_SRC="$(awk '/^body :: proc/{f=1} f{print} f && /^}/{exit}' <<<"$URUQUIM_WEB_PUBLIC_CODE")"
-URUQUIM_LIMIT_LINE="$(grep -nE 'len\([a-z_]+\) > BODY_LIMIT' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
+URUQUIM_LIMIT_LINE="$(grep -nE 'len\([a-z_]+\) > cap' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
 URUQUIM_PARSE_LINE="$(grep -nE 'unmarshal\(' <<<"$URUQUIM_BODY_SRC" | head -1 | cut -d: -f1)"
 test -n "$URUQUIM_LIMIT_LINE" -a -n "$URUQUIM_PARSE_LINE" ||
-  fail "web.body must contain both the BODY_LIMIT guard and the unmarshal call (WP7 D3)"
+  fail "web.body must contain both the max_body guard and the unmarshal call (WP7 D3)"
 test "$URUQUIM_LIMIT_LINE" -lt "$URUQUIM_PARSE_LINE" ||
-  fail "web.body parses before checking the 4 MiB cap; the cap must gate the parser (WP7 D3)"
+  fail "web.body parses before checking the body cap; the cap must gate the parser (WP7 D3)"
 
 # 10d-iv. Decoding is STRICT JSON. The pinned encoder's default spec is JSON5,
 #         which would accept unquoted keys, comments and single-quoted strings,
@@ -1279,7 +1344,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 47 + test-support ledger 2 = union 49"
+echo "public API contract: application ledger 50 + test-support ledger 2 = union 52"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"

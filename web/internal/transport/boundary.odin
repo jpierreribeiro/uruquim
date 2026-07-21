@@ -58,15 +58,27 @@ Outbound :: struct {
 // returns the adapter owns `out` and writes it to the wire.
 Dispatch_Proc :: #type proc(user: rawptr, inbound: Inbound, out: ^Outbound, allocator: mem.Allocator)
 
-// Config is what `web.serve` hands the adapter. `max_body` is the byte cap the
-// adapter enforces while reading; `on_ready`, when set, is called once after the
-// listen succeeds (used by tests to synchronize without a fixed sleep).
+// Config is what `web.serve` hands the adapter. `on_ready`, when set, is called
+// once after the listen succeeds (used by tests to synchronize without a fixed
+// sleep).
+//
+// THE THREE BYTE BUDGETS ARE RESOLVED NUMBERS, and that is the boundary's whole
+// contribution to WP36: the core validates a `web.Limits` once, at boot, and
+// hands the adapter integers. No `Limits` type crosses this line — the adapter
+// would then have to know about a public `web` type, which is the back-edge
+// ADR-009 forbids — and nothing on the read path re-derives a budget.
 Config :: struct {
-	port:     int,
-	max_body: int,
-	dispatch: Dispatch_Proc,
-	user:     rawptr,
-	on_ready: proc(user: rawptr),
+	port:             int,
+	// The byte cap the adapter enforces while reading the body.
+	max_body:         int,
+	// The request-line and header-block caps the BACKEND enforces. They are
+	// passed through rather than checked here: the adapter's job is to hand the
+	// backend its own options, not to reimplement its parser's limits.
+	max_request_line: int,
+	max_headers:      int,
+	dispatch:         Dispatch_Proc,
+	user:             rawptr,
+	on_ready:         proc(user: rawptr),
 }
 
 // Serve_Error is the neutral outcome of a serve attempt.

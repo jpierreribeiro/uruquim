@@ -63,6 +63,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp24_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp25_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp26_bench.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp30_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp36_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp37_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
@@ -834,6 +835,16 @@ echo "--- WP33 multi-parameter routes without a map (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp33-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp33-public-surface"
+
+# WP36 — configurable limits. THREE public symbols, ledger 47 -> 50, and the
+# least reversible change in the phase. The suite spends most of itself on the
+# two expensive failures: an application that configures NOTHING must behave
+# exactly as before, and both transports must enforce the same number — which is
+# why the budget lives on the App and not on `serve`.
+echo "--- WP36 configurable limits: Limits, DEFAULT_LIMITS, limits (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp36-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp36-public-surface"
 
 # WP37 — typed application state. TWO public symbols, ledger 45 -> 47. ADR-004
 # option A only: ONE value, APP-scoped, set before serving. There is no

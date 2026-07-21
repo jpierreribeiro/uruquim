@@ -215,6 +215,35 @@ control does not freeze.**
   `tests/wp20-public-surface::wp20_public_a_404_is_not_a_framework_failure`
   pins that distinction.
 
+### C-10 — "limits are configurable, and both transports enforce the same ones"
+
+* **Sentence:** "`web.limits` sets the application's byte budget;
+  `web.test_request` enforces the same numbers as a socket, so a 413 in a test
+  is a 413 in production." **Added by WP36.**
+* **Scope:** the `App`, both transports, `app()` and `bare()`. The body cap is
+  enforced on the shared request path; the request-line and header budgets are
+  passed to the backend at boot and enforced by its parser.
+* **Implemented:** `web/limits.odin` (validation and the fail-closed guards),
+  `web/serve.odin` (the one driver line that copies the budget onto every
+  request, and the boot derivation of the backend's options),
+  `web/extract.odin` (the comparison).
+* **Positive test:**
+  `tests/wp36-public-surface::wp36_a_lowered_body_cap_is_enforced_exactly` —
+  exactly the limit is accepted, one byte more is 413;
+  `::wp36_a_raised_body_cap_admits_what_a_lower_one_refused` proves the number
+  is read rather than a smaller constant applied twice.
+* **Negative control:** `check_wp36_controls.sh` — the body comparison pinned
+  back to the fixed constant must turn the configurable-cap tests red; the
+  after-dispatch guard removed must turn the rejection test red; and the driver
+  line that copies the budget onto the Context removed must turn the whole
+  configurable half red, which is what makes the R-10 claim mean something.
+* **Does NOT guarantee:** anything temporal. **There are no timeout fields**,
+  because the vendored server has no read or write deadline to configure — see
+  Amendment 12. It also does not bound **connections, accept backlog, inbound
+  header COUNT or process memory**: those belong to the transport and the
+  operating system, and configurable limits do not make the framework
+  "bounded".
+
 ### Claims examined and NOT frozen
 
 * **"the machinery present but unused costs +2,424 bytes … a program that never
@@ -281,12 +310,16 @@ belong to the transport.
 | logger line | `LOGGER_LINE_MAX` (149), route field 128 | `web/logger.odin` |
 | effective request ID | 64 bytes | `web/request_id.odin` |
 | poison diagnostic detail | `MW_POISON_DETAIL_MAX` (256) | `web/middleware.odin` |
-| request body | **4 MiB**, fixed, not configurable until Phase 3 | `web/extract.odin` |
+| request body | **4 MiB by default, configurable** — `web.limits`, `DEFAULT_LIMITS.max_body` — **amended by WP36** | `web/limits.odin`, `web/extract.odin` |
+| request line | **8000 bytes by default, configurable** — `Limits.max_request_line` — **added by WP36** | `web/limits.odin`, enforced by the backend |
+| header block | **8000 bytes by default, configurable** — `Limits.max_headers` — **added by WP36** | `web/limits.odin`, enforced by the backend |
 | path parameters per pattern | `ROUTE_PARAM_MAX` (8) — **added by WP33** | `web/dispatch_table.odin` |
 
 Each of these states what it does when full: the logger **truncates and says
 so**; the envelope escaper **stops on a unit boundary**; the body limit
-**answers 413**; the poison diagnostic **truncates the pattern, never the
+**answers 413** — at whatever number the application configured, exactly that
+many bytes being allowed; the request-line and header budgets are **refused by
+the backend before the core sees the request**; the poison diagnostic **truncates the pattern, never the
 approved sentence**; and a pattern declaring **more** parameters than
 `ROUTE_PARAM_MAX` is marked **invalid at registration** — it never matches and
 never contributes to an `Allow` value, which is the fail-closed answer WP4

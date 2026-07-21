@@ -41,11 +41,15 @@ serve :: proc(a: ^App, port: int) {
 		return
 	}
 
+	// WP36: the backend's options are DERIVED from the App's limits, once, here
+	// at boot. The adapter receives resolved numbers and never sees a `Limits`.
 	cfg := transport.Config {
-		port     = port,
-		max_body = BODY_LIMIT,
-		dispatch = serve_dispatch,
-		user     = a,
+		port             = port,
+		max_body         = a.private.limits.max_body,
+		max_request_line = a.private.limits.max_request_line,
+		max_headers      = a.private.limits.max_headers,
+		dispatch         = serve_dispatch,
+		user             = a,
 	}
 	if err := transport.serve(cfg); err != .None {
 		framework_report(App, .Serve_Listen_Failed)
@@ -115,6 +119,11 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 	// (R-10) and the Context still holds no `^App`.
 	ctx.private.state = a.private.state
 	ctx.private.state_type = a.private.state_type
+
+	// WP36: the byte budget travels the same way, which is what makes
+	// `test_request` and the socket agree about 413 by construction (R-10)
+	// rather than by two implementations happening to hold the same number.
+	ctx.private.limits = a.private.limits
 
 	if inbound.over_limit {
 		// The adapter rejected the body for length BEFORE the handler. The core

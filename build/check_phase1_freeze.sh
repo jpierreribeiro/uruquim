@@ -160,6 +160,31 @@ uruquim_freeze_generate_signatures() { # -> stdout
       fi
     done
 
+  # Constants: their own `odin doc` section, and — until WP36 — a KIND THIS
+  # EXTRACTOR NEVER READ.
+  #
+  # WHY IT MATTERS, and it is the same hole the proc-group branch above was
+  # written for. An exported constant is a public symbol: `check_public_api.sh`
+  # counts it, an application can name it, and its VALUE is a promise. Reading
+  # only procedures, groups and types meant such a constant was invisible to the
+  # snapshot, so its value could be changed with the frozen inventory unmoved —
+  # and `DEFAULT_LIMITS` is precisely a constant whose value IS the contract.
+  # Found while freezing WP36, closed here.
+  #
+  # The declaration is taken verbatim, so a changed default is a snapshot diff.
+  # It reads the FULL view, not the short one: the short view renders a struct
+  # constant as `Limits{...}`, eliding exactly the values that are the promise.
+  awk '/^\tconstants$/{on=1;next} /^\t[a-z_]+$/{on=0} /^\tfullpath:/{on=0} on&&/^\t\t[A-Za-z_][A-Za-z0-9_]* ::/{print}' "$full" \
+  | sed -E 's@ /\* [0-9]+![0-9]+ \*/@@; s@^\t\t@@' \
+  | while IFS= read -r decl; do
+      name="${decl%% ::*}"
+      if [[ "$name" =~ $URUQUIM_FREEZE_TEST_SUPPORT ]]; then
+        printf 'test-support\tconst\t%s\n' "$decl"
+      else
+        printf 'application\tconst\t%s\n' "$decl"
+      fi
+    done
+
   # Types: from the full view, which expands fields and enum members. The full
   # view interleaves doc comments, so only the declaration lines are taken.
   awk '/^\ttypes$/{on=1;next} /^\tfullpath:/{on=0} on&&/^\t\t[A-Z][A-Za-z_]* ::/{print}' "$full" \
@@ -229,25 +254,26 @@ while IFS=$'\t' read -r ledger kind decl; do
 done <"$URUQUIM_FREEZE_ACTUAL_SIG"
 
 # ---------------------------------------------------------------------------
-# 4. The ledgers still add up: 47 application + 2 test-support = 49
+# 4. The ledgers still add up: 50 application + 2 test-support = 52
 #    (32 frozen Phase-1 application symbols, plus WP17 use/next — Amendment
 #    3 — WP18 Router/router/mount — Amendment 4 — and WP19 header/
 #    bearer_token — Amendment 5 — the test_request headers parameter —
 #    Amendment 6 — and WP20 observe/Framework_Event/Framework_Error —
 #    Amendment 7 — and WP34 route — Amendment 10, the first Phase-3
 #    amendment, decided under the ADR-029 delegation — and WP37
-#    app_with_state/state — Amendment 11. All ratified.)
+#    app_with_state/state — Amendment 11 — and WP36 Limits/DEFAULT_LIMITS/
+#    limits — Amendment 12. All ratified.)
 # ---------------------------------------------------------------------------
 URUQUIM_FREEZE_APP_COUNT="$(grep -c '^application	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"
 URUQUIM_FREEZE_TS_COUNT="$(grep -c '^test-support	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"
 URUQUIM_FREEZE_TOTAL="$(( URUQUIM_FREEZE_APP_COUNT + URUQUIM_FREEZE_TS_COUNT ))"
 
-[ "$URUQUIM_FREEZE_APP_COUNT" -eq 47 ] ||
-  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the recorded 47 (32 frozen Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state, spec §9.2)"
+[ "$URUQUIM_FREEZE_APP_COUNT" -eq 50 ] ||
+  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the recorded 50 (32 frozen Phase-1 + WP17 + WP18 + WP19 + WP20 observer + WP22 logger + WP23 request_id + WP34 route + WP37 app_with_state/state + WP36 Limits/DEFAULT_LIMITS/limits, spec §9.2)"
 [ "$URUQUIM_FREEZE_TS_COUNT" -eq 2 ] ||
   fail "the test-support ledger holds $URUQUIM_FREEZE_TS_COUNT symbols, not the frozen 2"
-[ "$URUQUIM_FREEZE_TOTAL" -eq 49 ] ||
-  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the recorded 49"
+[ "$URUQUIM_FREEZE_TOTAL" -eq 52 ] ||
+  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the recorded 52"
 
 # ---------------------------------------------------------------------------
 # 5. Named assertions on the contracts most likely to be eroded quietly.
@@ -441,8 +467,8 @@ grep -oE '(build|tests|examples|docs|experiments|web|planning|ops|vendor)/[A-Za-
   "$URUQUIM_FREEZE_MANIFEST" | LC_ALL=C sort -u >"$URUQUIM_FREEZE_REFS" || true
 
 URUQUIM_FREEZE_REF_COUNT="$(wc -l <"$URUQUIM_FREEZE_REFS" | tr -d ' ')"
-[ "$URUQUIM_FREEZE_REF_COUNT" -ge 49 ] ||
-  fail "$URUQUIM_FREEZE_MANIFEST carries only $URUQUIM_FREEZE_REF_COUNT resolvable evidence citations for 49 recorded symbols; the matrix is incomplete"
+[ "$URUQUIM_FREEZE_REF_COUNT" -ge 52 ] ||
+  fail "$URUQUIM_FREEZE_MANIFEST carries only $URUQUIM_FREEZE_REF_COUNT resolvable evidence citations for 52 recorded symbols; the matrix is incomplete"
 
 URUQUIM_FREEZE_BAD_REFS=0
 while IFS= read -r ref; do
@@ -514,7 +540,7 @@ echo "freeze: signatures      -> $URUQUIM_FREEZE_APP_COUNT application + $URUQUI
 echo "freeze: fields/enums    -> Method(u8, 6), Status(int, 10, no 413), Handler, Context, Request, Header_View, App, Recorded_Response pinned"
 echo "freeze: extractors      -> named results pinned, no #optional_ok on any exported procedure"
 echo "freeze: dependencies    -> $(wc -l <"$URUQUIM_FREEZE_ACTUAL_DEP" | tr -d ' ') direct imports match the snapshot; boundaries one-way"
-echo "freeze: evidence matrix -> $URUQUIM_FREEZE_REF_COUNT citations resolved, all 49 symbols present, none NOT_FROZEN"
+echo "freeze: evidence matrix -> $URUQUIM_FREEZE_REF_COUNT citations resolved, all 52 symbols present, none NOT_FROZEN"
 echo "freeze: proc_group extraction self-test passed (private-member group is visible)"
 echo "freeze: no future-phase vocabulary exported; no open Phase-1 blocker"
 echo "PASS: Phase 1 freeze gate"
