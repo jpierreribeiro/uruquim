@@ -677,6 +677,41 @@ name who watches upstream and how often. **Rollback: HIGH.**
 
 ### WP52 — Fuzzing and the extended framing corpus
 
+**DONE, 2026-07-21 — one new corpus case, one case renamed, and one case
+WITHDRAWN with its reason.** The withdrawal is the useful part.
+
+**A RESPONSE-FRAMING AXIS THE CORPUS DID NOT HAVE.** Every case before this one
+was about a request the server must refuse; none asked whether the server's own
+RESPONSE is framed correctly. A 204 carrying a body desynchronizes a persistent
+connection exactly as a malformed request does — the direction is reversed and
+the failure is the same.
+
+**A CASE WAS TRIED AND WITHDRAWN, and the reason is an instrument boundary
+rather than an oversight.** WP45 found that SEQUENTIAL keep-alive was broken
+while the corpus's keep-alive case — which sends both requests in ONE write —
+passed for the whole life of the project, because the second request's bytes
+were already buffered. That case is now renamed to say `PIPELINED`, because **a
+case whose name is broader than its evidence reads as coverage it does not
+have.**
+
+A sequential case was then added here and **it did not go red when WP45's fix
+was reverted.** The wire harness is single-exchange by construction — one write,
+then read until the stream goes quiet — so a case layered on top of it cannot
+express "and then, later, ask again". **A corpus case that passes either way is
+worse than no case.** It was withdrawn, and sequential keep-alive is tested in
+`tests/wp41-fault`, which owns a connection across time.
+
+**The split is now explicit: this corpus owns BYTES, the fault lab owns TIME.**
+That is the same boundary WP46 found from the other side, when a deadline could
+not be expressed as a byte sequence.
+
+**NO FUZZER SHIPS.** The plan's title says fuzzing; what a fuzzer needs and this
+project does not have is a corpus-minimising harness and a crash oracle beyond
+"the process died". `tests/wp41-fault`'s seeded generator is the closest thing
+and it is deterministic on purpose — a fuzzer's value is finding inputs nobody
+imagined, and its cost is findings nobody can replay. Recorded as not delivered
+rather than counted as done.
+
 **TESTS.** Extends WP9's raw-wire corpus to response framing and the C-3
 cases. Body policy (HEAD, 1xx, 204, 304) stays internally separate from
 framing (fixed length, chunked, close-delimited) so the combinations remain

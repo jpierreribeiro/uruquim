@@ -74,7 +74,7 @@ corpus_storage := []Wire_Case{
 			connection_must_close = true,
 		},
 		{
-			name = "keep-alive serves two requests",
+			name = "keep-alive serves two PIPELINED requests",
 			bytes = "GET /ping HTTP/1.1\r\nHost: localhost\r\n\r\n" +
 			"GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
 			outcome = .Ok,
@@ -82,6 +82,43 @@ corpus_storage := []Wire_Case{
 			handler_must_run = true,
 			connection_must_close = true,
 			expect_second_request = true,
+			// RENAMED BY WP52, and the rename is the finding. This case sends
+			// both requests in ONE write, so the second one's bytes are already
+			// buffered when the first is served. **It passed for the whole life
+			// of the project while sequential keep-alive was broken** (WP45: a
+			// GET with no Content-Length reported its body read as FAILED, and
+			// the connection was retired after every response).
+			//
+			// A case that says "keep-alive works" and only exercises the
+			// pipelined path is a case whose name is broader than its evidence.
+			//
+			// **A SEQUENTIAL CASE WAS TRIED HERE AND WITHDRAWN.** This harness
+			// is single-exchange by construction — it writes once and reads
+			// until the stream goes quiet — and a case added on top of that did
+			// NOT go red when WP45's fix was reverted. A corpus case that
+			// passes either way is worse than no case, because it reads as
+			// coverage. Sequential keep-alive is tested in `tests/wp41-fault`
+			// instead, which owns a connection across time; this corpus owns
+			// BYTES. The instruments differ and the split is now explicit
+			// (WP52).
+			notes = "pipelined; the second request is already buffered",
+		},
+		{
+			// WP52 — RESPONSE framing, the axis this corpus did not cover.
+			//
+			// Every case before this one is about a request the server must
+			// refuse. None asked whether the server's own RESPONSE is framed
+			// correctly — and a 204 that carries a body, or a Content-Length
+			// that disagrees with the bytes sent, desynchronizes a persistent
+			// connection exactly as a malformed request does. The direction is
+			// reversed; the failure is the same.
+			name = "204 carries no body and no Content-Length",
+			bytes = "DELETE /nobody HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+			outcome = .Ok,
+			allowed_status = {204},
+			handler_must_run = true,
+			connection_must_close = true,
+			notes = "RFC 9110 6.4.1: a 204 has no body; a framing header here would desynchronize a reused connection",
 		},
 		{
 			name = "Connection: close closes after the response",

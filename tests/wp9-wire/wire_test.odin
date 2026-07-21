@@ -55,6 +55,15 @@ echo_handler :: proc(ctx: ^web.Context) {
 
 // `/smuggled` exists so a smuggled request WOULD be observable if the adapter
 // executed one. It must stay at zero for the whole suite.
+// WP52 — a handler that answers 204, so the corpus can assert RESPONSE framing
+// rather than only request rejection.
+nobody_hits: int
+
+nobody_handler :: proc(ctx: ^web.Context) {
+	nobody_hits += 1
+	web.no_content(ctx)
+}
+
 smuggled_handler :: proc(ctx: ^web.Context) {
 	smuggled_hits += 1
 	web.text(ctx, .OK, "smuggled")
@@ -83,6 +92,7 @@ start_server :: proc(s: ^Server) -> bool {
 		web.post(&s.app, "/ping", ping_handler)
 		web.post(&s.app, "/echo", echo_handler)
 		web.get(&s.app, "/smuggled", smuggled_handler)
+		web.delete(&s.app, "/nobody", nobody_handler)
 		s.port = candidate
 		s.thread = thread.create_and_start(serve_thread)
 		sync.wait(&s.ready)
