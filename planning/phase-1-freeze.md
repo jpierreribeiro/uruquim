@@ -1333,3 +1333,60 @@ single-threaded decision and belongs with it.
 | Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
 |---|---|---|---|---|---|---|
 | `stop` | A | WP44 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp41-fault/fault_test.odin::phase_stop_is_idempotent_and_stops_admission` | `docs/ai-context.md::web.stop` | owns nothing; signals the running server and returns; idempotent and thread-safe |
+
+## Amendment 15 — WP47: bounded admission joins `Limits`
+
+**Date: 2026-07-21. Authority: the ADR-029 delegation, over WP40's reservation
+rule.**
+**Ledger effect: NONE. 51 application + 2 test-support = 53, unchanged.**
+Two FIELDS, no symbols — the WP46 precedent, for the same reason: a public
+options struct already exists and a second way to bound a server would be a
+second answer to one question.
+
+```
+Limits.max_connections  int    1024 by default; 0 is unbounded
+Limits.reserved_conns   int    16 by default; slots held back from admission
+```
+
+**WHY A LIMIT AT ALL.** Without one, concurrent connections are bounded only by
+the operating system's file-descriptor limit — and reaching that limit is not a
+graceful degradation. It is an `accept` failing for a reason the server did not
+choose, at a moment it did not choose. **A server that refuses a connection is
+degraded and honest; one that accepts everything until the kernel stops it has a
+failure mode that is an accident.**
+
+**THE RESERVATION IS AN INEQUALITY, AND THAT IS THE WHOLE RULE.** Admission is
+refused at or below `max_connections - reserved_conns`, **never at zero**. The
+fatal failure is not running out of capacity — it is running out and having none
+left to shut down with. The test proves the gap rather than the ceiling: with a
+budget of 6 and 2 reserved, the fifth connection is refused **while two slots
+are still free**.
+
+**A reservation that swallows its own budget is rejected at BOOT.**
+`reserved_conns >= max_connections` would refuse every connection while looking
+like a working configuration — a server that accepts nothing, discovered in
+production. Fail-closed, with a diagnostic, where an operator is watching.
+
+**Refusal is COUNTED, not logged per event** (WP40 §2.5). The transition is
+logged once on entering the exhausted state and once on leaving it. Ten thousand
+refused connections must not become ten thousand log lines: that turns a load
+spike into an I/O storm, which is a denial of service the server performs on
+itself.
+
+**THE REFUSAL CLOSES RATHER THAN QUEUES.** A queue would be a second, invisible
+limit with its own exhaustion behaviour, and the client learns the same thing
+either way.
+
+**The numbers are judgement, recorded as such.** 1024 sits below a typical
+default descriptor limit so the framework's refusal arrives BEFORE the kernel's
+— that ordering is the point of having a limit rather than inheriting one. 16
+reserved is enough for a drain to close what is open and write final responses.
+
+**Evidence.** `tests/wp41-fault`, with the positive control running FIRST: a
+server whose limit is far above the load must serve everything, or the bounded
+phase would pass against a server that refused every connection.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `Limits.max_connections` | A | WP47 | `build/phase1-public-signatures.txt` | `tests/wp41-fault/fault_test.odin::phase_admission_is_bounded_with_a_reservation` | `docs/ai-context.md::web.Limits` | plain `int` on a value type; the count lives per serving thread |
+| `Limits.reserved_conns` | A | WP47 | `build/phase1-public-signatures.txt` | `tests/wp41-fault/fault_test.odin::phase_a_reservation_larger_than_the_budget_is_rejected` | `docs/ai-context.md::web.Limits` | as above; validated against `max_connections` at boot |

@@ -512,6 +512,30 @@ default, once shipped, is a promise about traffic.
 
 ### WP47 — Deterministic load shedding
 
+**DONE, 2026-07-21 — URUQUIM PATCH 8, `Limits.max_connections` and
+`Limits.reserved_conns`, Amendment 15, claim-ledger row C-12, capacity rows R-1
+and R-2 amended. Zero new symbols — two fields.**
+
+**THE THIRD DEFICIENCY IS CLOSED.** Concurrent connections were bounded only by
+the operating system's descriptor limit; the framework's own refusal now arrives
+before the kernel's, which is the entire point of having a limit rather than
+inheriting one.
+
+**The reservation is an inequality, and the test proves the GAP rather than the
+ceiling:** with a budget of 6 and 2 reserved, the fifth connection is refused
+while two slots are still free. Testing at zero would have proved the wrong
+rule.
+
+**Deterministic, as the plan required — no adaptive controller.** The decision
+is a comparison against a boot-validated number; there is no feedback loop, no
+sampling and no hysteresis. Research item 10 before 11.
+
+**On "rejection is cheaper than admitted work":** the plan asked for that claim
+with a measurement. **It is NOT claimed**, and therefore not measured — the
+instrument's noise floor is 138%, so a per-connection cost comparison here would
+be theatre. What C-12 claims instead is the bound and the reservation, both of
+which are observable without a stopwatch.
+
 **IMPLEMENTATION.** Bounded admission per WP40's reservation rows. The claim
 "rejection is cheaper than admitted work" enters the claim ledger **with a
 measurement and a negative control**. **Rollback: MEDIUM.**

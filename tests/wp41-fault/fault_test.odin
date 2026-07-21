@@ -521,6 +521,12 @@ wp41_fault_laboratory :: proc(t: ^testing.T) {
 	// WP45 — connection lifetime.
 	phase_keep_alive_serves_two_requests_on_one_connection(t)
 	phase_a_rejection_is_delivered_before_the_close(t)
+
+	// WP47 — bounded admission. The positive control runs FIRST: without it,
+	// the bounded phase would pass against a server that refused everything.
+	phase_admission_below_the_limit_is_unaffected(t)
+	phase_admission_is_bounded_with_a_reservation(t)
+	phase_a_reservation_larger_than_the_budget_is_rejected(t)
 }
 
 // ---------------------------------------------------------------------------
@@ -1030,4 +1036,153 @@ phase_a_rejection_is_delivered_before_the_close :: proc(t: ^testing.T) {
 		"the delivered rejection must be a 4xx; got %d",
 		status,
 	)
+}
+
+// ---------------------------------------------------------------------------
+// 10. WP47 — BOUNDED ADMISSION, and the reservation rule.
+// ---------------------------------------------------------------------------
+
+ADMISSION_PORTS :: [?]int{60171, 60613}
+
+start_admission_server :: proc(s: ^Server, ports: []int, max_conns, reserved: int) -> bool {
+	g_server = s
+	for candidate in ports {
+		s.app = web.app()
+		budget := web.DEFAULT_LIMITS
+		budget.max_connections = max_conns
+		budget.reserved_conns = reserved
+		// The read deadline is disabled so that a connection held open by this
+		// test is held by the TEST, not ended by the WP46 sweep — otherwise a
+		// pass would not say which mechanism did the work.
+		budget.max_request_time = 0
+		web.limits(&s.app, budget)
+		web.get(&s.app, "/ping", deadline_ping)
+		s.port = candidate
+		s.thread = thread.create_and_start(serve_thread)
+		sync.wait(&s.ready)
+		if wait_until_accepting(candidate) {
+			return true
+		}
+		web.stop(&s.app)
+		thread.join(s.thread)
+		thread.destroy(s.thread)
+		s.thread = nil
+		web.destroy(&s.app)
+	}
+	return false
+}
+
+// ADMISSION IS REFUSED AT OR BELOW THE RESERVATION, NEVER AT ZERO.
+//
+// The budget here is 6 with 2 reserved, so 4 connections are admissible and the
+// fifth must be refused **while two slots are still free**. That gap is the
+// reservation: it is what a drain works in, and testing at zero would prove the
+// wrong rule.
+//
+// Held connections are opened WITHOUT sending a request, so they occupy a slot
+// without completing — which is what a real overload looks like.
+phase_admission_is_bounded_with_a_reservation :: proc(t: ^testing.T) {
+	server: Server
+	ports := ADMISSION_PORTS
+	if !start_admission_server(&server, ports[:], 6, 2) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+	defer stop_server(&server)
+
+	held: [8]net.TCP_Socket
+	held_count := 0
+	defer for i in 0 ..< held_count {
+		net.close(held[i])
+	}
+
+	// Fill the admissible budget: 6 - 2 = 4.
+	for _ in 0 ..< 4 {
+		sock, ok := lab.dial(server.port, 500 * time.Millisecond)
+		if !ok {
+			break
+		}
+		held[held_count] = sock
+		held_count += 1
+		time.sleep(20 * time.Millisecond)
+	}
+	testing.expectf(t, held_count == 4, "the admissible budget must accept 4 connections; got %d", held_count)
+
+	// THE FIFTH. The kernel completes the TCP handshake before the server sees
+	// it, so `dial` still succeeds — the refusal is observed as the server
+	// CLOSING it rather than as a failed connect. That distinction is why this
+	// reads a status rather than checking `ok`.
+	time.sleep(100 * time.Millisecond)
+	extra, ok := lab.dial(server.port, 800 * time.Millisecond)
+	testing.expect(t, ok, "the kernel accepts the handshake regardless; the refusal is the server's close")
+	if !ok {
+		return
+	}
+	defer net.close(extra)
+
+	l: lab.Lab
+	lab.lab_init(&l, LAB_SEED, 800 * time.Millisecond)
+	lab.send_fragmented(extra, lab.GET_PING, 1, 0)
+	outcome, _ := lab.read_status(&l, extra)
+
+	testing.expectf(
+		t,
+		outcome == .Closed_Without_Response,
+		"a connection past the admission budget must be refused (closed), not served; got %v. Admission stops at or below the reservation, with slots still free, so a drain has room to work in.",
+		outcome,
+	)
+}
+
+// THE POSITIVE CONTROL, and it is not optional: a server whose limit is far
+// above the load must serve everything. Without it, the phase above would pass
+// against a server that refused every connection.
+phase_admission_below_the_limit_is_unaffected :: proc(t: ^testing.T) {
+	server: Server
+	ports := ADMISSION_PORTS
+	if !start_admission_server(&server, ports[:], 64, 8) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+	defer stop_server(&server)
+
+	l: lab.Lab
+	lab.lab_init(&l, LAB_SEED, 1500 * time.Millisecond)
+
+	for i in 0 ..< 6 {
+		sock, ok := lab.dial(server.port, l.patience)
+		if !ok {
+			testing.expectf(t, false, "connection %d must be accepted well below the limit", i)
+			return
+		}
+		lab.send_fragmented(sock, lab.GET_PING, 1, 0)
+		outcome, status := lab.read_status(&l, sock)
+		net.close(sock)
+		testing.expectf(
+			t,
+			outcome == .Responded && status == 200,
+			"request %d must be served when the limit is far above the load; got %v/%d",
+			i,
+			outcome,
+			status,
+		)
+	}
+}
+
+// A RESERVATION THAT SWALLOWS ITS BUDGET IS REFUSED AT BOOT.
+//
+// `reserved >= max` would refuse every connection while looking like a working
+// configuration — a server that accepts nothing, discovered in production. The
+// diagnostic belongs at boot, where an operator is watching.
+phase_a_reservation_larger_than_the_budget_is_rejected :: proc(t: ^testing.T) {
+	app := web.app()
+	defer web.destroy(&app)
+
+	budget := web.DEFAULT_LIMITS
+	budget.max_connections = 8
+	budget.reserved_conns = 8
+	web.limits(&app, budget)
+	web.get(&app, "/ping", deadline_ping)
+
+	res := web.test_request(&app, .GET, "/ping")
+	testing.expect_value(t, res.status, web.Status.Internal_Server_Error)
 }
