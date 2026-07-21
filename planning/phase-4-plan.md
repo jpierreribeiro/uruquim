@@ -225,6 +225,18 @@ objective, the research that binds it, and rollback.
 
 ### WP39 — Lifecycle state machine (RG-P4-A)
 
+**DONE, 2026-07-20 — `planning/phase-4-spec.md` §1, `build/check_phase4_spec.sh`,
+`build/check_wp39_controls.sh`.** Five closed states, five proof obligations,
+gate-enforced with eight controls including a positive one.
+
+**Writing the spec before the implementation earned its keep immediately.**
+Reading the vendored server rather than assuming it found that a lifecycle
+already exists there — `Server_State`, `Connection_State`, `Will_Close`,
+one-way transitions, a real drain — **and that its drain loop has NO deadline:
+it waits for active connections forever.** So WP44 is not "expose what is
+already there"; the deadline is the part that does not exist, and the framework's
+`Draining` must impose it AROUND the vendored loop rather than inside it.
+
 **SPEC.** `Configuring → Serving → Draining → Stopped`, plus `→ Failed`, as
 **data, not booleans** — the failure this prevents is `stopping`, `draining`
 and `failed` as flags admitting combinations no reviewer can enumerate. Same
@@ -233,6 +245,12 @@ travel to WP44: admission stop, close-after-send, an absolute deadline, and
 cleanup that runs exactly once. **Rollback: HIGH** — a spec ships nothing.
 
 ### WP40 — Capacity and overload ledger (RG-P4-B)
+
+**DONE, 2026-07-20 — `planning/phase-4-spec.md` §2.** Nine rows (R-1…R-9), each
+answering all five questions, with the fifth column — **reserved for stop** —
+parsed by the gate rather than eyeballed, because that is the cell that gets
+filled with "n/a" under time pressure. The reservation rule is an inequality on
+purpose: **admission is refused at or below the reservation, never at zero.**
 
 **SPEC.** One row per resource — connections, accept queue, ingress, response
 buffers, timers — each stating capacity, behaviour when full, the diagnostic,
