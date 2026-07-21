@@ -305,6 +305,29 @@ missed mutation has not earned its complexity. **Rollback: HIGH** (tests only).
 
 ### WP42 — Concurrency model (ADR-030)
 
+**DONE, 2026-07-21 — `planning/phase-4-concurrency.md`,
+`experiments/12-concurrency-arms/`, ADR-030 ACCEPTED. Decision:
+SINGLE-THREADED**, with the burden of proof left on threading and the reopening
+conditions written down.
+
+**The timing did not decide and the pre-registered rule said what to do about
+that.** Threaded finished ~31% sooner (1,288 ms vs 1,861 ms, both 400/400), and
+31% sits far inside FINDING-A's 138% noise floor. Inconclusive means
+single-threaded — a rule fixed before the prototype ran, precisely because at
+this moment the temptation is to read a wide noise band as a mild preference.
+
+**What decided it was correctness.** `thread_count > 1` is a ONE-LINE change in
+the adapter, and it silently falsifies three shipped guarantees: the
+non-atomic request-ID counter (whose own comment says so), the lazily-built miss
+chain (a check-then-act into an append-only pool — a WRONG CHAIN, not a wrong
+label), and the shared `dispatched`/`web.state` writes. Four amendments to
+shipped guarantees in exchange for a speed-up this machine cannot measure.
+
+**Recorded honestly: a collision was NOT observed**, and an apparent finding —
+141 of 300 empty responses under threading — **evaporated against its control**,
+which produced 133 of 300 single-threaded. The empties were the probe's own
+shell redirection. That control is the only reason it did not ship as a defect.
+
 **PROTOTYPE + ADR.** See §2b — the procedure is the deliverable, plus the
 decision it produces. Resolves the direction of audit A-4 (package-level
 transport globals) jointly with WP43. **Rollback: decays fast** — this is why
