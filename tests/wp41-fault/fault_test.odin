@@ -517,6 +517,10 @@ wp41_fault_laboratory :: proc(t: ^testing.T) {
 	// WP44 — stop and drain. Same one-listener rule.
 	phase_stop_is_idempotent_and_stops_admission(t)
 	phase_a_clean_stop_completes_promptly(t)
+
+	// WP45 — connection lifetime.
+	phase_keep_alive_serves_two_requests_on_one_connection(t)
+	phase_a_rejection_is_delivered_before_the_close(t)
 }
 
 // ---------------------------------------------------------------------------
@@ -918,5 +922,112 @@ phase_a_clean_stop_completes_promptly :: proc(t: ^testing.T) {
 		elapsed < 3 * time.Second,
 		"a stop with no connection left in flight must complete promptly; took %v",
 		elapsed,
+	)
+}
+
+// ---------------------------------------------------------------------------
+// 9. WP45 — CONNECTION LIFETIME.
+//
+// C-3 binds this three times: 400-and-close on framing errors, drain-or-close
+// after every early rejection, and the staged close of §9.6 — *a 400 the client
+// never receives is a real failure mode*.
+//
+// **The WP9 corpus already proves the first.** Every one of its cases asserts
+// that a malformed request RETIRES the connection and that trailing bytes never
+// execute as a second request. What no suite proved is the opposite half:
+//
+//	that a GOOD request PRESERVES the connection.
+//
+// A server that closed after every single response would pass the entire
+// existing suite while making keep-alive a lie, and nothing would have noticed.
+// That gap is what these phases close.
+// ---------------------------------------------------------------------------
+
+KEEPALIVE_PORTS :: [?]int{59171, 59613}
+
+// KEEP-ALIVE IS REAL: two requests, one connection.
+//
+// Sent as two separate writes rather than pipelined, because pipelining asks a
+// different question (does the server queue?) and answering both in one test
+// would leave neither answered.
+phase_keep_alive_serves_two_requests_on_one_connection :: proc(t: ^testing.T) {
+	server: Server
+	ports := KEEPALIVE_PORTS
+	if !start_configured_server(&server, ports[:], 0, false) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+	defer stop_server(&server)
+
+	l: lab.Lab
+	lab.lab_init(&l, LAB_SEED, 2 * time.Second)
+
+	sock, ok := lab.dial(server.port, l.patience)
+	testing.expect(t, ok, "the lab must be able to connect")
+	if !ok {
+		return
+	}
+	defer net.close(sock)
+
+	lab.send_fragmented(sock, lab.GET_PING_KEEPALIVE, 1, 0)
+	first, first_status := lab.read_status(&l, sock)
+	testing.expect_value(t, first, lab.Outcome.Responded)
+	testing.expect_value(t, first_status, 200)
+
+	// THE ASSERTION THIS PHASE EXISTS FOR. If the server retired the connection
+	// after the first response, this write either fails or is never answered.
+	lab.send_fragmented(sock, lab.GET_PING_KEEPALIVE, 1, 0)
+	second, second_status := lab.read_status_again(&l, sock)
+
+	testing.expectf(
+		t,
+		second == .Responded && second_status == 200,
+		"a second request on the same connection must be answered; got %v/%d. Without this, a server that closed after every response would pass the entire existing suite while making keep-alive a lie.",
+		second,
+		second_status,
+	)
+}
+
+// THE STAGED CLOSE: a rejection must ARRIVE before the connection goes.
+//
+// C-3 §9.6's point, and it is easy to get backwards: a server that detects a
+// framing error and closes immediately is *safe* — no smuggling — and *unusable*,
+// because the client sees a reset rather than a 400 and cannot tell a bad
+// request from a network fault. The WP9 corpus asserts the connection is
+// retired; it does not assert the response was delivered first.
+phase_a_rejection_is_delivered_before_the_close :: proc(t: ^testing.T) {
+	server: Server
+	ports := KEEPALIVE_PORTS
+	if !start_configured_server(&server, ports[:], 0, false) {
+		testing.expect(t, false, "no candidate port produced a working server")
+		return
+	}
+	defer stop_server(&server)
+
+	l: lab.Lab
+	lab.lab_init(&l, LAB_SEED, 2 * time.Second)
+
+	sock, ok := lab.dial(server.port, l.patience)
+	testing.expect(t, ok, "the lab must be able to connect")
+	if !ok {
+		return
+	}
+	defer net.close(sock)
+
+	// Two Content-Length headers: rejected by WP9's patch 4.
+	lab.send_fragmented(sock, lab.BAD_DOUBLE_LENGTH, 1, 0)
+	outcome, status := lab.read_status(&l, sock)
+
+	testing.expectf(
+		t,
+		outcome == .Responded,
+		"a rejected request must still RECEIVE its response before the connection closes; got %v. A 400 the client never sees is indistinguishable from a network fault.",
+		outcome,
+	)
+	testing.expectf(
+		t,
+		status >= 400 && status < 500,
+		"the delivered rejection must be a 4xx; got %d",
+		status,
 	)
 }

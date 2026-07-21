@@ -415,6 +415,36 @@ struct, because every symbol is a promise.
 
 ### WP45 — Connection lifetime: keep-alive, drain-or-close, staged close
 
+**DONE, 2026-07-21 — URUQUIM PATCH 7, two new phases in `tests/wp41-fault`.
+Zero public symbols.**
+
+**IT FOUND THAT KEEP-ALIVE WAS BROKEN FOR EVERY GET**, which is most traffic.
+
+The gap that hid it is worth stating, because it is a shape rather than an
+oversight: **the WP9 corpus proves that a BAD request retires a connection, and
+nothing proved that a GOOD one preserves it.** A server that closed after every
+single response would have passed the entire existing suite. The two phases
+added here close that: two requests on one connection must both be answered,
+and a rejected request must still RECEIVE its 4xx before the connection goes.
+
+**The cause was an upstream defect, one line.** `_body_length` sets
+`_body_ok = false` at entry — the flag `response_must_close` reads as "the body
+read failed" — and a request with **no** `Content-Length` returned through the
+SUCCESS path without correcting it. So every GET looked like a failed body read
+and had its connection retired. **No `Connection: close` was advertised**, so a
+client had no way to know it was paying a TCP handshake per request while
+HTTP/1.1 promised persistence. Measured before the patch: request one answered,
+request two met an orderly close. After: three sequential requests, three 200s.
+
+**This is the fourth upstream bug among seven carried patches**, and the
+plainest — it has nothing to do with Uruquim's policies and breaks persistent
+connections for anyone building on that server. Offered upstream under WP51.
+
+**FOR ADR-033, which WP44 reopened:** this patch is one line in one procedure.
+It is the most contained of the three so far, and it does not move the boundary
+WP44 located — a body-flag fix is not the operation lifecycle of the event loop.
+The evidence still reads: contained at the edges, uncontained at the loop.
+
 **IMPLEMENTATION.** C-3 binds it three times over: 400-and-close on framing
 errors, drain-or-close after every early rejection (§9.3 — leftover bytes are
 the next request smuggled), and the staged close of §9.6, because a 400 the

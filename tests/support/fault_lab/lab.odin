@@ -211,6 +211,20 @@ trails_equal :: proc(a: ^Lab, b: ^Lab) -> bool {
 // than to the request.
 GET_PING :: "GET /ping HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
 
+// GET_PING_KEEPALIVE is the same request WITHOUT `Connection: close`, so the
+// server is expected to keep the connection for a second request.
+//
+// WP45 needs it because every existing corpus case sends `close`: the suites
+// prove that a BAD request retires a connection, and nothing proved that a GOOD
+// one preserves it. A server that closed after every response would pass the
+// entire existing suite while making keep-alive a lie.
+GET_PING_KEEPALIVE :: "GET /ping HTTP/1.1\r\nHost: localhost\r\n\r\n"
+
+// A deliberately malformed request: two `Content-Length` headers. WP9's patch 4
+// rejects it, and WP45 asks the question WP9 did not — whether the client
+// actually RECEIVES the rejection before the connection goes away.
+BAD_DOUBLE_LENGTH :: "POST /ping HTTP/1.1\r\nHost: localhost\r\nContent-Length: 2\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi"
+
 // dial connects, or reports that it could not. The lab treats a refused
 // connection as an OUTCOME rather than an error, because during
 // `Shutdown_Mid_Request` a refusal is the correct behaviour.
@@ -309,6 +323,52 @@ is_timeout :: proc(err: net.Network_Error) -> bool {
 		strings.contains(text, "WOULD_BLOCK") ||
 		strings.contains(text, "EAGAIN") ||
 		strings.contains(text, "Again")
+}
+
+// read_status_again reads a SECOND response from the same socket.
+//
+// It exists because `read_status` stops at the first CRLF, which leaves the
+// rest of the first response in the socket buffer. For a keep-alive test the
+// question is whether a second request is answered at all, so this drains
+// whatever is pending and then reads until it sees another status line.
+read_status_again :: proc(l: ^Lab, sock: net.TCP_Socket) -> (outcome: Outcome, status: int) {
+	buf: [1024]u8
+	total := 0
+	deadline := time.now()
+
+	for time.duration_milliseconds(time.since(deadline)) < time.duration_milliseconds(l.patience) {
+		n, err := net.recv_tcp(sock, buf[total:])
+		if err != nil {
+			if is_timeout(err) {
+				break
+			}
+			return .Closed_Without_Response if total == 0 else .Responded, parse_status(string(buf[:total]))
+		}
+		if n == 0 {
+			break
+		}
+		total += n
+		if total >= len(buf) {
+			break
+		}
+	}
+
+	if total == 0 {
+		return .Held_Open_Until_Lab_Gave_Up, 0
+	}
+	// The buffer holds the tail of the first response and all of the second.
+	// The LAST status line in it is the one this call is about.
+	text := string(buf[:total])
+	last := -1
+	for i := 0; i + 8 < len(text); i += 1 {
+		if text[i:i + 5] == "HTTP/" {
+			last = i
+		}
+	}
+	if last < 0 {
+		return .Responded, 0
+	}
+	return .Responded, parse_status(text[last:])
 }
 
 // parse_status reads the three digits of `HTTP/1.1 NNN`. It returns 0 for

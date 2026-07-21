@@ -43,8 +43,8 @@ grep -qF '112c49b' "$URUQUIM_POLICY" ||
 # Five patches ship. The policy's disposition table and the vendor record must
 # agree on the count, or one of them has drifted and nobody can tell which.
 URUQUIM_POLICY_ROWS="$(grep -cE '^\| [0-9]+ \| .* \| .* \| \*\*(OFFER UPSTREAM|CARRY|APPEARS FIXED UPSTREAM)' "$URUQUIM_POLICY" || true)"
-test "$URUQUIM_POLICY_ROWS" -eq 6 ||
-  fail "the vendor policy lists $URUQUIM_POLICY_ROWS patch dispositions, not the 6 patches that ship. A patch with no recorded disposition is one nobody knows whether to re-apply."
+test "$URUQUIM_POLICY_ROWS" -eq 7 ||
+  fail "the vendor policy lists $URUQUIM_POLICY_ROWS patch dispositions, not the 7 patches that ship. A patch with no recorded disposition is one nobody knows whether to re-apply."
 
 URUQUIM_PATCH_MARKS="$(grep -rc 'URUQUIM PATCH' "$URUQUIM_ROOT"/vendor/odin-http/*.odin 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
 test "$URUQUIM_PATCH_MARKS" -gt 0 ||
