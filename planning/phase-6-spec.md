@@ -337,6 +337,30 @@ on the Hello World user.
 
 ---
 
+## Amendment 1 — WP67 separates decoding from schema validation
+
+**Recorded 2026-07-21, before WP68 implementation.** The pinned stdlib anatomy
+in `experiments/14-json-failure-anatomy/` established:
+
+- type mismatch reports a token and destination type, but no field path;
+- unknown fields are deliberately skipped;
+- `required` and validation tags have no decoder semantics;
+- allocator refusal can return `err=nil` with zero values directly, while the
+  current `web.body` path can misclassify valid bytes as `invalid_json`.
+
+Therefore WP68 owns malformed JSON, wrong type/path, unknown-field refusal and
+internal decoder/allocation failure. The `missing_field` and declared-rule
+rows in §5.1 remain phase requirements but are implemented by WP81 after it
+chooses the explicit schema/optionality representation. Their RED tests are
+committed separately under `tests/wp67-json-boundary/schema/`.
+
+The probe tags `json:"name,required"` and `validate:"..."` are test stimuli,
+not accepted syntax. WP68 may not make them canonical merely to turn the whole
+WP67 directory green. This amendment changes ownership/order, not the required
+wire taxonomy.
+
+---
+
 ## 10. Rollback
 
 WP66 is documentation and an executable document gate only. **Rollback: HIGH.**

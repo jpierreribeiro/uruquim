@@ -468,6 +468,13 @@ enough structured information. If it does not, compare a `json.Value`-based
 preflight with a thin bounded decoder; do not fork a complete JSON parser by
 default.
 
+**WP67 evidence amendment.** The stdlib exposes no field stack, skips unknown
+fields, has no required/validation vocabulary and can silently lose allocation
+failure. WP68 therefore makes the decoder suite green for malformed/type/path,
+unknown and internal failure. The separately committed required/range suite
+stays RED-under-control until WP81 chooses schema and optionality; probe tags
+are not an API decision.
+
 The common API remains small. A mode flag is not added for every decoder
 choice. Strict decoding is canonical; a permissive alternative exists only if
 a real compatibility case and all eight G-09 evidences justify it.
