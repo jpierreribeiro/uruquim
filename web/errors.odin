@@ -923,3 +923,33 @@ cors_poison :: proc(a: ^App, message: string, loc := #caller_location) {
 	}
 	logger.procedure(logger.data, .Error, message, logger.options, loc)
 }
+
+// WP61 — the two static-mount members of the fail-closed family.
+@(private)
+FRAMEWORK_MESSAGE_STATIC_AFTER_DISPATCH ::
+	"uruquim: web.static was called after the application had already " +
+	"dispatched a request; a mount owns a path prefix, so adding one while " +
+	"serving would change what a path means between two requests. Mount every " +
+	"directory before the first request. This application is rejected " +
+	"fail-closed: every request will answer 500 and web.serve will refuse to " +
+	"start."
+
+@(private)
+FRAMEWORK_MESSAGE_STATIC_INVALID ::
+	"uruquim: web.static was given a prefix that is not absolute, a prefix " +
+	"ending in a slash, an empty directory, a negative max_file_size, or more " +
+	"mounts than the framework stores. A mount that silently does not work is " +
+	"a 404 nobody traces back to a typo, and one that silently works on the " +
+	"wrong directory is worse. This application is rejected fail-closed: " +
+	"every request will answer 500 and web.serve will refuse to start."
+
+@(private)
+static_poison :: proc(a: ^App, message: string, loc := #caller_location) {
+	a.private.poisoned = true
+
+	logger := context.logger
+	if logger.procedure == nil {
+		return
+	}
+	logger.procedure(logger.data, .Error, message, logger.options, loc)
+}

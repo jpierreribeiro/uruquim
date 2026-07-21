@@ -436,3 +436,14 @@ cors_app :: proc() -> web.App {
 	web.get(&app, "/ping", ping)
 	return app
 }
+
+// fragment: phase5/static
+// WP61. A mount owns its prefix; everything under it is answered from the
+// directory or answered 404. The rejections — traversal, percent encoding,
+// dotfiles, symlinks — are the feature.
+static_app :: proc() -> web.App {
+	app := web.app()
+	web.static(&app, "/assets", "public/assets", web.Static_Options{index = "index.html"})
+	web.get(&app, "/ping", ping)
+	return app
+}

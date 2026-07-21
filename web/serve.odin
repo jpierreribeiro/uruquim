@@ -170,6 +170,14 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 		return
 	}
 
+	// WP61: a static mount OWNS its prefix. Checked before the router so the
+	// answer to "why is my route shadowed" never depends on whether a file
+	// happens to exist.
+	if a.private.static_serve != nil && a.private.static_serve(ctx, &a.private.static) {
+		driver_finalize(ctx)
+		return
+	}
+
 	dispatch(a, ctx)
 	driver_finalize(ctx)
 }

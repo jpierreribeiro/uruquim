@@ -38,6 +38,7 @@ application	proc	router :: proc() -> Router
 application	proc	secure_headers :: proc(ctx: ^Context)
 application	proc	serve :: proc(a: ^App, port: int)
 application	proc	state :: proc(ctx: ^Context, $T: typeid) -> ^T
+application	proc	static :: proc(a: ^App, prefix: string, dir: string, o: Static_Options = {...})
 application	proc	stop :: proc(a: ^App)
 application	proc	text :: proc(ctx: ^Context, status: Status, s: string)
 application	proc	trust_proxies :: proc(a: ^App, prefixes: []string)
@@ -54,6 +55,7 @@ application	type	Limits :: struct {max_body: int, max_request_line: int, max_hea
 application	type	Method :: enum u8 {UNKNOWN, GET, POST, PUT, PATCH, DELETE}
 application	type	Request :: struct {method: Method, path: string, query: string, headers: Header_View, body: []u8}
 application	type	Router :: struct {using app: App}
+application	type	Static_Options :: struct {max_file_size: int, index: string}
 application	type	Status :: enum int {OK = 200, Created = 201, Accepted = 202, No_Content = 204, Bad_Request = 400, Unauthorized = 401, Forbidden = 403, Not_Found = 404, Method_Not_Allowed = 405, Internal_Server_Error = 500}
 test-support	proc	test_request :: proc(a: ^App, method: Method, path: string, body: string = "", query: string = "", headers: []string = nil) -> Recorded_Response
 test-support	type	Recorded_Response :: struct {status: Status, body: string, headers: []string}
