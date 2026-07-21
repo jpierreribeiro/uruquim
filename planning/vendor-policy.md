@@ -1,0 +1,149 @@
+# Vendor maintenance policy (WP51)
+
+**Status: ACCEPTED 2026-07-21 under the ADR-029 delegation.** Audit items A-9
+and A-10.
+
+**This package moved ahead of WP46 deliberately.** ADR-031 makes WP46 the
+package that patches the vendored connection read, and **a patch that predates
+the policy governing patches is how a fork starts.** So the rules come first,
+and WP46 is the first work package held to them.
+
+---
+
+## 1. What is vendored, and the standing risk
+
+`vendor/odin-http/` is a snapshot of the root server package of
+`laytan/odin-http` at commit `112c49b` (2026-04-11), vendored 2026-07-19, MIT.
+Five local patches, all security-motivated, all marked `URUQUIM PATCH` at their
+site and all covered by a raw-wire corpus case that failed before the patch.
+
+**The standing risk is stated by the dependency itself.** Its README:
+
+> *"This is beta software, confirmed to work in my own use cases but can
+> certainly contain edge cases and bugs."*
+>
+> *"I do not hesitate to push API changes at the moment, so beware."*
+
+419 stars, 17 open issues, 8 open pull requests, one principal maintainer
+(checked 2026-07-20). That is not a criticism of the project — it is an
+accurate description of what a pin against it means, and it is why ADR-033
+treats the foundation as an open question rather than a settled dependency.
+
+---
+
+## 2. Upstream first, and what checking actually found
+
+**Rule: every patch is offered upstream unless there is a recorded reason not
+to.** Code we do not own is code we do not maintain, and a patch carried
+forever is a fork with extra steps.
+
+**But the plan may never depend on an upstream merge landing.** One maintainer's
+queue is not a schedule, and re-vendoring across an API its author says moves is
+work regardless of who wrote the fix.
+
+### 2.1 The five patches, each with its upstream disposition
+
+| # | Patch | Is it upstream's bug? | Disposition |
+|---|---|---|---|
+| 1 | `Content-Length` must be all ASCII digits; `-1` and `2, 2` rejected | **Yes** — a remote DoS. `strconv.parse_int` accepts `-1`, which then trips a `n >= 0` assertion and **kills the process** | **OFFER UPSTREAM.** See §2.2 — checked, and it appears still present on `main` |
+| 2 | A chunk not terminated by CRLF is rejected instead of asserted | **Yes** — a remote DoS, `assert` on malformed input | **APPEARS FIXED UPSTREAM** — see §2.2 |
+| 3 | `Content-Length` + `Transfer-Encoding` rejected, not repaired | **No** — a policy difference. RFC 9112 §6.1 permits refusal; upstream chose repair | **CARRY.** Uruquim's WP9 D2 is stricter on purpose |
+| 4 | Any repeated `Content-Length` rejected, even if identical | **No** — same class as 3 | **CARRY** |
+| 5 | Unknown method becomes `.Unknown` with `method_raw` preserved, no 501 | **No** — a framework-ownership decision (WP9 D7) | **CARRY** |
+
+**Two of five are upstream bugs; three are deliberate divergences.** That ratio
+is the useful number: a snapshot whose patches were all policy would be cheap to
+re-vendor, and one whose patches were all bug fixes would argue for upstreaming
+everything. This is neither.
+
+### 2.2 The upstream check, run 2026-07-21
+
+Read against `laytan/odin-http` `main` — **which is ahead of the pinned commit**,
+so this describes where upstream is going rather than what is vendored here:
+
+* **Patch 2's bug appears FIXED upstream.** The chunked path now reports through
+  its error callback (`s.cb(s.user_data, "", err)`) rather than asserting. So
+  the patch is likely to become unnecessary at the next re-vendor.
+* **Patch 1's bug appears STILL PRESENT.** `_body_length` still uses
+  `strconv.parse_int` and validates only the boolean result; the subsequent
+  guard is `if max_length > -1 && ilen > max_length`, which a negative `ilen`
+  passes. **This one is worth reporting upstream**, because it is a remote
+  process kill in a general-purpose HTTP server and not a Uruquim-specific
+  concern.
+
+**Recorded as a reading, not as a merge.** It was done from the published source
+at a moment in time, and §4's re-check obligation exists because that is all it
+is.
+
+---
+
+## 3. Patches are proven by CORPUS, never by grep over vendored source
+
+**The rule, and it is already how the gate works.** WP16 retired the code-shape
+greps that asserted patch TEXT and replaced them with executable corpus cases,
+for a reason that generalises:
+
+> **A correct re-application of a patch, written differently, must still pass.**
+
+A grep for the patched line fails when someone re-applies the same fix with a
+different variable name — which punishes the correct action. Worse, it passes
+when someone preserves the line and breaks the behaviour around it.
+
+So:
+
+* **`tests/support/transport_conformance/corpus.odin` is the evidence.** Each of
+  the five patches has a named case that FAILED before the patch existed.
+* **The gate asserts COVERAGE, not text**: the corpus must keep carrying a case
+  for each patch. Deleting a case is caught statically; reverting a patch is
+  caught by the corpus run.
+* **A new patch ships with its corpus case in the same change.** A patch whose
+  necessity is not demonstrated by a failing case is an opportunistic edit, and
+  §5 forbids those.
+
+---
+
+## 4. Who watches upstream, and how often
+
+**The obligation is on the phase gate, not on a person's memory.** Naming a
+human here would be inventing a maintainer this project does not have.
+
+* **At every phase freeze**, the vendored provenance is re-checked: is the
+  pinned commit still the intended one, have any carried patches been fixed
+  upstream, and has the upstream API moved in a way that would make re-vendoring
+  expensive? The answers are recorded in the freeze document.
+* **A carried patch that upstream has fixed is DROPPED at the next re-vendor**,
+  and its corpus case stays — the case proves the behaviour, whoever implements
+  it. Patch 2 is the first candidate.
+* **Between freezes there is no watch, and this policy says so** rather than
+  implying a vigilance nobody is performing. A dependency pinned by commit does
+  not change under you; the risk of not watching is staleness, not surprise, and
+  staleness is what the freeze check is for.
+
+---
+
+## 5. The rules a patch must satisfy
+
+1. **Security-motivated or ownership-motivated only.** No opportunistic edits,
+   no style, no "while I was in there".
+2. **Marked at its site** with `URUQUIM PATCH` and the decision it implements.
+3. **Covered by a corpus case in the same change**, which failed before it.
+4. **Listed in `vendor/odin-http/VENDOR.md`** with its conceptual change and
+   its reason.
+5. **Minimal.** The smallest edit that produces the behaviour, because every
+   line diverged is a line to re-apply at the next re-vendor.
+6. **Offered upstream, or recorded as a deliberate divergence.** §2.1's table
+   gains a row.
+
+**A patch that cannot satisfy 3 is not a patch, it is a preference.**
+
+---
+
+## 6. What this policy does NOT do
+
+* **It does not decide whether to keep the dependency.** That is ADR-033, open,
+  decided at WP41's evidence plus WP46's containment result. This policy governs
+  patches whichever way that goes — and if Uruquim ever owns the connection
+  layer, §3's corpus rule is exactly what makes the second adapter provable.
+* **It does not promise upstream contribution.** §2 offers; it cannot merge.
+* **It does not schedule a re-vendor.** A pin is a decision, and moving it is a
+  work package with a gate run behind it, not maintenance.
