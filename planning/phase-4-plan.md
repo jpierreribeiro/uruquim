@@ -437,6 +437,34 @@ inverted the hierarchy. **Rollback: MEDIUM.**
 
 ### WP51 — Vendor maintenance policy
 
+**DONE, 2026-07-21 — `planning/vendor-policy.md`,
+`build/check_vendor_policy.sh`.** Three negative controls run.
+
+**Checking upstream, rather than assuming it, produced the useful finding.**
+Of the five carried patches, **two fix upstream's own bugs and three are
+deliberate divergences** — and that ratio is what makes a re-vendor predictable.
+Read against upstream `main` on 2026-07-21:
+
+* **Patch 2's bug appears ALREADY FIXED upstream** — the chunked path now
+  reports through its error callback instead of asserting. The patch is likely
+  to become unnecessary at the next re-vendor, and its corpus case stays
+  regardless, because the case proves the behaviour whoever implements it.
+* **Patch 1's bug appears STILL PRESENT** — `_body_length` still parses
+  `Content-Length` with `strconv.parse_int` and guards only with
+  `max_length > -1 && ilen > max_length`, which a negative value passes. That is
+  a remote process kill in a general-purpose HTTP server, not a Uruquim-specific
+  concern, and it is the one worth reporting upstream.
+
+**The evidence rule is the load-bearing part**, and the gate protects it because
+it is the one most likely to be "improved" back into a grep: patches are proven
+by CORPUS, never by grep over vendored text, because **a correct re-application
+written differently must still pass.**
+
+**The watch obligation sits on the phase freeze, and the policy admits that
+nothing watches between freezes** rather than implying a vigilance nobody
+performs. A commit pin does not change under you; the risk is staleness, not
+surprise.
+
 **SPEC. MOVED BEFORE WP46 (§2c), because ADR-031 makes WP46 a patching
 package** and a patch that predates the policy governing patches is how a fork
 starts. This package's output is therefore a precondition, not a retrospective.
