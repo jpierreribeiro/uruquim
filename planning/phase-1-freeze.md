@@ -1505,3 +1505,44 @@ explaining. Now `sed -n ... p`.
 |---|---|---|---|---|---|---|
 | `secure_headers` | A | WP49 | `tests/wp49-public-surface/contract_test.odin::wp49_the_signature_is_pinned` | `tests/wp49-public-surface/contract_test.odin::wp49_the_headers_are_on_a_404` | `docs/ai-context.md::web.secure_headers` | a `Handler` value; sets one boolean; every name and value is a compile-time constant, so nothing is allocated and nothing torn down |
 | `Recorded_Response.headers` | T | WP49 | `build/phase1-public-signatures.txt` (the changed row) | `tests/wp49-public-surface/contract_test.odin::wp49_recorded_response_exposes_header_lines` | `docs/ai-context.md::Recorded_Response` | owned by the recorder, valid until the next `test_request` on that App — the same lifetime `body` already has |
+
+## Amendment 18 — WP50: `refused_connections`
+
+**Date: 2026-07-21. Authority: the ADR-029 delegation, over the WP50 redaction
+policy (`planning/phase-4-spec.md` §3).**
+**Ledger effect: application 54 → 55.** 55 application + 2 test-support = 57.
+One added line.
+
+```
+application	proc	refused_connections :: proc() -> int
+```
+
+**IT EXISTS BECAUSE THE POLICY DEMANDS IT, not because a counter felt useful.**
+§3.5: *any component that can discard records must count what it discarded and
+expose the count, because a metric that silently stops being emitted is worse
+than no metric — it reads as "nothing happened".*
+
+WP47 gave the framework the ability to refuse a connection. That is a discard,
+and until this symbol existed it was an **invisible** one: a server under
+admission pressure looked, from outside, exactly like a server nobody was
+talking to.
+
+**WHY A COUNT AND NOT A METRICS API.** A framework that exports a metrics
+abstraction has chosen a metrics vendor for its users, and the shape of that
+choice outlives the reasons for it. An integer an application reads and hands to
+whatever it already uses is the smallest thing that discharges the obligation.
+`web.observe` already covers framework FAILURES; this covers the one thing that
+is neither a failure nor a request.
+
+**Zero means two things and they are deliberately not distinguished** — no
+server running, and nothing refused. A caller that needs to tell them apart is
+asking whether a server is running, which WP44 decided this framework does not
+answer.
+
+**It carries no request-derived byte**, which is what places it inside §3.1's
+permitted set rather than at its edge. An integer cannot leak a path, a header
+or a body, and that property is what let this ship as observability at all.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `refused_connections` | A | WP50 | `tests/wp50-public-surface/contract_test.odin::wp50_the_signature_is_pinned` | `tests/wp50-public-surface/contract_test.odin::wp50_with_no_server_the_count_is_zero` | `docs/ai-context.md::web.refused_connections` | reads one integer from the running server through the named `g_server` exception; owns nothing, allocates nothing |

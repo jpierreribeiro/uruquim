@@ -122,6 +122,9 @@ Server :: struct {
 	handler:        Handler,
 
 	threads:        []Server_Thread,
+	// URUQUIM PATCH 8 (WP47/WP50) — connections refused for admission since this
+	// server started. Read by the adapter for the observable drop policy.
+	refused_total:  int,
 	// Once the server starts closing/shutdown this is set to true, all threads will check it
 	// and start their thread local shutdown procedure.
 	//
@@ -516,6 +519,11 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 		}
 		if len(td.conns) >= budget {
 			td.refused_connections += 1
+			// WP50 §3.5 — the DROP POLICY IS OBSERVABLE. A component that can
+			// discard work must count what it discarded, because a metric that
+			// silently stops being emitted reads as "nothing happened".
+			s_total := &server.refused_total
+			s_total^ += 1
 			if td.refused_connections == 1 {
 				log.warnf(
 					"uruquim: admission limit reached (%i of %i slots, %i reserved for shutdown); refusing connections. This is logged ONCE per exhausted period, not per refusal.",

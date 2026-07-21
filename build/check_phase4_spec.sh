@@ -151,6 +151,38 @@ grep -qiE 'they do not bound a handler.s own allocations' <<<"$URUQUIM_FLAT" ||
   fail "the spec no longer disclaims what its rows do NOT bound. Server bounds are not framework bounds, and the gated word depends on that distinction holding."
 
 # ---------------------------------------------------------------------------
+# 6b. THE REDACTION POLICY (§3, WP50).
+#
+# The property this holds is not "no secrets" but "NO REQUEST-DERIVED BYTE",
+# and the difference is what makes it enforceable: a do-not-log LIST can be
+# incomplete and needs maintaining against attackers who read it too, while the
+# rule needs no list and fails closed.
+# ---------------------------------------------------------------------------
+grep -qiE 'no request-derived byte reaches a log line' <<<"$URUQUIM_FLAT" ||
+  fail "§3 no longer states the redaction rule in its strong form. 'Do not log secrets' needs a definition of secret and a list somebody maintains; 'nothing derived from the request' needs neither and fails closed."
+
+URUQUIM_PERMITTED="$(grep -cE '^\| (the|a|framework) .*\*\*.* \| .* \|$' "$URUQUIM_P4S" || true)"
+test "$URUQUIM_PERMITTED" -ge 7 ||
+  fail "the permitted-to-record table has $URUQUIM_PERMITTED rows, fewer than the 7 ratified. A row that vanishes is a field nobody can justify recording — or one nobody has to."
+
+grep -qiE 'never be recorded' <<<"$URUQUIM_FLAT" ||
+  fail "§3 no longer states what may NEVER be recorded. A permitted list without its complement reads as guidance."
+
+# The OWASP relationship, stated rather than implied. Without this sentence a
+# later reader adds an `is_password_like()` check that gives false comfort.
+grep -qiE 'recorded as motivation and the rule is what is enforced' <<<"$URUQUIM_FLAT" ||
+  fail "§3 no longer records that OWASP's do-not-log list is MOTIVATION and the strong rule is the MECHANISM. Enforcing the list instead of the rule would be weaker than what already ships."
+
+grep -qiE 'forges additional log records' <<<"$URUQUIM_FLAT" ||
+  fail "§3 lost the log-injection half: a CR or LF in a permitted field turns a reader's evidence into an attacker's writing surface"
+
+grep -qiE 'a metric that silently stops being emitted is worse than no metric' <<<"$URUQUIM_FLAT" ||
+  fail "§3.5 no longer requires the drop policy to be observable"
+grep -qiE 'may never apply backpressure to a request' <<<"$URUQUIM_FLAT" ||
+  fail "§3.5 no longer forbids a logger applying backpressure to the serving path. Observation exists to describe the system, never to become the reason it is slow."
+echo "phase-4 spec: the redaction rule is stated in its strong form; $URUQUIM_PERMITTED permitted fields, each with a reason"
+
+# ---------------------------------------------------------------------------
 # 7. Unfinished work has no place in a ratified spec.
 # ---------------------------------------------------------------------------
 if grep -nE '\b(TODO|FIXME|XXX|TBD)\b' "$URUQUIM_P4S"; then

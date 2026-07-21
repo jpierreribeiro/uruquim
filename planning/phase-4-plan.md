@@ -602,6 +602,32 @@ Phase 2 deferred (D-14.3) — resolve it in the spec half, not in passing.
 
 ### WP50 — Observability, with redaction as its spec half
 
+**DONE, 2026-07-21 — `planning/phase-4-spec.md` §3 (the policy),
+`web/observability.odin` (+1 symbol, ledger 54 → 55), Amendment 18, three gate
+controls.** The spec half landed first, as the plan required.
+
+**THE POLICY IS STRONGER THAN THE ONE THE PLAN ASKED FOR, and the difference is
+what makes it enforceable.** The plan named OWASP's do-not-log list — tokens,
+session identifiers, passwords, connection strings, keys, PII, payment data.
+**Every item on it is already excluded by the rule that no REQUEST-DERIVED BYTE
+is recorded at all.** A list can be incomplete and needs maintaining against
+attackers who read it too; the rule needs no list and fails closed. So the list
+is recorded as MOTIVATION and the rule is the mechanism — stated explicitly, so
+a later reader does not add an `is_password_like()` check that gives false
+comfort.
+
+**MOST OF IT WAS ALREADY TRUE, and the spec says so rather than claiming new
+work.** `Framework_Event` admits no request-derived string but `route`;
+`web.route` is gate-asserted at every write; the logger escapes the pattern and
+derives its bound; `request_id` DISCARDS an invalid client value rather than
+sanitising it. **The property was preserved package by package before there was
+a policy naming it** — §3.5's standing rule is what stops that being luck from
+here on.
+
+**The implementation half is one integer**, and it exists because §3.5 demands
+it: WP47 could refuse a connection, and that discard was invisible. A server
+under admission pressure looked exactly like a server nobody was talking to.
+
 **SPEC + IMPLEMENTATION.** The redaction policy lands first: OWASP's
 do-not-log list made concrete (tokens, session identifiers, passwords,
 connection strings, keys, PII, payment data), CR/LF escaping against log

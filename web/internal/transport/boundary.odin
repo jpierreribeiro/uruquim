@@ -96,6 +96,19 @@ Config :: struct {
 	on_ready:         proc(user: rawptr),
 }
 
+// refused_connections reports how many connections this process refused for
+// admission since the server started, or 0 when no server is running.
+//
+// WP50 §3.5: the drop policy is OBSERVABLE. A component that can discard work
+// must count what it discarded — a metric that silently stops being emitted
+// reads as "nothing happened", which is worse than no metric.
+//
+// It is a plain integer and carries no request-derived byte, which is what puts
+// it inside §3.1's permitted set.
+refused_connections :: proc() -> int {
+	return _refused_connections()
+}
+
 // Serve_Error is the neutral outcome of a serve attempt.
 Serve_Error :: enum {
 	None,
