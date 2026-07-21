@@ -34,6 +34,7 @@ application	proc	route :: proc(ctx: ^Context) -> string
 application	proc	router :: proc() -> Router
 application	proc	serve :: proc(a: ^App, port: int)
 application	proc	state :: proc(ctx: ^Context, $T: typeid) -> ^T
+application	proc	stop :: proc(a: ^App)
 application	proc	text :: proc(ctx: ^Context, status: Status, s: string)
 application	proc	unauthorized :: proc(ctx: ^Context, message: string)
 application	proc	use :: proc(a: ^App, middleware: Handler)

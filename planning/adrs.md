@@ -1282,7 +1282,33 @@ none; the requirement it keeps is the one nobody disputes.
 
 ## ADR-033 — the transport foundation: keep it, patch it, or own it
 
-- **Status.** **CLOSED 2026-07-21 — KEEP AND PATCH (option A/B).** Decided by
+- **Status.** **REOPENED 2026-07-21, the same day it closed, by the trigger it
+  wrote for itself.** It closed on WP46's contained patch; **WP44's patch did
+  NOT stay contained**, which is the counter-evidence this ADR named in advance
+  as the condition for reopening. The closure is left below rather than deleted,
+  because an ADR edited to match its latest state teaches nothing about how it
+  got there.
+
+  **WP44's evidence, and it is the first pointing the other way.** Spec §1.3
+  obligation 3 requires an absolute drain deadline. Bounding the drain LOOP was
+  not sufficient: the `nbio.run()` that follows it waits on every pending
+  operation, and a connection a client holds open has one. Closing those
+  connections hard at the deadline did not help. **The measured result was a
+  drain that never terminated — worse than the unbounded wait it replaced** —
+  so the patch was withdrawn and obligation 3 is recorded as UNMET.
+
+  **What that means, stated carefully.** One contained patch and one
+  uncontained one is not a verdict; it is two data points, and the honest
+  reading is that the boundary runs somewhere between "a periodic sweep beside
+  an existing tick" and "the operation lifecycle of the event loop". The second
+  is where an owned connection layer would begin, and WP45's connection-lifetime
+  work is the next test of where the line actually falls.
+
+  **The interim is unchanged and is now load-bearing rather than cautious:**
+  behind a reverse proxy, under a supervisor. `web.stop` ships without a
+  deadline, and WP55 must say so in those words.
+
+  Previously: **CLOSED 2026-07-21 — KEEP AND PATCH (option A/B).** Decided by
   the criteria fixed in advance: WP41's fault laboratory, then WP46's
   containment result. The reasoning below is left as written, with the outcome
   appended, because an ADR that is edited to match its conclusion teaches

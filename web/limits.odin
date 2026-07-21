@@ -87,6 +87,7 @@ Limits :: struct {
 	// `time.Duration` is that package's type. The transport converts at the
 	// boundary, where a clock is already linked.
 	max_request_time: i64,
+
 }
 
 // DEFAULT_LIMITS is what every application gets without asking.
@@ -131,6 +132,8 @@ HEADER_BLOCK_LIMIT :: 8000
 // security fix rather than a tuning knob, and the capacity ledger records it.
 @(private)
 REQUEST_TIME_LIMIT :: i64(30 * 1_000_000_000)
+
+
 
 // LIMITS_MIN_BODY, LIMITS_MIN_TEXT are the floors validation enforces.
 //
