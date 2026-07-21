@@ -172,6 +172,42 @@ empty prefix, or more than eight, **rejects the application at boot** — an emp
 prefix would match every peer. The result is a request-scoped view: copy it to
 keep it.
 
+### Multipart forms
+
+```text
+Uploaded_File{field, filename, content_type, bytes}
+form_field(ctx, "title")  -> (string, bool)
+form_file(ctx, "avatar")  -> (Uploaded_File, bool)
+```
+
+Parsed from the body ALREADY IN MEMORY — there is no spool. `file.bytes` is a
+view over the request body and does not outlive the request; copy what you keep.
+`filename` and `content_type` are the client's claims, never checked and never
+used as a path: generate your own storage name.
+
+The readers and `web.body` share ONE single-use capability (ADR-012): whichever
+runs first takes it.
+
+**An upload larger than `max_body` (4 MiB default) is refused with 413 before
+your handler runs**, and no setting makes a 2 GB upload work — the body is held
+whole. Terminate large uploads at a proxy or object store and pass a reference.
+
+A malformed form yields nothing rather than a partial parse, because a missing
+field that looks like a blank one is a bug nobody attributes to the parser.
+
+<!-- fragment: phase5/multipart -->
+```odin
+upload_handler :: proc(ctx: ^web.Context) {
+	file, ok := web.form_file(ctx, "avatar")
+	if !ok {
+		web.bad_request(ctx, "avatar is required")
+		return
+	}
+	// file.bytes is a view over the request body: copy what you keep.
+	web.text(ctx, .OK, file.filename)
+}
+```
+
 ### Static files
 
 ```text
@@ -772,7 +808,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-59 application symbols.
+62 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

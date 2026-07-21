@@ -447,3 +447,15 @@ static_app :: proc() -> web.App {
 	web.get(&app, "/ping", ping)
 	return app
 }
+
+// fragment: phase5/multipart
+// WP63. The body is already in memory — there is no spool — so a part is a view
+// over it. Copy what you keep, and never use the client's filename as a path.
+upload_handler :: proc(ctx: ^web.Context) {
+	file, ok := web.form_file(ctx, "avatar")
+	if !ok {
+		web.bad_request(ctx, "avatar is required")
+		return
+	}
+	web.text(ctx, .OK, file.filename)
+}
