@@ -277,14 +277,14 @@ query_int_or :: proc(ctx: ^Context, name: string, default_value: int) -> (value:
 //  3. The 4 MiB cap is checked BEFORE the arena and BEFORE the parser. Exactly
 //     `BODY_LIMIT` bytes is allowed; a strictly larger body is 413
 //     `body_too_large`, again with no arena.
-//  4. Decoding runs in strict `.JSON` mode against the request-lifetime arena
-//     (ADR-006), so nested strings and slices are arena-owned and freed in one
-//     shot at request end. On failure:
-//       - a parse-level error (`Invalid_Data`) is the client's malformed JSON:
-//         400 `invalid_json`;
-//       - anything else — an incompatible destination, a nil/non-pointer dst —
-//         is a decoder fault, NOT shown to the client: it is logged through the
-//         typed report and answered with a 500.
+//  4. WP68 structurally preflights the standard parser's value against the
+//     destination type. Malformed/incomplete input is `invalid_json`; a value
+//     of the wrong type is `invalid_field` with a stable path; an undeclared
+//     key is `unknown_field`. Unsupported destination types and allocator
+//     failure remain private diagnostics answered as 500.
+//  5. The authoritative typed decode runs in strict `.JSON` mode against the
+//     request-lifetime arena (ADR-006), so nested strings and slices are
+//     arena-owned and freed in one shot at request end.
 //
 // After `body` returns false, the partial content of `dst` is UNDEFINED and
 // must be discarded. On success `dst` is fully populated and its nested data is
@@ -331,11 +331,34 @@ body :: proc(ctx: ^Context, dst: ^$T) -> bool {
 		return false
 	}
 
-	// 4. Decode into the request-lifetime arena, strict JSON.
+	// 4. Preflight with the stdlib grammar plus the bounded WP68 field-stack
+	// checker. It rejects unknown keys and classifies type errors without
+	// exposing Odin type names or decoder internals.
+	issue := body_json_preflight(raw, type_info_of(T))
+	switch issue.kind {
+	case .None:
+		// continue to the authoritative typed decoder below
+	case .Invalid_Json:
+		error_commit_static(ctx, .Bad_Request, ERROR_BODY_INVALID_JSON)
+		return false
+	case .Invalid_Field:
+		error_invalid_body_field(ctx, json_path_string(&issue.path))
+		return false
+	case .Unknown_Field:
+		error_unknown_body_field(ctx, json_path_string(&issue.path))
+		return false
+	case .Unsupported_Destination, .Internal:
+		framework_report(T, .Body_Decode_Failed)
+		error_commit_static(ctx, .Internal_Server_Error, ERROR_BODY_INTERNAL)
+		framework_observe_request(T, ctx, .Body_Decode_Failed)
+		return false
+	}
+
+	// 5. Decode into the request-lifetime arena, strict JSON.
 	request_arena_init(ctx)
 	err := encoding_json.unmarshal(raw, dst, .JSON, request_arena_allocator(ctx))
 	if err != nil {
-		if body_error_is_client_json(err) {
+		if !body_unmarshal_error_is_internal(err) {
 			error_commit_static(ctx, .Bad_Request, ERROR_BODY_INVALID_JSON)
 		} else {
 			// A decoder/destination fault. Log through the typed path while the
@@ -348,27 +371,4 @@ body :: proc(ctx: ^Context, dst: ^$T) -> bool {
 	}
 
 	return true
-}
-
-// body_error_is_client_json reports whether an unmarshal error is the CLIENT's
-// malformed JSON (→ 400) rather than a decoder/destination fault (→ 500).
-//
-// `unmarshal_any` validates the whole input with `is_valid` before parsing, so
-// every parse-level failure — empty, truncated, and the rejected JSON5 forms —
-// surfaces as `Unmarshal_Data_Error.Invalid_Data`. A bare `json.Error` would be
-// a parse error too. Everything else — `Unsupported_Type_Error`, a
-// nil/non-pointer destination — means the JSON was well-formed but the
-// destination could not receive it, which is not something the caller can fix
-// by sending different JSON and is therefore not reported as `invalid_json`.
-@(private)
-body_error_is_client_json :: proc(err: encoding_json.Unmarshal_Error) -> bool {
-	switch e in err {
-	case encoding_json.Error:
-		return true
-	case encoding_json.Unmarshal_Data_Error:
-		return e == .Invalid_Data
-	case encoding_json.Unsupported_Type_Error:
-		return false
-	}
-	return false
 }

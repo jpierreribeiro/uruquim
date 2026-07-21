@@ -367,3 +367,23 @@ WP66 is documentation and an executable document gate only. **Rollback: HIGH.**
 Later implementation WPs carry their own rollback grades. This spec does not
 authorize a release, tag, Tina dependency, published-history rewrite or any
 destructive database operation outside an explicitly disposable test database.
+
+---
+
+## Amendment 2 — WP68 keeps the stdlib grammar and owns the missing structure
+
+**Recorded 2026-07-21, after the WP67 RED corpus and before WP68 merge.** A
+`json.Value` preflight was chosen over a second parser. The standard tokenizer,
+string decoder and typed unmarshaller remain authoritative; a private bounded
+RTTI walk adds only the missing field stack and unknown-key refusal.
+
+The preflight uses a disposable arena destroyed before typed decoding. Client
+paths are copied into fixed request-local storage, capped without splitting
+UTF-8, and never contain raw values or Odin types. Multiple unknown keys select
+the lexicographically smallest key, so map iteration cannot change the wire
+result. A root mismatch uses `$`; nested objects use dot-separated names.
+
+The implementation also requires EOF after the root value. This closes a gap
+where the pinned parser could successfully return the first value while leaving
+trailing tokens unread. Requiredness and declared validation remain explicitly
+outside WP68 and RED-under-control until WP81.

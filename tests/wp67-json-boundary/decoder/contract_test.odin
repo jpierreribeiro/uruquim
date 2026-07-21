@@ -152,6 +152,33 @@ wp67_unknown_field_is_rejected_by_the_canonical_strict_path :: proc(t: ^testing.
 }
 
 @(test)
+wp68_nested_unknown_field_carries_its_full_path :: proc(t: ^testing.T) {
+	expect_error(
+		t,
+		"/input",
+		`{"address":{"extra":true}}`,
+		.Bad_Request,
+		"unknown_field",
+		"address.extra",
+	)
+}
+
+@(test)
+wp68_multiple_unknown_fields_choose_a_stable_result :: proc(t: ^testing.T) {
+	expect_error(t, "/input", `{"z":1,"a":2}`, .Bad_Request, "unknown_field", "a")
+}
+
+@(test)
+wp68_wrong_root_aggregate_uses_the_root_path :: proc(t: ^testing.T) {
+	expect_error(t, "/input", `[]`, .Bad_Request, "invalid_field", "$")
+}
+
+@(test)
+wp68_trailing_tokens_are_not_silently_ignored :: proc(t: ^testing.T) {
+	expect_error(t, "/input", `{"age":1} true`, .Bad_Request, "invalid_json")
+}
+
+@(test)
 wp67_unsupported_destination_remains_an_internal_error :: proc(t: ^testing.T) {
 	expect_error(
 		t,

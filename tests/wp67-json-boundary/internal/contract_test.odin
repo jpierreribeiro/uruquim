@@ -15,6 +15,11 @@ wp67_decoder_allocation_failure_must_not_return_success_with_zero_values :: proc
 	ctx: Context
 	defer request_arena_destroy(&ctx)
 	ctx.request.body = transmute([]u8)string(`{"name":"a\\nb","tags":["x","y"]}`)
+	// The 500 is the expected outcome under test; suppress its expected Error
+	// diagnostic so core:testing does not count the log record as a test error.
+	previous_logger := context.logger
+	defer context.logger = previous_logger
+	context.logger = {}
 
 	// The pinned stdlib currently returns err=nil and zeroes when allocations
 	// fail. The framework must detect or avoid that path; a successful bind with

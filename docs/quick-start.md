@@ -121,8 +121,9 @@ create_user :: proc(ctx: ^web.Context) {
 }
 ```
 
-Same shape again: if the body is missing, malformed, or larger than the fixed
-4 MiB limit, `web.body` has already answered and you return.
+Same shape again: if the body is missing, malformed, has a wrong field type,
+contains an undeclared key, or exceeds the body limit, `web.body` has already
+answered and you return.
 
 Call `web.body` **at most once per request**. The body is read once; a second
 call decodes nothing.
@@ -155,6 +156,8 @@ GET  /unknown-path        404   {"error":{"code":"not_found", ...}}
 DELETE /a-GET-only-path   405   + an Allow header listing the real methods
 GET  /users/abc           400   invalid_path_parameter
 POST with broken JSON     400   invalid_json
+POST with wrong type      400   invalid_field + field path
+POST with unknown key     400   unknown_field + field path
 POST with a huge body     413   body_too_large
 ```
 
