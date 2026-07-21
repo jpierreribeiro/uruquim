@@ -1622,3 +1622,81 @@ no deadline, no forced close. The vendored patches (9, 10, 11) are marked
 **deleted** when `core:net/http` lands in January 2027, not ported. Patch 10 is
 the exception worth offering upstream regardless: the use-after-free it fixes is
 upstream's, not this project's.
+
+---
+
+## Amendment 20 — WP60: `cors` and `Cors_Options`
+
+**Date: 2026-07-21. Authority: ADR-034 (owner amendment), recorded in
+`planning/phase-5-spec.md` §1 and `decisoes-do-dono.md`.**
+**Ledger effect: application 55 → 57.** 57 application + 2 test-support = 59.
+Two added lines.
+
+```
+application	proc	cors :: proc(a: ^App, o: Cors_Options)
+application	type	Cors_Options :: struct {origins: []string, methods: string, headers: string, credentials: bool, max_age: int}
+```
+
+**`cors` WAS A RESERVED NAME AND THIS IS THE PHASE IT WAS RESERVED FOR.** It sat
+in `check_public_api.sh`'s later-phase list from Phase 1 precisely so nothing
+could take it before a work package argued for it. It leaves that list here,
+which is the list doing its job rather than being overridden.
+
+**WHY IT IS CONFIGURATION AND NOT MIDDLEWARE**, which is the decision the shape
+turns on. Two reasons, both structural:
+
+1. **The headers must reach every response.** Including the automatic 404, the
+   405, an extractor's 400 and the driver's 500. WP22 measured that the driver
+   finalizes a missing response AFTER the chain has unwound, so a stamping
+   middleware misses exactly the responses a browser most needs to read — a
+   page whose error is invisible shows its user a blank screen. The
+   `secure_headers` precedent decided this once; this follows it.
+2. **A preflight must be answered without running a handler.** A middleware
+   cannot stop the chain, and this framework deliberately gives it no way to.
+
+**THE SAFETY RULES ARE ENFORCED AT REGISTRATION**, and that is the whole value
+of the symbol over a hand-written middleware. A CORS misconfiguration is not an
+error the server notices — it works perfectly and quietly shares one origin's
+authenticated data with another. So four configurations fail closed at boot:
+
+| Refused | Why it is not merely wrong |
+|---|---|
+| `*` with `credentials` | The classic hole. No browser honours it, so the application looks broken, and the obvious workaround — echo whatever `Origin` arrives — is a real vulnerability |
+| `*` beside named origins | Reads as "these, and also everyone", which is everyone |
+| `*` in `headers` with `credentials` | The Fetch standard does not let that wildcard cover `Authorization`, so it permits less than it appears to |
+| empty origin list | An allow-list that allows nothing is unfinished, not strict |
+
+**WHAT IT ECHOES.** A listed origin comes back as itself, never the literal `*`,
+always with `Vary: Origin` — echoing the wildcard would make every origin's
+response look identical to a shared cache. An UNLISTED origin gets the response
+with **no CORS header at all**: served, and unreadable by the page. Refusing
+outright would break every same-origin browser POST, which also carries an
+`Origin`, and would leak which origins are listed through the status difference.
+
+**`methods` and `headers` are comma-joined strings rather than slices**, which
+is a deliberate trade. They go on the wire verbatim, so taking them pre-joined
+means the framework never builds a string at request time and never needs a
+buffer to build it in. Slices would read better at the call site and would cost
+an allocation or a copy on every preflight.
+
+**Ownership: the strings are the CALLER's**, on the `trust_proxies` contract
+exactly — read on the request path, so they must outlive the App, and string
+literals are what every real call site passes. Only the LIST is copied, into a
+bounded inline array, so the App never holds a slice header whose backing the
+caller could resize.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `cors` | A | WP60 | `tests/wp60-public-surface/contract_test.odin::wp60_the_signatures_are_pinned` | `tests/wp60-public-surface/contract_test.odin` — twelve cases including the four fail-closed configurations; `tests/wp60-internal/wp60_internal_test.odin` — six preflight cases | `docs/ai-context.md::CORS`, fragment `phase5/cors` with a compiling fixture | stores a bounded inline config on the App; allocates nothing; the origin strings are the caller's |
+| `Cors_Options` | A | WP60 | `build/phase1-public-signatures.txt` (struct shape frozen field-by-field) | `tests/wp60-public-surface/contract_test.odin::wp60_the_signatures_are_pinned` constructs every field | `docs/ai-context.md::CORS` | a by-value policy; owns nothing; `origins` is a caller-owned slice read only at registration |
+
+**The preflight suite is INTERNAL, and that is the design working.** A preflight
+is an OPTIONS request; `test_request` takes a `Method`; `Method` has no OPTIONS
+member because HEAD and OPTIONS are resolved from the raw token before a
+`Method` value exists. A public-surface suite that COULD send a preflight would
+be evidence the frozen six-member enum had grown.
+
+**Rollback.** Removing `cors` removes the feature completely: `Cors_Config` is
+private, the request path reads a flag that is never set, and no other symbol
+references either name. The one shared edit is `RESPONSE_HEADER_MAX`, raised
+from 6 to 12 — a fixed array on the Context, no allocation either way.

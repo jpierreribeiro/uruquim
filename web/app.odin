@@ -96,6 +96,12 @@ App_Internal :: struct {
 	// the observer, the state and the limits.
 	trusted: Trusted_Proxies,
 
+	// WP60 — the cross-origin policy (ADR-034). Copied onto each request beside
+	// the limits and the trusted set. Bounded and inline: no allocation, no
+	// teardown, and the origin strings are the caller's on the `trust_proxies`
+	// contract.
+	cors: Cors_Config,
+
 	// WP37 — ADR-004 option A: the application's typed state, as an untyped
 	// pointer plus the `typeid` that makes it typed again at the boundary.
 	//

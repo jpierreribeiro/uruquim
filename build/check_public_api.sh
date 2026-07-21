@@ -78,6 +78,7 @@ URUQUIM_MACHINERY_MARKER='// uruquim:file test-machinery'
 # ---------------------------------------------------------------------------
 URUQUIM_EXPECTED_EXPORTS="App
 Context
+Cors_Options
 DEFAULT_LIMITS
 Framework_Error
 Framework_Event
@@ -95,6 +96,7 @@ bare
 bearer_token
 body
 client_ip
+cors
 created
 delete
 destroy
@@ -464,7 +466,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 55 symbols (32 Phase-1 + Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies + WP49 secure_headers + WP50 refused_connections)"
+echo "public API contract: application ledger is exactly 57 symbols (32 Phase-1 + Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies + WP49 secure_headers + WP50 refused_connections + WP60 cors/Cors_Options)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -531,14 +533,14 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 55; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 55 (32 Phase-1 + the Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies + WP49 secure_headers + WP50 refused_connections)"
+if test "$URUQUIM_APP_COUNT" -ne 57; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 57 (32 Phase-1 + the Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies + WP49 secure_headers + WP50 refused_connections + WP60 cors/Cors_Options)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 57; then
-  fail "exported union is $URUQUIM_UNION, not 57 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 59; then
+  fail "exported union is $URUQUIM_UNION, not 59 (the two ledgers must be disjoint)"
 fi
 echo "public API contract: test-support ledger is exactly 2; exported union is exactly 57"
 
@@ -582,14 +584,19 @@ echo "public API contract: web/testing bridge exports match the locked minimal s
 # `test_request` was removed from this list by WP3 (ratified test-support
 # symbol); `use`/`next` by WP17 and `router`/`mount` by WP18 (ratified
 # application symbols, spec §9.2 — pinned by the inventory above). `group`
-# stays FOREVER: ADR-024 rejects it in every phase. `Response` stays
+# `cors` LEFT THIS LIST on 2026-07-21. It was reserved here for a later phase,
+# and Phase 5 is that phase: ADR-034 moved CORS into the core, so the name is
+# now ratified rather than pending. A reserved name that ships is the list doing
+# its job — it kept the name from being taken by accident before a work package
+# had argued for it. `group` stays FOREVER: ADR-024 rejects it in every phase.
+# `Response` stays
 # forbidden; `Recorded_Response` is a different exact name and is allowed.
 # The application ledger scanned here excludes test_support.odin, so the two
 # ratified test-support names never reach this loop.
 # ---------------------------------------------------------------------------
 for URUQUIM_FUTURE in group \
   serve_with serve_transport app_init \
-  redirect conflict bytes recovery cors body_limit \
+  redirect conflict bytes recovery body_limit \
   Response Header Header_Pair Header_View_Internal Params Route_Info \
   Transport method_raw headers commit; do
   if grep -qx "$URUQUIM_FUTURE" <<<"$URUQUIM_ACTUAL_EXPORTS"; then
@@ -1414,7 +1421,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 55 + test-support ledger 2 = union 57"
+echo "public API contract: application ledger 57 + test-support ledger 2 = union 59"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"
