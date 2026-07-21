@@ -1140,3 +1140,80 @@ commands and outputs.
   silently. That asymmetry is the argument for shipping the smallest set of
   fields that the fault lab can actually demonstrate, exactly as WP36 sized its
   byte budgets.
+
+## ADR-032 — the ecosystem's relationship to the core, and when it may start
+
+- **Status.** **ACCEPTED** (2026-07-20, decided under the ADR-029 delegation).
+  Scope: the two questions PR #49 (`crystals-ecosystem-plan`, draft) leaves as
+  unmet entry conditions CE-E3 and CE-E4. It does **not** accept ADR-C001…C008,
+  which remain the ecosystem's own to settle.
+
+- **Context.** A draft proposes an optional-package ecosystem ("Crystals"):
+  fourteen documents, no code, every ADR PROPOSED. Its own bookkeeping records
+  three of four entry conditions unmet, all of them owner decisions rather than
+  engineering blockers. Two of the three are cheap to answer and cost nothing
+  to hold; leaving them open costs something real, because the documents were
+  written against a 44-symbol Phase-2 core and decay as the tree moves.
+
+- **Decision 1 — CE-E3 is ACCEPTED, and it is a rule about THIS repository.**
+  *No ecosystem work may add, widen or change a core symbol.* If an optional
+  package cannot be written against the frozen surface, the finding is written
+  down and the package waits; it does not become a reason to export something.
+  This is stated here, in the core's own ADR log, rather than in the
+  ecosystem's, because **it is a promise the core makes about itself** — the
+  ecosystem cannot bind the core, and a rule kept only in the dependent
+  repository is a rule the dependency can talk its way out of.
+
+  The reasoning is the one the draft states about itself and is worth adopting
+  verbatim: *"If the ecosystem cannot exist without the core bending, the
+  ecosystem was a way of smuggling features into a frozen framework, and the
+  honest response is to stop."* Three phases of anti-accretion gating exist
+  precisely so that sentence has teeth.
+
+- **Decision 2 — CE-E4: ecosystem work waits until after WP44.** Not until
+  Phase 4 freezes — after the **stop/shutdown** package specifically. Two
+  reasons, and the first is concrete rather than about priorities:
+
+  1. **The recommended first Crystal is a restart-on-save watcher, and the core
+     cannot shut down.** It would ship a tool whose central defect is a hole
+     WP44 is scheduled to close, and teach the ecosystem to route around it. A
+     first Crystal should test the idea, not the workaround.
+  2. **Phase 4 is what makes the framework usable; the ecosystem is what makes
+     it pleasant.** The mission's precedence — discipline, then joy, then
+     convenience — settles the order when both are wanted.
+
+- **Decision 3 — when it does start, the first Crystal is a Route Crystal, not
+  the watcher.** The draft recommends `dev/watch` on the grounds that its blast
+  radius on the core is structurally none. That is true and it is the reason to
+  choose something else: it *"proves nothing about the coupling contract,
+  because it never touches `uruquim:web` — half the idea would still be
+  untested, and the half with all the danger in it"* (the draft's own words). A
+  ~40-line `web/health` returning a detached `web.Router` tests the load-bearing
+  mechanism and simultaneously exercises the draft's own failure criterion —
+  whether a `CRYSTAL.md` for a forty-line middleware is longer than the
+  middleware.
+
+- **Two of the draft's blockers have already cleared, and this ADR records it
+  so nobody re-derives them.**
+  - **ADR-C006 depended on `web.state`** and could not be accepted before it.
+    **WP37 shipped it.** Services are application-owned and reached through
+    `web.state`; the per-Crystal registry stays rejected, since it would
+    recreate the extension bag G-03 forbids.
+  - **Open question Q-3 asked whether the detached-`Router` shape survives
+    Phase 3's wholesale router replacement.** **It did, and this is verified
+    rather than expected:** WP29 replaced the representation and WP30 added
+    conflict poisoning, both inside the index; `Router :: struct { using app:
+    App }` and `mount`'s copy semantics are byte-identical in the freeze
+    snapshot across the phase.
+
+- **What is NOT decided here.** Whether the ecosystem exists at all, its
+  categories, its distribution shape, and every ADR-C are the ecosystem's own
+  matters. This ADR fixes only the core's side: the core does not bend, and the
+  clock starts after WP44.
+
+- **Doc impact.** PR #49 stays a draft. `planning/roadmap.md` places the
+  ecosystem in Phase 5; Decision 2 is a narrowing of that placement, not an
+  exception to it.
+
+- **Reversibility. HIGH.** Nothing ships. Decision 1 is a refusal, which costs
+  nothing to hold and can only be loosened deliberately; Decision 2 is a date.
