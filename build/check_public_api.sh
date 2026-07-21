@@ -916,6 +916,41 @@ fi
 echo "public API contract: all $URUQUIM_APP_INTERNAL_LITERALS App constructors initialise Limits to DEFAULT_LIMITS"
 
 # ---------------------------------------------------------------------------
+# 8d. WP43 — THE ADAPTER'S PER-REQUEST STATE IS NOT A PACKAGE GLOBAL.
+#
+# `web.serve` used to write its `Config` into a package variable that the
+# backend handler read on every request. With one server per process that is
+# fine; with two it is a SILENT CROSS-WIRE — the second `serve` overwrites the
+# first's dispatch pointer and requests to one application run the other's.
+# Nothing diagnoses it, because from each server's own point of view nothing is
+# wrong. That is the worst shape a defect can have.
+#
+# WP43 moved the config into per-server state reached through the backend
+# handler's own `user_data`. This check keeps it there: any package-level
+# variable in the adapter that is written per REQUEST rather than per SERVER
+# fails here.
+#
+# `g_server` is deliberately still permitted and is the ONE exception, named
+# rather than pattern-matched: `request_stop` asks a process-wide question
+# ("stop the running server") that only WP44's public surface can answer
+# properly. Naming it means a SECOND such global cannot arrive quietly.
+# ---------------------------------------------------------------------------
+URUQUIM_ADAPTER="$URUQUIM_WEB/internal/transport/odin_http_adapter.odin"
+test -f "$URUQUIM_ADAPTER" || fail "the transport adapter is missing"
+URUQUIM_ADAPTER_CODE="$(sed -E 's://.*$::' "$URUQUIM_ADAPTER")"
+
+# Package-level variable declarations: `name: Type` at column 0, no `::`.
+URUQUIM_ADAPTER_GLOBALS="$(grep -nE '^[a-z_][A-Za-z0-9_]*:[[:space:]]*[^:=]' <<<"$URUQUIM_ADAPTER_CODE" |
+  sed -E 's/^[0-9]+:([a-z_][A-Za-z0-9_]*):.*/\1/' | LC_ALL=C sort -u || true)"
+URUQUIM_ADAPTER_UNEXPECTED="$(grep -vxF 'g_server' <<<"$URUQUIM_ADAPTER_GLOBALS" | grep -c . || true)"
+if test "$URUQUIM_ADAPTER_UNEXPECTED" -ne 0; then
+  echo "--- package-level variables in the adapter ---" >&2
+  grep -vxF 'g_server' <<<"$URUQUIM_ADAPTER_GLOBALS" >&2
+  fail "the transport adapter declares a package-level variable other than the one ratified exception 'g_server'. Per-request state in a package global cross-wires two servers silently (WP43): the second serve overwrites the first's dispatch pointer, and nothing diagnoses it."
+fi
+echo "public API contract: the transport adapter holds per-server state, not per-request globals (g_server is the one named exception)"
+
+# ---------------------------------------------------------------------------
 # 9. WP4 route registration and dispatch (planning/phase-1-plan.md §WP4 D1-D5)
 #
 # WP4 adds BEHAVIOR, not surface. The inventory above already proves the ledger

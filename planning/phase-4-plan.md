@@ -335,6 +335,29 @@ it precedes every package it shapes.
 
 ### WP43 — Per-server state replaces the transport globals
 
+**DONE, 2026-07-21 — `web/internal/transport/odin_http_adapter.odin`,
+`build/check_public_api.sh` §8d.** Internal only, **zero public change**, and
+**every existing test passed unchanged and unmodified**, which was the
+package's own condition.
+
+**The defect it removes has the worst possible shape.** `web.serve` wrote its
+`Config` into a package global that the backend handler read on every request.
+With one server per process that is fine. With two it is a **silent
+cross-wire**: the second `serve` overwrites the first's dispatch pointer, and
+requests to one application run the other's — with nothing diagnosing it,
+because from each server's own point of view nothing is wrong.
+
+**No vendored change was needed.** The backend's `Handler` already carries a
+`user_data: rawptr`; the capability was there and unused. The config now travels
+WITH the handler, in a `Server_Runtime` that lives in `serve`'s own frame — no
+allocation, no teardown, and no slot for a second server to overwrite.
+
+**`g_server` deliberately remains, and is now the ONE NAMED exception** in the
+gate rather than an unremarked survivor. `request_stop` asks a process-wide
+question that only WP44's public surface can answer properly; removing it here
+would mean inventing half of WP44 inside an internal package. Naming it is what
+stops a second such global arriving quietly — proven by a negative control.
+
 **IMPLEMENTATION, internal only.** ADR-018's direction; the prerequisite for
 two servers in one process, for embedded use, and for WP44 having something
 coherent to stop. Existing tests pass unchanged and unmodified. **Rollback:
