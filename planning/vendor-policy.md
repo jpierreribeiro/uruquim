@@ -50,9 +50,16 @@ work regardless of who wrote the fix.
 | 3 | `Content-Length` + `Transfer-Encoding` rejected, not repaired | **No** — a policy difference. RFC 9112 §6.1 permits refusal; upstream chose repair | **CARRY.** Uruquim's WP9 D2 is stricter on purpose |
 | 4 | Any repeated `Content-Length` rejected, even if identical | **No** — same class as 3 | **CARRY** |
 | 5 | Unknown method becomes `.Unknown` with `method_raw` preserved, no 501 | **No** — a framework-ownership decision (WP9 D7) | **CARRY** |
+| 7 | A request with no `Content-Length` reports its body read as SUCCEEDED rather than failed | **Yes** — a plain upstream defect. `_body_ok = false` means "read failed", and the no-body path returned through it without correcting the flag, so `response_must_close` retired the connection | **OFFER UPSTREAM.** It breaks keep-alive for every GET in any application, is one line, and has nothing to do with Uruquim's policies |
 | 6 | A configurable request read deadline; a per-thread sweep closes connections whose request has taken too long to arrive | **Yes** — the upstream read has no deadline, and `scanner.odin` carries an unfinished-work comment asking for one at the recv site | **OFFER UPSTREAM.** It is a general slowloris defence, not a Uruquim policy, and the upstream comment is as close to an invitation as one gets |
 
-**Three of six are upstream bugs; three are deliberate divergences.** WP46's
+**Four of seven are upstream bugs; three are deliberate divergences.** WP45's
+keep-alive fix joined the first group and is the plainest of them: a success
+path that leaves a failure flag set, breaking persistent connections for every
+GET in any application built on this server.
+
+Previously, of six:
+**three of six were upstream bugs; three were deliberate divergences.** WP46's
 deadline joined the first group: the upstream read path has no deadline at all
 and says so in an unfinished-work comment, which makes it a gap in a
 general-purpose HTTP server rather than a Uruquim-specific policy.

@@ -121,6 +121,23 @@ _body_length :: proc(req: ^Request, max_length: int = -1, user_data: rawptr, cb:
 
 	len, ok := headers_get_unsafe(req.headers, "content-length")
 	if !ok {
+		// URUQUIM PATCH 7 (WP45) — NO BODY IS NOT A FAILED BODY.
+		//
+		// `_body_ok` is set to `false` at the top of this procedure and means
+		// "the body read was attempted and failed"; `response_must_close` reads
+		// it that way and retires the connection. But a request with no
+		// `Content-Length` has no body to read, and returning here without
+		// setting it left `false` standing on a SUCCESS path.
+		//
+		// The consequence, measured before this patch: **every GET closed its
+		// connection.** No `Connection: close` was advertised, so a client had
+		// no way to know — it simply paid a TCP handshake per request while
+		// HTTP/1.1 promised persistence. Two sequential requests on one socket:
+		// the first answered, the second met an orderly close.
+		//
+		// Setting it here says what actually happened: there was nothing to
+		// read, and reading nothing succeeded.
+		req._body_ok = true
 		cb(user_data, "", nil)
 		return
 	}
