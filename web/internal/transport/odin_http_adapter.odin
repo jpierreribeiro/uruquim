@@ -18,28 +18,59 @@ import "core:net"
 import "core:slice"
 import "core:strings"
 
-// The running server and the active config. thread_count is 1 and only one
-// server runs at a time in the Phase-1 bootstrap, so package-level state is
-// enough; `request_stop` reads `g_server` to signal a shutdown from another
-// thread (the backend's shutdown is built for exactly that).
+// WP43 — PER-SERVER STATE. The config no longer lives in a package global.
+//
+// WHY THIS MATTERS AND IS NOT TIDYING. `web.serve` used to write its `Config`
+// into `g_config`, which the backend's handler read on every request. That is
+// fine for exactly one server per process and becomes a silent cross-wire the
+// moment there are two: the second `serve` overwrites the first's dispatch
+// pointer, and requests to server A run server B's application. Nothing
+// diagnoses it, because nothing is wrong from either server's point of view.
+//
+// The backend's `Handler` already carries a `user_data: rawptr`, so the config
+// travels WITH the handler rather than beside it. No vendored change was needed
+// — the capability was there and unused.
+//
+// WHAT IS STILL A GLOBAL, and it is stated rather than hidden: `g_server`, read
+// by `request_stop`. That one is a genuinely process-wide question today
+// ("stop the running server") and it is WP44 that gives it a proper answer, by
+// making a server a thing a caller HOLDS. Removing it here would mean inventing
+// half of WP44's public surface in an internal package — and ADR-030's
+// single-threaded decision means one loop, so the residual risk is a second
+// `serve` in one process, which is already unsupported and already documented.
 @(private)
 g_server: ^http.Server
 
+// Server_Runtime is the per-server state the handler needs. It lives in
+// `serve`'s frame and is reached through the backend handler's `user_data`, so
+// its lifetime is exactly the server's — no allocation, no teardown, and no way
+// for a second server to overwrite the first's.
 @(private)
-g_config: Config
+Server_Runtime :: struct {
+	config: Config,
+}
 
 // Exchange is the per-request state threaded through the async body read. It
 // lives in the connection's temp allocator, which the backend owns for the
 // duration of the request.
+//
+// WP43: it now also carries the runtime, because `on_body` is a plain callback
+// with no other way to reach it.
 @(private)
 Exchange :: struct {
-	req: ^http.Request,
-	res: ^http.Response,
+	req:     ^http.Request,
+	res:     ^http.Response,
+	runtime: ^Server_Runtime,
 }
 
 // serve runs the backend event loop and blocks until the server is stopped.
 serve :: proc(cfg: Config) -> Serve_Error {
-	g_config = cfg
+	// The runtime lives here, in this frame, for exactly as long as the server
+	// does. Two concurrent `serve` calls would have two runtimes rather than
+	// one shared slot — which is the whole point of WP43.
+	runtime := Server_Runtime {
+		config = cfg,
+	}
 
 	s: http.Server
 	g_server = &s
@@ -76,7 +107,9 @@ serve :: proc(cfg: Config) -> Serve_Error {
 		cfg.on_ready(cfg.user)
 	}
 
-	handler := http.handler(catch_all)
+	// The runtime travels WITH the handler through the backend's own
+	// `user_data`, rather than beside it in a package global.
+	handler := runtime_handler(&runtime)
 	http.serve(&s, handler)
 
 	g_server = nil
@@ -95,8 +128,23 @@ request_stop :: proc() {
 
 // catch_all is the single backend handler. It starts the capped, buffered body
 // read; everything else happens in `on_body` once the body is available.
+// runtime_handler builds the backend handler with the runtime attached.
+//
+// `http.handler` stores a PROCEDURE in `user_data`; this stores the runtime
+// instead and calls `catch_all` explicitly, which is the same shape the vendored
+// helper uses and the reason no vendored change was needed.
 @(private)
-catch_all :: proc(req: ^http.Request, res: ^http.Response) {
+runtime_handler :: proc(runtime: ^Server_Runtime) -> http.Handler {
+	h: http.Handler
+	h.user_data = rawptr(runtime)
+	h.handle = proc(h: ^http.Handler, req: ^http.Request, res: ^http.Response) {
+		catch_all((^Server_Runtime)(h.user_data), req, res)
+	}
+	return h
+}
+
+@(private)
+catch_all :: proc(runtime: ^Server_Runtime, req: ^http.Request, res: ^http.Response) {
 	// WP9 D5 — `Expect: 100-continue` is refused before anything is read. This
 	// is a PROTOCOL error handled by the adapter rather than by the core (D6):
 	// there is no framework-owned request yet, so there is no envelope to write.
@@ -111,10 +159,11 @@ catch_all :: proc(req: ^http.Request, res: ^http.Response) {
 	exchange := new(Exchange, context.temp_allocator)
 	exchange.req = req
 	exchange.res = res
+	exchange.runtime = runtime
 
 	// The backend enforces the cap as it reads: an over-length body never gets
 	// buffered, and `on_body` is told with `.Too_Long`.
-	http.body(req, g_config.max_body, exchange, on_body)
+	http.body(req, runtime.config.max_body, exchange, on_body)
 }
 
 // on_body runs once the body has been read (or rejected for length). It builds
@@ -146,7 +195,8 @@ on_body :: proc(user_data: rawptr, body: http.Body, err: http.Body_Error) {
 	// connection allocator, and tears down its request-local state — all before
 	// returning (WP8 D2/D4).
 	out: Outbound
-	g_config.dispatch(g_config.user, inbound, &out, context.temp_allocator)
+	cfg := exchange.runtime.config
+	cfg.dispatch(cfg.user, inbound, &out, context.temp_allocator)
 
 	write_response(res, out)
 	http.respond(res)
