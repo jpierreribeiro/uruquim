@@ -1283,7 +1283,10 @@ none; the requirement it keeps is the one nobody disputes.
 ## ADR-033 — the transport foundation: keep it, patch it, or own it
 
 - **Status.** **REOPENED 2026-07-21, the same day it closed, by the trigger it
-  wrote for itself.** It closed on WP46's contained patch; **WP44's patch did
+  wrote for itself.** **See also Amendment 1 at the end of this file (2026-07-21):
+  `core:net/http` ships in January 2027, which removes arm C and points this ADR
+  at keep-and-patch with the transition as its declared exit.** It closed on
+  WP46's contained patch; **WP44's patch did
   NOT stay contained**, which is the counter-evidence this ADR named in advance
   as the condition for reopening. The closure is left below rather than deleted,
   because an ADR edited to match its latest state teaches nothing about how it
@@ -1513,3 +1516,124 @@ none; the requirement it keeps is the one nobody disputes.
   amendments. It decays because every later package that assumes one loop
   without saying so adds to the amendment list — which is why this ADR asks each
   of them to say so.
+
+---
+
+## ADR-033 — Amendment 1: `core:net/http` has a date, and it removes arm C
+
+- **Status.** AMENDMENT, 2026-07-21, under the ADR-029 delegation. It does not
+  close ADR-033; it removes one of its three arms and re-weights the other two.
+
+- **What changed.** The owner reports that Odin's standard library gains an
+  official `core:net/http` in **January 2027**, expected with limitations. Until
+  today the tree recorded that package as a hypothesis with no date
+  (`later-phases-plan.md`: *"verified absent from both the pinned toolchain and
+  the current official index… Treat as a hypothesis with no date"*). That
+  sentence is now false, and this ADR was decided partly on its truth.
+
+- **Arm C is economically dead.** Owning the connection layer means building,
+  hardening and conformance-testing a second HTTP/1.1 server over roughly six
+  months, to be superseded by one the language ships and the core team
+  maintains. The comparison that ADR-031 already made applies with more force:
+  Gin does not implement timeouts, keep-alive or graceful shutdown because
+  `net/http` does, and a framework whose foundation is maintained by the
+  language is structurally cheaper than one whose foundation it maintains
+  itself. Arm C was the expensive answer to *"the vendored server is beta and
+  has one maintainer"*; January answers it for free.
+
+- **What this ADR should now close on.** **A/B — keep and patch, with the
+  transition as the declared exit.** Not because patching became more attractive,
+  but because the alternative acquired an expiry date. The remaining question is
+  narrow and empirical: does the drain patch stay contained? WP59 answers it and
+  WP65 closes this ADR on the answer.
+
+- **The obligation it creates, and it binds every package from here.** Work done
+  before January must not make the swap harder:
+  - nothing in `web/` learns anything about the backend (already G-06,
+    already gate-scanned — the amendment is that weakening it now costs more);
+  - the multipart parser consumes `[]u8` and never reads from a socket;
+  - static file serving fills `Outbound` like any other response and acquires no
+    privileged write path;
+  - **the vendored drain patches are declared BRIDGE WORK.** They are worth
+    building because the gap is now and January is not, and they are expected to
+    be deleted when the new adapter lands. `vendor-policy.md` records them as
+    such so a later reader does not mistake a bridge for a foundation.
+
+- **What the boundary already promised.** `web/internal/transport/boundary.odin`
+  says only the conceptual contract — accept → dispatch → commit → stop — is
+  frozen, and that the record shapes "may change freely when a second adapter
+  lands". The transport-conformance matrix in `tests/support/` exists to
+  validate exactly that swap, and it was built before any decision rather than
+  to justify one. Phase 5's job is to keep both sentences true.
+
+- **Reversibility. HIGH.** If January slips or the shipped package cannot serve
+  this framework's needs, arm C returns unchanged — nothing here is deleted, and
+  the conformance matrix that would validate an owned layer is the same one that
+  will validate the stdlib adapter.
+
+---
+
+## ADR-034 — the table stakes belong in the core
+
+- **Status.** ACCEPTED, 2026-07-21, owner amendment recorded in
+  `phase-5-spec.md` §1 and `decisoes-do-dono.md`.
+
+- **Context.** `decisoes-do-dono.md` recorded, under the delegation, that CORS,
+  uploads and static files stay **outside** the core as future optional
+  packages. `roadmap.md` governing rule 4 said the same. Phase 5 was scoped as
+  *Ecosystem*, with each item gated on "a real user request".
+
+  Two facts collided. First, that gate is unsatisfiable: there are no users, and
+  there will be none until the framework has the pieces that demand would have
+  asked for. A rule that can only be satisfied by the state it prevents is not a
+  rule, it is a deadlock. Second, a framework missing static files, CORS **and**
+  uploads is not a microframework — it is a routing library, and a person
+  arriving from Gin discovers this in the first week rather than reading it in
+  the documentation.
+
+- **Options.** (A) keep them outside, wait for demand. (B) ship them in the
+  core, growing the ledger, paying G-09 in full. (C) ship them as first-party
+  Crystals in a separate repository.
+
+- **Decision. B**, for three items and no others.
+
+  **Why not A.** It is the deadlock above. Waiting costs the project the users
+  whose requests are the thing being waited for.
+
+  **Why not C.** CE-E3 (ADR-032) forbids ecosystem work from adding, widening or
+  changing a core symbol — correctly, because that is how a frozen framework
+  gets features smuggled into it. Static files needs a detached `Router`; CORS
+  needs the middleware chain; uploads needs the request body and the limits
+  struct. Arm C would either bend CE-E3 or produce three packages that cannot do
+  their job. Shipping core growth while calling it ecosystem is the exact
+  failure CE-E3 exists to prevent, and the honest move is the front door.
+
+- **Scope, stated so it cannot be stretched.** Static files, CORS, uploads. **The
+  amendment names three items.** TLS, OpenAPI, WebSocket, streaming, HTTP/2,
+  templates and database integration keep rule 4 and keep the demand-driven
+  gate. A waiver that grows to fit whatever is being proposed next is the
+  absence of a rule, and this one is bounded on purpose.
+
+- **What is NOT waived.** G-09. Every symbol still carries all eight evidences —
+  owning phase and spec clause, proof it is not a synonym, a compiling example,
+  a behaviour test, parity with canonical-patterns and ai-context, ownership and
+  allocation notes, a dependency and transport-leak review, and a rollback
+  impact. What the owner waived is the wait for an external request, never the
+  evidence for the design.
+
+- **Cost, stated honestly.** Ledger 55 → roughly 62, and three new security
+  surfaces the project must now own: path traversal and symlink escape (static),
+  permissive-origin and credential reflection (CORS), and the whole OWASP file
+  upload list (multipart). Each is a real liability. The mitigation is that each
+  arrives with the corpus that proves it, in the pattern the WP9 raw-wire corpus
+  established — the one that found four upstream defects.
+
+  A second cost, structural: buffered responses (ADR-014) mean static files
+  carry a declared size ceiling, and a large upload costs its own size in RAM.
+  These are documented limitations, not defects, and `docs/operations.md` §3 is
+  where they are named.
+
+- **Reversibility. LOW once shipped**, and that is the point of the evidence
+  bar. A public symbol is a promise; three of them plus a security surface is a
+  promise the project cannot quietly withdraw. This is why B required an owner
+  amendment rather than an agent decision.

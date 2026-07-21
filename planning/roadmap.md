@@ -125,10 +125,25 @@ A-4); trusted-proxy handling with ADR-013 accepted; fuzzing and a soak test in
 CI; observability using **low-cardinality route identity**, never raw paths;
 an operations document.
 
-### Phase 5 — Ecosystem
+### Phase 5 — Close the drain, ship the table stakes
 
-**Entry:** Phase 4 frozen; a real user request for each item.
-**Exit:** per item — each is spec-gated individually and may be declined.
+**Rescoped 2026-07-21** by owner amendment (`phase-5-spec.md` §1). The original
+scope — *Ecosystem*, gated on "a real user request for each item" — could not be
+satisfied: the project has no users, and it will not acquire any until it has the
+pieces that demand would have asked for. The criterion is kept for everything
+except the three items named below.
+
+**Entry:** Phase 4 frozen.
+**Exit:** `web.stop` terminates within a declared deadline with connections held
+open by a client, or the field is not shipped and the reason is recorded; static
+files, CORS and uploads exist in the core, each paying G-09 in full; every gap
+that remains is named in `docs/operations.md` with its reason; nothing in `web/`
+has learned anything about the backend, so the January 2027 `core:net/http`
+transition stays as cheap as the boundary was designed to make it.
+
+**Still ecosystem, still demand-driven:** TLS in-process, OpenAPI, WebSocket,
+streaming, HTTP/2, templates, database integration. The waiver names three items
+and no others.
 
 ## Release and adoption track
 
@@ -159,8 +174,13 @@ Carried forward from Phase 1 because they are why Phase 1 stayed small:
 2. **No aliases, no second canonical way.** This is Odin's own stated rule.
 3. **Defaults must be lazily linked** — an application that does not use a
    feature pays zero bytes for it, proven by `nm`, as G-11 established.
-4. **Optional means optional.** Uploads, static files, TLS, OpenAPI, WebSocket
-   and streaming are candidates for separate packages, not core growth.
+4. **Optional means optional** — for the things that are genuinely optional.
+   TLS, OpenAPI, WebSocket and streaming are candidates for separate packages,
+   not core growth. **Amended 2026-07-21:** uploads, static files and CORS were
+   on this list and are not any more. They are table stakes, not options: a
+   microframework missing all three is a routing library. They land in the core
+   in Phase 5, paying G-09 in full. The amendment names three items; the rule is
+   unchanged for every other.
 5. **Measurements decide performance questions**, not preference — and the
    losing options get recorded.
 6. **Decisions are made under the ADR-029 delegation (owner, 2026-07-20).**

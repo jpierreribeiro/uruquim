@@ -98,6 +98,22 @@ Deferred, prototype-gated, never a mandatory generator. Not Phase 1.
 ### OQ-12 · OpenAPI surface (`Route_Info`)
 Phase 5 optional layer. Not Phase 1.
 
+**Noted 2026-07-21, not decided.** Two facts have moved under this question
+since it was written, and neither was recorded:
+
+1. **WP34 shipped `web.route(ctx)`**, which returns the registered pattern — and
+   `later-phases-plan.md` describes OpenAPI generation as *"a layer over route
+   information"*. Some of the information this question asks for now exists.
+   `Route_Info` as a **type** still does not exist anywhere in the tree.
+2. **OpenAPI keeps the demand-driven gate.** ADR-034's waiver named static
+   files, CORS and uploads, and explicitly not this. So the question stays open
+   on purpose: it is no longer blocked on missing information, only on a real
+   request.
+
+Recorded because this is the thinnest entry in the file and the one most changed
+by work already shipped — an open question nobody revisits is indistinguishable
+from a closed one.
+
 ### OQ-13 · Collection name (`uruquim:web`) final?
 Chosen; confirm in WP0. Trivial to change before 1.0.
 
@@ -129,6 +145,19 @@ Signals, thresholds, hysteresis, and recovery remain research.
 ### OQ-20 · Multipart temporary-file ownership
 Phase 4. Prototype cleanup, quotas, persistence transfer, disk-full, timeout,
 and disconnect behavior before proposing an ownership ADR.
+
+**Promoted to blocking, 2026-07-21 (Phase 5, WP62).** Uploads moved into the
+core by ADR-034, and this question is its precondition rather than its footnote:
+WP62 answers all seven — owner of the temporary file, cleanup, quotas,
+persistence, disk-full, timeout, mid-upload disconnect — **before** WP63 writes
+a parser. If any answer requires streaming, because a 2 GB upload does not fit
+in a buffered body (ADR-014), **WP63 is declined this phase and the reason is
+recorded**. A package that records why it could not be built is a criterion met;
+one that ships a knob that lies is not.
+
+Second constraint, from ADR-033 Amendment 1: whatever ownership model WP62 fixes
+must still hold when the body arrives from `core:net/http` in January 2027. The
+parser consumes `[]u8` and never reads from a socket.
 
 ## Routing table
 
