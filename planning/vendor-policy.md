@@ -178,3 +178,38 @@ human here would be inventing a maintainer this project does not have.
 * **It does not promise upstream contribution.** §2 offers; it cannot merge.
 * **It does not schedule a re-vendor.** A pin is a decision, and moving it is a
   work package with a gate run behind it, not maintenance.
+
+---
+
+## 8. Bridge patches — added 2026-07-21 (ADR-033 Amendment 1)
+
+**A new patch class, and it exists because the foundation now has an expiry
+date.** Odin's standard library gains an official `core:net/http` in **January
+2027**. ADR-033 Amendment 1 records the consequence: owning the connection layer
+is economically dead, and this project keeps patching a vendored server only
+until the swap.
+
+That makes some patches *bridges* rather than maintenance. A bridge patch:
+
+1. **Closes a gap that is real today** and cannot wait for January.
+2. **Is expected to be deleted** when the new adapter lands — not migrated, not
+   ported, deleted.
+3. **Is marked `URUQUIM PATCH — BRIDGE`** at its site, so a reader in 2027 knows
+   the difference between a patch that carries a security fix forward and one
+   that exists because the calendar did not cooperate.
+4. **Is offered upstream anyway**, under §2. A bridge for this project may be a
+   permanent fix for someone else's, and the rule against carrying unofferred
+   patches does not relax because we plan to leave.
+
+**The distinction matters for the wrong reason it could be abused.** "It is a
+bridge" is not a licence for a rougher patch. A bridge that ships a knob which
+does not bound what it claims is exactly the failure Phase 4 refused when it
+withdrew `max_drain_time` — and the withdrawal, not the shipping, was the
+correct call. Bridge patches meet the same bar as every other: an executable
+case that failed before, a `URUQUIM PATCH` marker, and a recorded upstream
+offer.
+
+**First patches in this class:** the Phase-5 drain work (WP59) against
+`vendor/odin-http/{server,scanner}.odin`. They exist because `web.stop` cannot
+bound itself today, and `git diff --stat` against `vendor/` is the number that
+goes into ADR-033's containment verdict.

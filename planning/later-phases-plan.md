@@ -338,10 +338,10 @@ needs to become public API.
 | P4-5 | Limits: connections, queue depth, header count and size, request line, minimum ingress rate | the slowloris mitigation is a minimum ingress rate; OWASP names it and gives no numbers, so Uruquim must pick and justify its own |
 | P4-6 | Deterministic load shedding | bounded admission before any adaptive controller (research item 11 stays after this) |
 | P4-7 | Trusted proxies and peer preservation | C-4; ADR-013 must be accepted first. Default to the peer address; trusted hops are explicit operator configuration; never echo `Forwarded` into a response |
-| P4-8 | CORS | C-5 in §5: five headers, with `*` **not** sufficient under credentials and **not** covering `Authorization`; preflight restricted to an ok status; `Vary: Origin` required for dynamic origins. Candidate for an optional package |
+| P4-8 | CORS | C-5 in §5: five headers, with `*` **not** sufficient under credentials and **not** covering `Authorization`; preflight restricted to an ok status; `Vary: Origin` required for dynamic origins. **Reclassified 2026-07-21: core, Phase 5 WP60** (was "candidate for an optional package") |
 | P4-9 | Secure headers, cookies | cookies force the `Recorded_Response` header decision (Phase-2 D-14.3) |
-| P4-10 | Multipart and uploads | OWASP: allow-list extensions, validate after decoding the filename, generate the stored name, never trust `Content-Type`, size limits, storage outside the webroot, no execute permission. **Recommended as a separate package** |
-| P4-11 | Static files | traversal, symlinks, ranges, cache validators — a security surface of its own. **Recommended as a separate package** |
+| P4-10 | Multipart and uploads | OWASP: allow-list extensions, validate after decoding the filename, generate the stored name, never trust `Content-Type`, size limits, storage outside the webroot, no execute permission. **Reclassified 2026-07-21: core, Phase 5 WP62 (spec) + WP63 (implementation)** — was "recommended as a separate package". WP63 is conditional: if OQ-20 concludes that honest uploads need streaming, it is declined and the reason recorded |
+| P4-11 | Static files | traversal, symlinks, ranges, cache validators — a security surface of its own. **Reclassified 2026-07-21: core, Phase 5 WP61** (was "recommended as a separate package"). Buffered responses (ADR-014) force a declared size ceiling; ranges follow the same constraint |
 | P4-12 | Observability, non-blocking | C-2; **must** key on the low-cardinality route pattern, never the raw path |
 | P4-13 | Redaction policy | OWASP's do-not-log list is concrete: tokens, session identifiers, passwords, connection strings, keys, PII, payment data — plus CR/LF escaping against log injection. Phase 1's "nothing reaches a log line" property must be preserved deliberately, not by accident |
 | P4-14 | TLS decision | **do not assume the framework terminates TLS.** Compare in-process termination, reverse-proxy termination (the common deployment, and free) and an optional adapter. Recommendation: document proxy termination as supported; in-process at most an optional package. **Owner approval** |
@@ -360,16 +360,22 @@ needs to become public API.
 declined, and requires a real user request before it starts. Classification per
 the Odin-fit audit.
 
+**Amended 2026-07-21.** Phase 5 was rescoped by owner amendment
+(`phase-5-spec.md` §1) to *close the drain, ship the table stakes*. Three items
+left this backlog for the core — CORS, static files and uploads — because the
+demand-driven criterion is unsatisfiable at zero users. **Every item still in
+this table keeps that criterion.** The waiver named three items and no others.
+
 | Item | Classification | Reasoning |
 |---|---|---|
-| `core:net/http` adapter | **NEEDS_PROTOTYPE, unscheduled** | **The package does not exist** — verified absent from both the pinned toolchain and the current official index. `core/net` is sockets, DNS and URL parsing; `core/nbio` is an event loop. Treat as a hypothesis with no date |
+| `core:net/http` adapter | **SCHEDULED — January 2027** | **Amended 2026-07-21:** the owner reports the package ships in the standard library in January 2027, expected with limitations. It is no longer a hypothesis with no date. Two consequences: **ADR-033 arm C (own the connection layer) is economically dead** — six months of work superseded by the stdlib — and every Phase-5 package acquires a second acceptance criterion, *it must not make the swap harder*. The vendored drain patches are declared bridge work, expected to be deleted when this lands |
 | OpenAPI generation | SHOULD_BE_OPTIONAL_PACKAGE | a layer over route information; never a generator requirement |
 | Automatic documentation | SHOULD_BE_OPTIONAL_PACKAGE | follows OpenAPI |
 | Validation | NEEDS_PROTOTYPE | tag-based validation edges toward the type-system cleverness Odin's own principles avoid; explicit validation may simply be the answer |
 | WebSocket | SHOULD_BE_OPTIONAL_PACKAGE | its own protocol surface (RFC 6455) |
 | Streaming request/response | SHOULD_BE_OPTIONAL_PACKAGE | changes the body-ownership model that ADR-006 and ADR-012 rest on |
 | HTTP/2 | SHOULD_BE_OPTIONAL_PACKAGE | only as the transport permits; RFC 9113 is a large surface |
-| Advanced API (`app_init`, `Advanced_Config`, `serve_transport`) | ACCEPTABLE_WITH_GUARDRAILS | ADR-010, still PROPOSED; must stay out of the common surface |
+| Advanced API (`app_init`, `Advanced_Config`, `serve_transport`) | ACCEPTABLE_WITH_GUARDRAILS | ADR-010 — **ACCEPTED 2026-07-20** under the ADR-029 delegation, with activation deferred: designed, not shipped, until a real external user asks, and never in the Quick Start. (This row said "still PROPOSED" until 2026-07-21; corrected against `adrs.md:202`) |
 | Templates | **REJECT for core** | ecosystem territory |
 | Database integration | **REJECT for core** | ecosystem territory; a Postgres *example* belongs in the release track (M4) instead |
 | Package distribution and versioning | product track | C-8: vendoring and a pinned toolchain, tagged against the Odin release. **No package-manager integration, ever** |
