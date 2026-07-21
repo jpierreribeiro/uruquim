@@ -190,6 +190,32 @@ grep -qiE 'no document claims uruquim has configurable timeouts' <<<"$URUQUIM_P3
 echo "phase-3 freeze: the deliberate absences are recorded, timeouts among them"
 
 # ---------------------------------------------------------------------------
+# 7b. NO LEDGER MAY DEFER TO A PHASE THAT HAS ALREADY FROZEN.
+#
+# The defect this catches, found by reading the shipped freeze rather than by a
+# gate: the capacity ledger carried "read/write timeouts — not configurable
+# until Phase 3". That sentence was true when written and became a LIE the day
+# Phase 3 froze without them, because it now reads as a promise that was kept.
+# Nothing failed: the row was accurate prose about the past, and no check looks
+# at tense.
+#
+# A deferral is a debt with a due date. When the date passes, the row must say
+# what actually happened — shipped, or not shipped and why — never leave the
+# reader to infer the happier one.
+# ---------------------------------------------------------------------------
+# Only LEDGER ROWS are scanned — lines beginning with a table pipe. Prose may
+# legitimately QUOTE a retired deferral in order to say it was retired, and an
+# amendment that could not name the sentence it replaced would be a worse
+# document. The row is the promise; the paragraph about the row is not.
+URUQUIM_STALE_DEFERRALS="$(grep -nE '^\|.*(until Phase [123]\b|in Phase [123]\b.*(will|becomes))' "$URUQUIM_P2" \
+  "$URUQUIM_ROOT/planning/phase-1-freeze.md" "$URUQUIM_P3" 2>/dev/null || true)"
+if test -n "$URUQUIM_STALE_DEFERRALS"; then
+  echo "$URUQUIM_STALE_DEFERRALS" >&2
+  fail "a frozen ledger still defers to a phase that has already frozen. When the due date passes the row must state the OUTCOME — shipped, or not shipped and why — because a deferral left standing reads as a promise that was kept."
+fi
+echo "phase-3 freeze: no ledger defers to a phase that has already frozen"
+
+# ---------------------------------------------------------------------------
 # 8. Unfinished work has no place in a frozen contract.
 # ---------------------------------------------------------------------------
 if grep -nE '\b(TODO|FIXME|XXX|TBD)\b' "$URUQUIM_P3"; then
