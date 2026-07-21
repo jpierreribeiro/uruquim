@@ -242,6 +242,22 @@ you set cookies, you set the headers, and you own their attributes.
   response model this framework does not have (ADR-014 buffers responses
   whole). CORS, static files and uploads were on this list until Phase 5 moved
   them into the core (ADR-034).
+* **Uploads are bounded by `max_body` and held in memory.** A file larger than
+  that is refused with 413 before your handler runs. There is no setting that
+  makes a 2 GB upload work — the body is held whole, so raising `max_body`
+  raises what one request can cost. **If you need large uploads, terminate them
+  at a proxy or an object store and hand the application a reference.** The
+  framework will not spool to disk, and a version that pretended to would be
+  spooling into RAM.
+* **Static files are served whole, with no ranges and no `Last-Modified`.**
+  `ETag`/`If-None-Match` work and answer 304. A file above
+  `Static_Options.max_file_size` is answered 404. Every symlink is refused
+  whatever it points at, and so is any path containing `..`, `%`, a backslash,
+  a NUL, an empty segment, or a segment starting with `.`.
+* **A CORS misconfiguration fails at boot, not at runtime.** `*` with
+  credentials, `*` beside named origins, and `*` in the header list with
+  credentials are all refused by `web.cors`, and the application will not
+  start.
 * **The HTTP server underneath is a vendored snapshot of `laytan/odin-http`,
   which describes itself as beta.** Eleven local patches are carried, five of
   them fixing upstream defects — including one that broke keep-alive for every
