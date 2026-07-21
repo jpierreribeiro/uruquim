@@ -138,8 +138,17 @@ s = open(p).read()
 # The rule this earned, and it generalises past this file: a probe must remove
 # the ability to make an observation, not one path that happens to reach it.
 # Same class as WP39's control 6 and WP18's control 6 — three in one session.
+# THE COUNT IS ASSERTED, NOT ASSUMED, and WP56's re-run is why this comment
+# exists. It was 2; WP45 added `read_status_again` for the keep-alive phases and
+# made it 3. The probe caught that IMMEDIATELY rather than silently mutating two
+# of three and reporting a hole — which is exactly what the earlier versions of
+# this control did, and the reason the assert was added.
+#
+# It is deliberately an exact count rather than a minimum: a NEW report site is
+# a new way to make this observation, and a probe that removes the ability must
+# know about all of them. Raising this number is a decision, not an edit.
 count = s.count(".Held_Open_Until_Lab_Gave_Up, 0")
-assert count == 2, "expected 2 report sites, found %d" % count
+assert count == 3, "expected 3 report sites, found %d" % count
 s = s.replace(".Held_Open_Until_Lab_Gave_Up, 0", ".Responded, 0")
 open(p, 'w').write(s)
 PYEOF

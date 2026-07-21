@@ -795,6 +795,27 @@ doctor` on the product track. **Rollback: HIGH.**
 
 ### WP56 — Phase-4 freeze
 
+**DONE, 2026-07-21 — `planning/phase-4-freeze.md`,
+`build/check_phase4_freeze.sh`, three controls. PHASE 4 IS FROZEN: 50 → 55
+application, union 57.**
+
+**Approval was the gate's, under the ADR-029 delegation.** The one
+breach-shaped item is not a breach: two packages are recorded as NOT DELIVERED
+with their reasons. The delegation's condition is that criteria are met, not
+that every box is ticked — and **a package that records why it could not be
+built is a criterion met, while one that ships a knob that lies is not.**
+
+**Re-running all fifteen mutation suites repaired three controls**, and every
+one of them broke because the tree IMPROVED: WP23's probe lost its anchor when
+WP49 inserted a block; WP25's control targeted a row WP47 had bounded; WP41's
+count was two and WP45 made it three. That is the healthy failure mode, and it
+only shows up if somebody re-runs them.
+
+**ONE MATTER GOES TO THE OWNER: ADR-033 is OPEN.** Whether Uruquim eventually
+owns the HTTP/1.1 connection layer is now backed by three independent findings —
+WP44's drain, WP46's containment result and WP54's allocator seam — all stopping
+at the same place. It is the largest question the project has.
+
 **FREEZE.** Everything WP38 required, plus: a capacity-ledger row for every
 WP40 resource; the fault-lab seeds recorded as data; a claim-ledger row with a
 negative control for every shed/stop/drain promise; soak results recorded; the
