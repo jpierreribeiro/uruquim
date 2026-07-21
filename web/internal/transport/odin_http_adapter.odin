@@ -92,6 +92,9 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	opts.request_read_timeout = time.Duration(cfg.max_request_time)
 	opts.max_connections = cfg.max_connections
 	opts.reserved_connections = cfg.reserved_conns
+	// WP59 — the drain deadline crosses as nanoseconds and becomes a Duration
+	// here, on the side of the boundary where a clock is already linked.
+	opts.max_drain_time = time.Duration(cfg.max_drain_time)
 	// WP9 D5: Phase 1 implements no interim-response flow. Leaving the backend's
 	// automatic continue on made it answer "100 Continue" and then WAIT for a
 	// body the client may never send. `Expect` is refused with 417 in

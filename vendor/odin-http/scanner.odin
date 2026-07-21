@@ -49,6 +49,30 @@ Scanner :: struct /* #no_copy */ {
 	could_be_too_short:           bool,
 	user_data:                    rawptr,
 	callback:                     Scan_Callback,
+
+	// URUQUIM PATCH 9 (WP59) — BRIDGE. The outstanding `recv`, kept so it can be
+	// cancelled.
+	//
+	// Upstream discards the `^nbio.Operation` that `recv_poly` returns (see
+	// `scanner_read` below, and upstream's own `// TODO: some kinda timeout on
+	// this` beside it). Discarding it makes the operation unreachable, and an
+	// unreachable operation cannot be cancelled — which is the whole of the
+	// shutdown problem:
+	//
+	//   1. `connection_close` frees the `^Connection` while this `recv` is still
+	//      outstanding. When it later completes, `scanner_on_read` dereferences
+	//      `s.connection` for its arena and touches freed memory. WP58 measured
+	//      it: `free(): invalid pointer`.
+	//   2. `nbio.run()` at the end of `_server_thread_shutdown` waits for every
+	//      outstanding operation. One orphaned `recv` per idle keep-alive
+	//      connection is enough for a drain that never ends.
+	//
+	// Both are the same missing capability, so both are fixed by keeping the
+	// handle. `nbio.remove` needs the pointer and nothing else did.
+	//
+	// BRIDGE, per `vendor-policy.md` §8: this goes away with the vendored server
+	// when `core:net/http` lands.
+	pending_recv:                 ^nbio.Operation,
 }
 
 INIT_BUF_SIZE :: 1024
@@ -201,11 +225,22 @@ scanner_scan :: proc(
 	s.could_be_too_short = could_be_too_short
 
 	assert_has_td()
-	// TODO: some kinda timeout on this.
-	nbio.recv_poly(s.connection.socket, {s.buf[s.end:len(s.buf)]}, s, scanner_on_read)
+	// URUQUIM PATCH 9 (WP59) — BRIDGE. Keep the handle; see `pending_recv`.
+	s.pending_recv = nbio.recv_poly(
+		s.connection.socket,
+		{s.buf[s.end:len(s.buf)]},
+		s,
+		scanner_on_read,
+	)
 }
 
 scanner_on_read :: proc(op: ^nbio.Operation, s: ^Scanner) {
+	// URUQUIM PATCH 9 (WP59) — BRIDGE. The operation has fired, so the handle is
+	// dead: `nbio.remove` on an operation whose callback has run is itself a use
+	// after free, and the library says so. Cleared FIRST, before any early
+	// return below can skip it.
+	s.pending_recv = nil
+
 	context.temp_allocator = virtual.arena_allocator(&s.connection.temp_allocator)
 
 	defer scanner_scan(s, s.user_data, s.callback)

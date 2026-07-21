@@ -1546,3 +1546,79 @@ or a body, and that property is what let this ship as observability at all.
 | Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
 |---|---|---|---|---|---|---|
 | `refused_connections` | A | WP50 | `tests/wp50-public-surface/contract_test.odin::wp50_the_signature_is_pinned` | `tests/wp50-public-surface/contract_test.odin::wp50_with_no_server_the_count_is_zero` | `docs/ai-context.md::web.refused_connections` | reads one integer from the running server through the named `g_server` exception; owns nothing, allocates nothing |
+
+---
+
+## Amendment 19 — WP59: `Limits.max_drain_time`
+
+**Date: 2026-07-21. Authority: the ADR-029 delegation, over `planning/phase-5-spec.md`
+§2.1, which fixed the success criterion and the failure handling BEFORE the
+measurement.**
+**Ledger effect: NONE. Application stays 55, test-support stays 2, union 57.**
+A field on an existing type costs no name — the precedent is three of Phase 4's
+five deliveries.
+
+```
+application	type	Limits :: struct {..., max_drain_time: i64}
+application	const	DEFAULT_LIMITS :: Limits{..., max_drain_time = DRAIN_TIME_LIMIT}
+```
+
+**THIS FIELD WAS WITHDRAWN ONCE, AND THE WITHDRAWAL WAS CORRECT.** WP44 built it,
+measured a drain that never terminated, and removed it rather than ship a knob
+that bounded nothing. That decision is why this amendment can be written at all:
+the gap stayed named in `docs/operations.md` instead of being papered over, and
+ADR-033 reopened on the evidence.
+
+**What changed is the mechanism, not the resolve.** WP44 bounded the drain loop
+and found `nbio.run()` waiting behind it. WP58 measured the shape of that wait
+and found the cause one layer lower: `scanner.odin` discarded the
+`^nbio.Operation` returned by `recv_poly`, so the pending read was
+**unreachable** and therefore uncancellable. Keeping that pointer — nine lines —
+made cancellation possible, and cancellation ends the wait instead of bounding
+it.
+
+**IT IS ALSO A MEMORY-SAFETY FIX, and that is the part nobody was looking for.**
+WP58 measured the alternative ending: releasing the clients' sockets let the
+orphaned reads complete, `scanner_on_read` dereferenced a `^Connection` that
+`connection_close` had already freed, and the process died with `free():
+invalid pointer`. **A real deployment with idle keep-alive clients could hang on
+shutdown or crash on it, and both were reachable before this amendment.**
+
+**Measured, by `tests/wp58-drain/`:**
+
+| Phase | Before | After |
+|---|---|---|
+| no connections | 990 ms | 990 ms |
+| 8 idle keep-alive | never returned, then crashed | 987 ms |
+| 1 connection held mid-request | never returned | 1.59 s, force-closed at the 1 s deadline |
+
+**The default is ten seconds, and the number is judgement recorded as such**
+(the C-5 honesty rule). No specification sets a shutdown deadline. It is chosen
+against the only numbers that constrain it — systemd's `TimeoutStopSec` default
+of 90 s and Kubernetes' 30 s grace period — because a drain deadline is
+decoration unless it expires before the supervisor's kill.
+
+**WHAT IT DOES NOT BOUND, and `docs/operations.md` says it in these words: a
+handler that blocks.** The event loop is single-threaded (ADR-030), so a handler
+that sleeps holds the very thread the deadline is enforced on. This is the same
+honesty WP44 insisted on, and it is why the field is documented with its
+exception rather than as a guarantee.
+
+**A design attempt that failed, recorded because it looked right.**
+`nbio.run_until(&flag)` with a timeout operation arming the flag is the obvious
+shape for a bounded final drain. It is wrong: `run_until` loops while
+`num_waiting() > 0`, and the arming timeout is itself outstanding — so a
+shutdown with no connections waited the full deadline instead of returning at
+once, turning the bound into a floor. Caught by WP58's positive control, which
+went from 990 ms to 3 s. The shipped code ticks directly instead.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `Limits.max_drain_time` | A | WP59 | `build/phase1-public-signatures.txt` (struct shape frozen field-by-field) | `tests/wp58-drain/drain_test.odin::wp58_drain_anatomy`, three phases with a positive control first | `docs/operations.md` §4 and §10, `docs/ai-context.md::web.Limits` | stores one integer, validated at boot; allocates nothing; converted to a `Duration` at the transport boundary because `package web` may not import `core:time` (FINDING-B) |
+
+**Rollback.** Set the field to zero and the previous behaviour returns exactly —
+no deadline, no forced close. The vendored patches (9, 10, 11) are marked
+`URUQUIM PATCH — BRIDGE` per `vendor-policy.md` §8 and are expected to be
+**deleted** when `core:net/http` lands in January 2027, not ported. Patch 10 is
+the exception worth offering upstream regardless: the use-after-free it fixes is
+upstream's, not this project's.

@@ -62,6 +62,24 @@ Server_Opts :: struct {
 	// failure is not running out of capacity — it is running out and having none
 	// left to shut down with.**
 	reserved_connections:    int,
+	// URUQUIM PATCH 11 (WP59) — BRIDGE. The absolute drain deadline.
+	//
+	// How long a graceful shutdown may take, measured from the moment
+	// `server_shutdown` is observed. Zero means unbounded, which is the upstream
+	// behaviour and the default here.
+	//
+	// WHY IT IS ABSOLUTE. Phase 4 withdrew an earlier attempt because bounding
+	// the drain LOOP left `nbio.run()` waiting behind it — a deadline that
+	// bounds one of three waits is a deadline that does not bound shutdown. This
+	// one covers all three: the loop ticks at `SHUTDOWN_INTERVAL` instead of
+	// blocking, `.Active` connections are force-closed once it expires, and the
+	// final drain runs under `run_until` rather than `run`.
+	//
+	// WHAT IT DOES NOT BOUND, and operations.md says so in these words: a
+	// handler that blocks. The event loop is single-threaded (ADR-030), so a
+	// handler that sleeps holds the same thread the deadline is enforced on.
+	// The supervisor's kill is still the outer bound.
+	max_drain_time:          time.Duration,
 	// URUQUIM PATCH 6 (WP46 / ADR-031) — the request read deadline.
 	//
 	// How long ONE request may take to arrive, from its first byte to its last.
@@ -318,11 +336,46 @@ _server_thread_shutdown :: proc(s: ^Server, loc := #caller_location) {
 	// 	log.infof("had %i temp blocks to spare", blocks)
 	// }
 
+	// URUQUIM PATCH 11 (WP59) — BRIDGE. The absolute drain deadline.
+	//
+	// WP58 measured what this replaces: with eight idle keep-alive connections
+	// the drain did not end at all, and releasing the clients' sockets crashed
+	// the process instead. Both failures are below, and both are addressed here.
+	//
+	// THE DEADLINE COVERS THREE WAITS, because bounding one of them is what
+	// failed in Phase 4:
+	//
+	//   1. `nbio.tick()` blocked with no timeout, so the loop could not
+	//      re-evaluate anything between events. It now ticks at
+	//      `SHUTDOWN_INTERVAL` — the constant defined at the top of this file
+	//      that upstream never used, and that its own comment above
+	//      `server_shutdown` promised.
+	//   2. `.Active` connections were only LOGGED, so `td.conns` never emptied
+	//      while a client held one. Past the deadline they are force-closed.
+	//   3. `nbio.run()` waited for every outstanding operation. It is now
+	//      `run_until`, released by a timeout armed on the same deadline.
+	//
+	// Zero keeps the upstream behaviour exactly: no deadline, no forced close.
+	drain_bounded := s.opts.max_drain_time > 0
+	drain_expires := time.time_add(time.now(), s.opts.max_drain_time)
+	drain_expired := false
+
 	for {
+		past_deadline := drain_bounded && time.since(drain_expires) >= 0
+
 		for sock, conn in td.conns {
 			#partial switch conn.state {
 			case .Active:
-				log.infof("shutdown: connection %i still active", sock)
+				// PAST THE DEADLINE, "still active" stops being a reason to
+				// wait. Before it, this is upstream's behaviour unchanged: an
+				// in-flight request is allowed to finish, which is the whole
+				// point of a graceful shutdown.
+				if past_deadline {
+					log.infof("shutdown: deadline expired, closing active connection %i", sock)
+					connection_close(conn)
+				} else {
+					log.infof("shutdown: connection %i still active", sock)
+				}
 			case .New, .Idle, .Pending:
 				log.infof("shutdown: closing connection %i", sock)
 				connection_close(conn)
@@ -337,7 +390,11 @@ _server_thread_shutdown :: proc(s: ^Server, loc := #caller_location) {
 			break
 		}
 
-		err := nbio.tick()
+		// A BOUNDED TICK IS WHAT MAKES THE DEADLINE REACHABLE. With
+		// `nbio.tick()` the loop parks until an event arrives, and a client that
+		// sends nothing produces no events — so the deadline above would only be
+		// evaluated when the thing it exists to interrupt happened to stop.
+		err := nbio.tick(SHUTDOWN_INTERVAL if drain_bounded else nbio.NO_TIMEOUT)
 		fmt.assertf(err == nil, "IO tick error during shutdown: %v")
 	}
 
@@ -346,7 +403,33 @@ _server_thread_shutdown :: proc(s: ^Server, loc := #caller_location) {
 	nbio.remove(td.accept)
 	td.accept = nil
 
-	nbio.run()
+	// The final drain. Every connection is closed by here, but their close
+	// timeouts and `close` operations are still outstanding, and PATCH 10 has
+	// cancelled the `recv` that used to outlive them.
+	//
+	// A BOUNDED TICK LOOP rather than `run` or `run_until`, and the first attempt
+	// at this is worth recording because it looked right and was not.
+	//
+	// `run_until(&flag)` with a timeout operation arming the flag is the obvious
+	// shape. It is wrong here: `run_until` loops while `num_waiting() > 0`, and
+	// the arming timeout is ITSELF an outstanding operation. A shutdown with no
+	// connections at all then waited the full deadline instead of returning
+	// immediately — the deadline became a floor rather than a ceiling. Measured,
+	// not reasoned: WP58's baseline phase went from 990 ms to the full bound.
+	//
+	// Ticking directly has neither problem. The loop ends when the work is done,
+	// or when the deadline expires, whichever comes first — which is what an
+	// absolute deadline is supposed to mean.
+	for nbio.num_waiting() > 0 {
+		if drain_bounded && time.since(drain_expires) >= 0 {
+			drain_expired = true
+			log.warn("shutdown: drain deadline expired with operations outstanding")
+			break
+		}
+		err := nbio.tick(SHUTDOWN_INTERVAL if drain_bounded else nbio.NO_TIMEOUT)
+		fmt.assertf(err == nil, "IO tick error during shutdown drain: %v")
+	}
+	_ = drain_expired
 	nbio.release_thread_event_loop()
 
 	td.state = .Closed
@@ -454,6 +537,28 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 	log.debugf("closing connection: %i", c.socket)
 
 	c.state = .Closing
+
+	// URUQUIM PATCH 10 (WP59) — BRIDGE. Cancel the outstanding `recv` before
+	// anything below frees the connection it points at.
+	//
+	// This is a MEMORY-SAFETY fix that happens to also end the drain, and the
+	// order matters in both directions:
+	//
+	//   - Without it, the callback at the bottom of this procedure frees `c`
+	//     while the scanner's `recv` is still outstanding. When that `recv` later
+	//     completes — which is exactly what a client disconnecting causes —
+	//     `scanner_on_read` dereferences `s.connection` and the process dies.
+	//     WP58 measured `free(): invalid pointer` doing precisely this.
+	//   - Without it, the operation also stays in `num_waiting()`, and the
+	//     `nbio.run()` that ends `_server_thread_shutdown` waits on it forever.
+	//
+	// `nbio.remove` is final and silent: the callback will never run. That is
+	// the property this needs — the connection is going away and nothing should
+	// be scheduled to touch it again.
+	if c.scanner.pending_recv != nil {
+		nbio.remove(c.scanner.pending_recv)
+		c.scanner.pending_recv = nil
+	}
 
 	// RFC 7230 6.6.
 

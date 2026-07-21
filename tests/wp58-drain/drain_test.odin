@@ -64,9 +64,21 @@
 // upstream's own `// TODO: some kinda timeout on this` one line above it — is
 // the reason it cannot be cancelled yet.
 //
-// The last two phases are obligation 3, and they are expected to FAIL until
-// WP59. They are committed RED on purpose: a test that has never failed is a
-// test nobody has shown to test anything.
+// WHAT WP59 CHANGED, and the numbers are from this suite:
+//
+//	                  before WP59              after WP59
+//	baseline          990 ms                   990 ms
+//	idle (8 conns)    never returned, crash    987 ms
+//	active (1 conn)   never returned           1.59 s, force-closed at 1 s
+//
+// The fix is to CANCEL the operation rather than bound the wait around it:
+// `scanner.odin` keeps the `^nbio.Operation` it used to discard, and
+// `connection_close` calls `nbio.remove` on it before freeing the connection.
+// That removes the use-after-free and the orphaned wait in one change, because
+// they were the same missing capability.
+//
+// This suite was committed RED against the tree before that patch, and the
+// failing commit is the evidence that it tests something.
 //
 // HOW IT FAILS WITHOUT HANGING, which is the part WP44 could not solve. The
 // suite never blocks on an unbounded join. It waits on a semaphore the serve
@@ -91,9 +103,15 @@ import web "uruquim:web"
 // servers.
 CANDIDATE_PORTS :: [?]int{55011, 55337, 55603, 55889}
 
-// What the suite is willing to call "the drain ended". It is a property of the
-// TEST, not of the framework — there is no framework deadline yet, and naming
-// this one in the assertions keeps it from being read as one.
+// The deadline the SERVER is configured with, in nanoseconds. Deliberately far
+// below `DEFAULT_LIMITS.max_drain_time` (ten seconds): a suite that tested the
+// default would take ten seconds per phase to prove a bound, and a bound worth
+// having is one a test can afford to hit.
+SERVER_DRAIN_TIME :: i64(1 * 1_000_000_000)
+
+// What the suite is willing to wait before calling the drain stuck. It is a
+// property of the TEST and is three times the server's own deadline, so a phase
+// that fails has genuinely blown the bound rather than raced it.
 DRAIN_DEADLINE :: 3 * time.Second
 
 // How long the rescue is given. Longer than the deadline because the rescue is
@@ -143,6 +161,10 @@ start_server :: proc(s: ^Server) -> bool {
 	g_server = s
 	for candidate in CANDIDATE_PORTS {
 		s.app = web.app()
+		// The whole point of the suite: a drain deadline short enough to observe.
+		l := web.DEFAULT_LIMITS
+		l.max_drain_time = SERVER_DRAIN_TIME
+		web.limits(&s.app, l)
 		web.get(&s.app, "/ping", ping_handler)
 		s.port = candidate
 		s.thread = thread.create_and_start(serve_thread)
@@ -392,7 +414,7 @@ phase_obligation_3_stop_returns_with_a_connection_held_active :: proc(t: ^testin
 	testing.expect(
 		t,
 		returned,
-		"OBLIGATION 3: `web.stop` must return under a deadline while a client holds a connection open. This is EXPECTED RED until WP59 — the drain loop only logs `.Active` connections, so `td.conns` never empties",
+		"OBLIGATION 3: `web.stop` must return under a deadline while a client holds a connection open, by force-closing it once `max_drain_time` expires",
 	)
 }
 
