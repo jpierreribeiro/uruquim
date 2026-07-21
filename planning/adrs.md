@@ -1282,7 +1282,31 @@ none; the requirement it keeps is the one nobody disputes.
 
 ## ADR-033 — the transport foundation: keep it, patch it, or own it
 
-- **Status.** **REOPENED 2026-07-21, the same day it closed, by the trigger it
+- **Status.** **CLOSED 2026-07-21 (second closure) — A/B, KEEP AND PATCH, WITH
+  THE JANUARY 2027 TRANSITION AS THE DECLARED EXIT.** The third data point
+  arrived and it was contained: WP59 patched the OPERATION LIFECYCLE of the
+  event loop — the very thing this ADR named as the far side of the boundary —
+  in three sites, one struct field and one option field, and the patch held.
+  See §5 of `planning/phase-5-freeze.md`.
+
+  **But containment is no longer what decides it**, and the record should not
+  pretend otherwise. Amendment 1 (below) removed arm C when `core:net/http`
+  acquired a date. Owning a connection layer over six months, to be superseded
+  by one the language maintains, loses whether or not the patch is contained.
+  So this closes on keep-and-patch with an EXIT rather than with a permanent
+  answer, and the three drain patches are marked `BRIDGE` — to be deleted, not
+  ported.
+
+  **What WP59 found on the way is why this ADR was worth keeping open.** The
+  drain did not merely lack a deadline: it could not terminate at all with idle
+  keep-alive connections, and completing those connections crashed the process
+  on a freed pointer. Both came from one discarded operation handle in the
+  vendored scanner. **That is an upstream defect**, and it is being carried by
+  every project that vendors this server.
+
+  The history below is preserved rather than rewritten.
+
+  **Previously: REOPENED 2026-07-21, the same day it closed, by the trigger it
   wrote for itself.** **See also Amendment 1 at the end of this file (2026-07-21):
   `core:net/http` ships in January 2027, which removes arm C and points this ADR
   at keep-and-patch with the transition as its declared exit.** It closed on
