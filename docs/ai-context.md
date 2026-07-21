@@ -172,6 +172,39 @@ empty prefix, or more than eight, **rejects the application at boot** — an emp
 prefix would match every peer. The result is a request-scoped view: copy it to
 keep it.
 
+### CORS
+
+```text
+Cors_Options{origins, methods, headers, credentials, max_age}
+cors(&app, o)                      set it; before the first request
+```
+
+Configuration, not middleware: the headers must reach the automatic 404, the
+405 and the driver's 500 too, and the preflight must be answered before any
+handler runs.
+
+The unsafe combinations are refused at REGISTRATION — the application is
+poisoned and `serve` refuses to bind — because a CORS mistake is a hole that
+works perfectly and quietly: `*` with `credentials`, `*` beside named origins,
+and `*` in `headers` with `credentials` (the Fetch standard does not let that
+wildcard cover `Authorization`). An empty origin list is refused too.
+
+A listed origin is echoed back with `Vary: Origin`, never the literal `*`. An
+unlisted origin is SERVED with no CORS header at all, so the browser refuses to
+hand the result to the page — refusing outright would break same-origin browser
+POSTs, which also carry an `Origin`.
+
+<!-- fragment: phase5/cors -->
+```odin
+app := web.app()
+web.cors(&app, web.Cors_Options{
+	origins     = {"https://app.example.com"},
+	headers     = "Content-Type, Authorization",
+	credentials = true,
+	max_age     = 600,
+})
+```
+
 ### Limits
 
 ```text
@@ -711,7 +744,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-55 application symbols.
+57 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

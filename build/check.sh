@@ -1092,6 +1092,29 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp50-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp50-public-surface"
 
+# WP60 — CORS. The public half: what an application can observe about its own
+# policy, plus the five fail-closed configurations.
+echo "--- WP60 CORS: the policy an application can observe (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp60-public-surface" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp60-public-surface"
+
+# WP60 — the preflight, internal for the WP32b reason: a preflight is an OPTIONS
+# request and `Method` has no OPTIONS member. A public suite that could send one
+# would be evidence the frozen enum had grown.
+echo "--- WP60 CORS preflight (throwaway package) ---"
+URUQUIM_WP60_TMP="$(mktemp -d -t uruquim-wp60-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP60_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP60_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp60-internal/*.odin "$URUQUIM_WP60_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP60_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp60-internal"
+rm -rf "$URUQUIM_WP60_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP60_TMP" || fail "the throwaway WP60 internal-test package was not removed"
+echo "PASS: WP60 preflight ran against the real sources; throwaway package removed"
+
 # WP58/WP59 — the drain deadline. Under an EXTERNAL timeout, because the defect
 # this suite was written against presents as a hang: a suite that hangs here
 # would stall the gate rather than fail it, and "the gate is still running" is

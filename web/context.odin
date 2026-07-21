@@ -176,6 +176,22 @@ Context_Internal :: struct {
 	peer:    string,
 	trusted: Trusted_Proxies,
 
+	// WP60 — the cross-origin policy, copied from the App by the driver, plus
+	// what `cors_resolve` decided about THIS request.
+	//
+	// `cors_origin` is a VIEW over the arrived `Origin` header, request-scoped
+	// like every other view here. `cors_active` says the origin was allowed and
+	// the response carries the headers; `cors_preflight` says the request was an
+	// OPTIONS carrying `Access-Control-Request-Method`, which is answered
+	// without running a handler.
+	cors:                  Cors_Config,
+	cors_origin:           string,
+	cors_active:           bool,
+	cors_preflight:        bool,
+	// Request-local storage for the rendered `Access-Control-Max-Age`, on the
+	// same terms as `allow_buffer`: the committed response holds a view over it.
+	cors_max_age_buffer:   [CORS_MAX_AGE_DIGITS]u8,
+
 	// WP36 — the byte budget this request is held to, copied from the App by
 	// the driver alongside the observer and the state.
 	//

@@ -6,6 +6,7 @@ application	proc	bare :: proc() -> App
 application	proc	bearer_token :: proc(ctx: ^Context) -> (value: string, ok: bool)
 application	proc	body :: proc(ctx: ^Context, dst: ^$T) -> bool
 application	proc	client_ip :: proc(ctx: ^Context) -> string
+application	proc	cors :: proc(a: ^App, o: Cors_Options)
 application	proc	created :: proc(ctx: ^Context, value: $T)
 application	proc	delete :: proc(a: ^App, pattern: string, handler: Handler)
 application	proc	destroy :: proc(a: ^App)
@@ -44,6 +45,7 @@ application	proc	unauthorized :: proc(ctx: ^Context, message: string)
 application	proc	use :: proc(a: ^App, middleware: Handler)
 application	type	App :: struct {private: App_Internal}
 application	type	Context :: struct {request: Request, private: Context_Internal}
+application	type	Cors_Options :: struct {origins: []string, methods: string, headers: string, credentials: bool, max_age: int}
 application	type	Framework_Error :: enum {None, Response_Marshal_Failed, Body_Decode_Failed, Body_Consumed_Twice, No_Response_Committed, Invalid_Serve_Port, Serve_Listen_Failed, Use_After_Route}
 application	type	Framework_Event :: struct {kind: Framework_Error, method: Method, route: string, status: Status, payload_type: typeid}
 application	type	Handler :: proc(ctx: ^Context)

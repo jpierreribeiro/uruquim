@@ -134,6 +134,10 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 	// per-application.
 	ctx.private.trusted = a.private.trusted
 
+	// WP60: the cross-origin policy travels the same way, so `test_request` and
+	// the socket agree about CORS by construction (R-10).
+	ctx.private.cors = a.private.cors
+
 	if inbound.over_limit {
 		// The adapter rejected the body for length BEFORE the handler. The core
 		// authors the WP7 413 envelope; the handler never runs (WP8 D3).
@@ -156,6 +160,16 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 		headers = header_view_from_pairs(inbound_header_pairs(inbound, context.temp_allocator)),
 		body    = inbound.body,
 	}
+	// WP60: resolve the origin BEFORE dispatch, because a preflight must be
+	// answered without running a handler — and because the headers have to be
+	// on the Context before any response, including a 404 or a 500, is built.
+	cors_resolve(ctx)
+	if ctx.private.cors_preflight {
+		cors_commit_preflight(ctx)
+		driver_finalize(ctx)
+		return
+	}
+
 	dispatch(a, ctx)
 	driver_finalize(ctx)
 }
