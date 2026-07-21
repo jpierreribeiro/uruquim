@@ -490,35 +490,33 @@ wp7_second_bind_never_double_commits :: proc(t: ^testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// 17-18. Incompatible destination / internal decoder failure -> log + 500
+// 17-18. Client field mismatch -> stable 400 (WP68)
 // ---------------------------------------------------------------------------
 
 @(test)
-wp7_incompatible_destination_logs_and_500s :: proc(t: ^testing.T) {
-	// Valid JSON whose shape does not fit the destination is NOT the client's
-	// "invalid JSON": it is a decoder/destination fault. It must be logged and
-	// answered with a 500, never invalid_json.
+wp68_incompatible_field_is_a_client_400 :: proc(t: ^testing.T) {
+	// Valid JSON whose field value does not fit the declared type is a client
+	// error with a stable path. Unsupported destination TYPES remain internal,
+	// but an ordinary scalar mismatch is not a framework fault.
 	record: Wp7_Log
 	ctx: Context
 	defer request_arena_destroy(&ctx)
 	record.response = &ctx.private.response
 	context.logger = wp7_recording_logger(&record)
 
-	// `age` expects an int; a string there is a type mismatch the decoder
-	// reports as Unsupported_Type.
+	// `age` expects an int; a non-numeric string is attributed to that field.
 	ctx.request.body = transmute([]u8)string(`{"age":"not-an-int"}`)
 
 	dst: Wp7_User
 	ok := body(&ctx, &dst)
 
 	testing.expect(t, !ok)
-	testing.expect_value(t, record.framework_calls, 1)
-	testing.expect(t, !record.committed_at_log, "the failure must be logged BEFORE the 500 is committed")
-	testing.expect_value(t, ctx.private.response.status, Status.Internal_Server_Error)
+	testing.expect_value(t, record.framework_calls, 0)
+	testing.expect_value(t, ctx.private.response.status, Status.Bad_Request)
 	testing.expect_value(
 		t,
 		string(ctx.private.response.body),
-		`{"error":{"code":"internal_error","message":"Internal server error"}}`,
+		`{"error":{"code":"invalid_field","message":"Request field has an invalid value","field":"age"}}`,
 	)
 }
 
@@ -527,8 +525,8 @@ wp7_a_failed_bind_leaves_no_leak :: proc(t: ^testing.T) {
 	// A partial parse may leave allocations in the arena; teardown must release
 	// them. Drive every failure mode and confirm the tracker is clean.
 	//
-	// The type-mismatch case logs a decode-failed diagnostic; swallow it so the
-	// runner does not count that expected Error record as a failure.
+	// Keep a recording logger installed to prove client failures do not emit a
+	// framework-fault diagnostic while all temporary allocations are released.
 	record: Wp7_Log
 	context.logger = wp7_recording_logger(&record)
 

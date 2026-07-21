@@ -73,7 +73,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp39_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp41_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase6_spec.sh"
-bash -n "$URUQUIM_ROOT/build/check_wp67_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_vendor_policy.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp38_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
@@ -1071,7 +1071,7 @@ bash "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 # proves each is red for the pre-registered reason and that the current 500 is
 # identical on the memory and real-socket transports.
 echo "--- WP67 JSON failure anatomy and RED controls ---"
-env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_wp67_controls.sh"
+env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 
 # WP51 — the vendor maintenance policy. It runs in the gate because it is the
 # PRECONDITION for WP46: a patch that predates the policy governing patches is

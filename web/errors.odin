@@ -118,6 +118,30 @@ ERROR_CODE_INVALID_PATH_PARAMETER :: "invalid_path_parameter"
 @(private)
 ERROR_CODE_INVALID_QUERY_PARAMETER :: "invalid_query_parameter"
 
+// WP68 — strict request decoding distinguishes syntax from a value that does
+// not fit the declared destination and from a key the destination does not
+// declare. These are wire codes, not public Odin symbols.
+@(private)
+ERROR_CODE_INVALID_FIELD :: "invalid_field"
+
+@(private)
+ERROR_CODE_UNKNOWN_FIELD :: "unknown_field"
+
+@(private)
+ERROR_MESSAGE_INVALID_FIELD :: "Request field has an invalid value"
+
+@(private)
+ERROR_MESSAGE_UNKNOWN_FIELD :: "Request field is not recognized"
+
+#assert(
+	len("{\"error\":{\"code\":\"") +
+	max(len(ERROR_CODE_INVALID_FIELD), len(ERROR_CODE_UNKNOWN_FIELD)) +
+	len("\",\"message\":\"") +
+	max(len(ERROR_MESSAGE_INVALID_FIELD), len(ERROR_MESSAGE_UNKNOWN_FIELD)) +
+	len("\",\"field\":\"") + ERROR_NAME_ESCAPED_MAX + len("\"}}") <=
+	ERROR_BODY_MAX,
+)
+
 // The three ratified message shapes. Each is a prefix and a suffix wrapped
 // around the escaped parameter name.
 @(private)
@@ -314,6 +338,44 @@ error_commit_parameter :: proc(
 		response_json_headers(ctx),
 		buffer[:n],
 	)
+}
+
+// error_commit_field is the allocation-free WP68 renderer for a decoder
+// failure tied to a field path. `field` is already a decoded, bounded path;
+// the shared escaper makes it safe JSON and applies the same deterministic
+// 64-byte wire bound as the Phase-1 extractor errors.
+@(private)
+error_commit_field :: proc(ctx: ^Context, code, message, field: string) {
+	if ctx.private.response.committed {
+		return
+	}
+
+	buffer := ctx.private.error_buffer[:]
+	n := 0
+	n += copy(buffer[n:], "{\"error\":{\"code\":\"")
+	n += copy(buffer[n:], code)
+	n += copy(buffer[n:], "\",\"message\":\"")
+	n += copy(buffer[n:], message)
+	n += copy(buffer[n:], "\",\"field\":\"")
+	n = error_write_escaped_name(buffer, n, field)
+	n += copy(buffer[n:], "\"}}")
+
+	response_commit(
+		&ctx.private.response,
+		.Bad_Request,
+		response_json_headers(ctx),
+		buffer[:n],
+	)
+}
+
+@(private)
+error_invalid_body_field :: proc(ctx: ^Context, field: string) {
+	error_commit_field(ctx, ERROR_CODE_INVALID_FIELD, ERROR_MESSAGE_INVALID_FIELD, field)
+}
+
+@(private)
+error_unknown_body_field :: proc(ctx: ^Context, field: string) {
+	error_commit_field(ctx, ERROR_CODE_UNKNOWN_FIELD, ERROR_MESSAGE_UNKNOWN_FIELD, field)
 }
 
 // error_invalid_path_parameter commits the 400 for a path parameter that is

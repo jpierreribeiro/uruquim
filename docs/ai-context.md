@@ -568,6 +568,9 @@ Semantics you must not guess at:
 - **Nothing is decoded.** `?q=a%20b` yields the literal `a%20b`.
 - **`body` is single-use.** Call it at most once per request; a second call
   decodes nothing. After it returns false, `dst` is undefined — discard it.
+- **Body decoding is strict.** Malformed or trailing input is `invalid_json`;
+  a wrong value type is `invalid_field`; an undeclared key is `unknown_field`.
+  The latter two carry a bounded dot-separated `field` path.
 - **The body cap is a fixed 4 MiB.** An oversized request is `413` before your
   handler runs, even if the handler never calls `body`.
 
@@ -645,10 +648,10 @@ All errors share one envelope:
 {"error": {"code": "...", "message": "...", "field": "..."}}
 ```
 
-`field` is present only for the two extractor errors
-(`invalid_path_parameter`, `invalid_query_parameter`). For every other code it
-is **omitted entirely** — never `null`, never `""`. `docs/errors.md` documents
-each code.
+`field` is present only for input-specific errors:
+`invalid_path_parameter`, `invalid_query_parameter`, `invalid_field`, and
+`unknown_field`. For every other code it is **omitted entirely** — never
+`null`, never `""`. `docs/errors.md` documents each code.
 
 ## Middleware
 

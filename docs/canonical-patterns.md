@@ -423,9 +423,11 @@ create_user :: proc(ctx: ^web.Context) {
 }
 ```
 
-Invalid JSON automatically produces the `invalid_json` envelope (400); a body
-over the fixed 4 MiB cap produces `body_too_large` (413). In both cases
-`web.body` has already responded — just `return`.
+Malformed or incomplete JSON produces `invalid_json` (400). A value that does
+not fit its declared type produces `invalid_field` with a stable dot-separated
+path; an undeclared key produces `unknown_field`. A body over the configured
+cap produces `body_too_large` (413). In every case `web.body` has already
+responded — just `return`.
 
 WP7 rules you must not guess at:
 
@@ -439,7 +441,12 @@ WP7 rules you must not guess at:
 - **Values only.** The destination is a concrete struct; the payload decodes by
   value, matching the response side (`web.ok(ctx, value)`).
 - **Strict JSON.** Comments, unquoted keys and single-quoted strings are
-  rejected. Do not rely on JSON5.
+  rejected, trailing tokens are rejected, and undeclared object keys are not
+  ignored. Do not rely on JSON5 or permissive field skipping.
+- **Four input states are distinct design concerns.** A field may be missing,
+  present with its zero value, present as JSON `null`, or present with a
+  non-null value. WP68 does not infer requiredness from zero and does not add a
+  generic patch wrapper; explicit requiredness/validation is owned by WP81.
 
 ## Query parameters
 

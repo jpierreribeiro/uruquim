@@ -334,12 +334,12 @@ Evidence: `tests/wp9-semantic/http_factory_test.odin::wp9_semantic_matrix_on_the
 
 ## 7. Dependency inventory
 
-Snapshot: `build/phase1-direct-dependencies.txt` (15 direct imports, diffed on
+Snapshot: `build/phase1-direct-dependencies.txt` (19 direct imports, diffed on
 every gate run).
 
 | Package | Direct imports |
 |---|---|
-| `web` | `core:mem`, `core:strings`, `core:encoding/json`, `uruquim:web/testing`, `uruquim:web/internal/transport` |
+| `web` | `core:mem`, `core:strings`, `core:encoding/json`, `core:os`, `core:reflect`, `core:strconv`, `uruquim:web/testing`, `uruquim:web/internal/transport` |
 | `web/testing` | `core:mem`, `core:strings` |
 | `web/internal/transport` | `core:mem`, `core:net`, `core:slice`, `core:strings`, `core:time`, `uruquim:vendor/odin-http` |
 | `examples/01..03` | `uruquim:web` only |
@@ -1846,3 +1846,48 @@ bytes came from would not.
 **Rollback.** All three are readers over a private parser and a private Context
 field; removing them removes the feature with no other symbol affected. No
 dependency is added — the parser uses `core:strings`, which `web` already had.
+
+---
+
+## Amendment 23 — WP68: honest JSON classification, no ledger growth
+
+**Date: 2026-07-21. Authority: `planning/phase-6-spec.md` §5.1 and Amendments
+1–2. Ledger effect: none; application remains 62 and test-support remains 2.**
+
+**Dependency ledger: `web` gains `core:reflect` and `core:strconv`.** Both are
+Odin standard-library packages under the repository's BSD-3-Clause license
+(`$ODIN_ROOT/LICENSE`). Their sole owner is the private
+`web/json_decode.odin` structural preflight: reflection maps the caller's
+concrete destination to JSON fields, and `strconv` verifies the numeric string
+coercions the pinned stdlib decoder already accepts. Neither type appears in a
+public signature, and neither crosses the transport boundary.
+
+**Why two dependencies are justified.** The WP67 experiment proved that the
+standard decoder supplies neither an object-field stack nor an unknown-key
+error. Reimplementing that information without RTTI would require a second
+schema declaration or generated code, both larger public concepts explicitly
+refused by the Phase-6 spec. Reimplementing numeric conversion would create a
+second interpretation of values already owned by the stdlib. The two imports
+therefore keep the implementation thin: standard grammar and conversion,
+private structural comparison only.
+
+**Cost evidence.** Two adjacent worktrees (WP67 parent `5db85d0` and WP68), the
+same pinned `819fdc7` compiler and byte-identical build commands measured
+`01-hello-world` at 966,720 versus 966,768 bytes: **+48 bytes** for an
+application that never calls `body`. The JSON example measured 1,116,288
+versus 1,133,768 bytes: **+17,480 bytes** when the feature is used. The result
+shows that the linker removes practically the whole preflight when unused;
+introducing registration or code generation to chase the residual 48 bytes
+would oppose the project's simplicity goal. These exact measurements are
+evidence, not a permanent size promise.
+
+**Ownership and failure.** The preflight tree lives in a disposable dynamic
+arena and is destroyed before the authoritative typed decode. Its field path
+is a fixed request-local value and the error envelope uses the existing fixed
+Context buffer. Malformed input is validated allocation-free first because the
+pinned parser's partial-error cleanup consults the implicit allocator; the WP7
+tracking test caught that mismatch and now pins zero leaks and zero bad frees.
+
+**Rollback.** Removing `web/json_decode.odin`, the two 400 renderers and the
+preflight call restores the pre-WP68 decoder behavior and removes both imports.
+No signature, ledger row, Context field or transport contract changes.

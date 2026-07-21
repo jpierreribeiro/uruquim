@@ -155,7 +155,7 @@ response_body :: proc(raw: string) -> string {
 }
 
 @(test)
-wp67_current_500_is_identical_on_memory_and_socket :: proc(t: ^testing.T) {
+wp68_client_type_error_is_identical_on_memory_and_socket :: proc(t: ^testing.T) {
 	filter: Log_Filter
 	context.logger = filtered_logger(&filter)
 
@@ -163,7 +163,7 @@ wp67_current_500_is_identical_on_memory_and_socket :: proc(t: ^testing.T) {
 	defer web.destroy(&memory_app)
 	web.post(&memory_app, "/input", bind_input)
 	memory := web.test_request(&memory_app, .POST, "/input", `{"age":"old"}`)
-	testing.expect_value(t, memory.status, web.Status.Internal_Server_Error)
+	testing.expect_value(t, memory.status, web.Status.Bad_Request)
 
 	s: Server
 	s.app = web.app()

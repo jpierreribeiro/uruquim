@@ -8,21 +8,24 @@ Every error Uruquim produces is JSON, with one envelope shape:
 
 - `code` is stable. Match on it, not on the message.
 - `message` is human-readable and may be reworded.
-- `field` is present **only** when a specific input field caused the error —
-  that is, only for `invalid_path_parameter` and `invalid_query_parameter`. For
-  every other code it is **omitted entirely**: never `null`, never `""`.
+- `field` is present **only** when a specific input field caused the error.
+  Today that is `invalid_path_parameter`, `invalid_query_parameter`,
+  `invalid_field`, and `unknown_field`. For every other code it is **omitted
+  entirely**: never `null`, never `""`.
 
 Every error carries `Content-Type: application/json`.
 
 All examples below were captured from a running server.
 
-## The ten Phase-1 codes
+## The twelve current codes
 
 | `code` | HTTP | Producer | `field`? |
 |---|---|---|---|
 | `invalid_path_parameter` | 400 | `web.path_int` | yes |
 | `invalid_query_parameter` | 400 | `web.query_int`, `web.query_int_or` | yes |
 | `invalid_json` | 400 | `web.body` | no |
+| `invalid_field` | 400 | `web.body` | yes |
+| `unknown_field` | 400 | `web.body` | yes |
 | `body_too_large` | 413 | `web.body` (enforced by the transport) | no |
 | `bad_request` | 400 | `web.bad_request` | no |
 | `unauthorized` | 401 | `web.unauthorized` | no |
@@ -92,8 +95,41 @@ never produces this error: it reports presence and returns.
 Triggered by an empty body, malformed JSON, and JSON5 constructs (comments,
 unquoted keys, single-quoted strings), which strict JSON rejects.
 
-Well-formed JSON that does not fit the destination type is **not** this error:
-that is a server-side fault, logged and answered as `internal_error`.
+Well-formed JSON that does not fit a declared field is `invalid_field`, not a
+syntax error.
+
+---
+
+### `invalid_field` — 400
+
+**Producer:** `web.body`. **Field:** the stable destination path.
+
+**Message:** `Request field has an invalid value`
+
+```json
+{"error":{"code":"invalid_field","message":"Request field has an invalid value","field":"address.number"}}
+```
+
+The code means the JSON grammar is valid, but the value cannot be decoded into
+the declared field type. Nested object fields use dot-separated paths. A wrong
+root aggregate uses `$`. The response never includes the raw value, an Odin
+type name, source file, or decoder diagnostic.
+
+---
+
+### `unknown_field` — 400
+
+**Producer:** `web.body`. **Field:** the stable undeclared-key path.
+
+**Message:** `Request field is not recognized`
+
+```json
+{"error":{"code":"unknown_field","message":"Request field is not recognized","field":"profile.surprise"}}
+```
+
+Canonical body decoding is strict: object keys not represented by the
+destination are rejected instead of silently skipped. If several unknown keys
+exist at the same object level, the selected key is deterministic.
 
 ---
 
@@ -204,7 +240,8 @@ each logged first:
 
 - a response payload the JSON encoder cannot serialize (a pointer or a
   procedure — Phase-1 payloads are values);
-- a request body that is valid JSON but does not fit the destination type;
+- an unsupported request destination type or internal decoder/allocation
+  failure (ordinary client type mismatches are `invalid_field`);
 - a handler that returns without responding. HTTP has no zero status, so the
   driver logs the mistake and answers 500.
 
