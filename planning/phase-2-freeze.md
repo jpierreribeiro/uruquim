@@ -270,7 +270,7 @@ answer less than they claim.
 
 | Value | Owner | Valid until | May it escape? | Who cleans up |
 |---|---|---|---|---|
-| route pattern | App | `destroy(&app)` | only as a documented view | App |
+| route pattern, incl. `web.route(ctx)` — **WP34** | App | `destroy(&app)` | only as a documented view, and only while the App lives | App |
 | `request.path` / `query` / `body` | transport | end of request | no — copy first | transport |
 | inbound header name/value | transport | end of request | no — copy first | transport |
 | `bearer_token` result | transport | end of request | no — copy first | transport |
@@ -281,10 +281,26 @@ answer less than they claim.
 | `Framework_Event.route` | App | `destroy(&app)` | only while the App lives | App |
 | middleware list and chain pool | App | `destroy(&app)` | no | App |
 | `Router` after `mount` | App | `destroy(&app)` | no | App |
+| application state, `web.state(ctx, T)` — **WP37** | **the caller** | as long as the caller keeps the value alive | it is the caller's own pointer; the App only borrows it | **the caller** — the framework allocated nothing |
 | `Recorded_Response` | recorder | next `test_request` | copy to keep | App teardown |
 
 **One rule:** only `Framework_Event` may escape a request. Everything else is a
-view, and a view outlives nothing.
+view, and a view outlives nothing — with one named exception, twice over: the
+**route pattern**, whether it arrives through `web.route(ctx)` or through
+`Framework_Event.route`, is App-owned and lives until `destroy`. It outlives the
+request and does not outlive the application.
+
+**AMENDED BY PHASE 3 (WP34, WP37), not appended to.** Two rows changed rather
+than two rows being added beside the old ones: `route` reaches the pattern the
+event already carried, so the exception has a second door and not a second
+meaning. **`web.state` is the one row where the framework is not the owner** —
+it borrows a pointer, frees nothing, and the value must outlive the App. No
+assert can enforce that (the type is still right and the memory still mapped),
+so the rule is taught as LAYOUT in `examples/07-app-state`: the state and the
+App are both locals of `main`.
+
+**WP33 added no lifetime.** Multi-parameter captures are the same
+request-scoped views `web.path` always returned, at a higher count.
 
 **Enforced, not merely written:** the reuse invariant is test-pinned (WP2 — a
 path view reading `"/users"` reads `"######"` after buffer reuse while a copy

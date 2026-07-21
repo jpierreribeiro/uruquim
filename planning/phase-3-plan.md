@@ -1108,6 +1108,58 @@ Everything WP25 required, plus what Phase 3 adds:
 * **`nm` measurements with positive controls** for every new "costs nothing
   when unused" claim.
 
+**WP38 DONE, 2026-07-20 — `planning/phase-3-freeze.md`,
+`build/check_phase3_freeze.sh`, `build/check_wp38_controls.sh`,
+`experiments/11-usage-lab/`.** **PHASE 3 IS FROZEN: 44 → 50 application, union
+52.** Approval was the gate's, under the ADR-029 delegation, and every recorded
+criterion is met — so nothing stopped for the owner. `check_wp38_controls.sh`
+proves that is a fact about the tree rather than about the agent: control 7
+pushes the lab program past 25 concepts and the gate refuses it as a reserved
+matter.
+
+**The new freeze gate is one lesson older than its predecessor.** It pins Phase
+3's totals as HISTORY from the day they are written, checks the document's own
+arithmetic, and separately requires the live ledger not to have SHRUNK — which
+catches what the Phase-2 gate's live comparison was actually protecting against,
+without breaking the first time Phase 4 adds a symbol.
+
+**Re-running every mutation suite found a control that had silently stopped
+working, which is the whole argument for the step.** WP18's control 6 removed
+`mount`'s append guard and required the fail-closed tests red; it stayed green,
+because WP30's conflict detection now rejects the same application for a
+different reason. Strengthening the test to assert WHICH failure it caught was
+worth doing and was not enough: `mount` has four allocation guards on one path
+emitting the same diagnostic, so the append guard is **not independently
+observable**. Recorded, and the control re-aimed at the family.
+
+**Two measurements failed, and the freeze says so instead of rounding.** `nm`
+is blind here — the four symbols inline away and emit nothing EVEN WHEN USED,
+proven by a positive control that read zero. Binary size cannot resolve it
+either: the same commit measured twice differed by 4,080 bytes, because output
+size quantises at a ~4 KiB page. An earlier draft of the freeze reported
+"+4,768 bytes for an application that uses no Phase-3 symbol"; that was
+measurement, not cost, and it is recorded as an error caught rather than
+deleted. **No Phase-3 symbol carries a "costs nothing when unused" claim.**
+
+**The benchmark shows no regression and the freeze declines to oversell it.**
+Every delta sits far inside the tolerance the harness derived on this machine —
+13,821 basis points, 138% — which is another way of saying the instrument
+cannot tell "unchanged" from "50% slower". What it can still show holds:
+dispatch is FLAT, 1,755 ns at 5 routes against 1,727 ns at 5,000. The deltas
+are consistently positive and are handed to Phase 4 as a question rather than
+waved away.
+
+**The usage laboratory is now an instrument, not a number.** Phase 2 recorded
+"14" and "23" without keeping the programs or the counting rule, so this re-run
+had to RECONSTRUCT them and could not reproduce 23 exactly — 22 by textual
+count, the difference being the `Router` type a program need never name.
+Program A reproduces 14 exactly, which is what makes the reconstruction
+trustworthy. Both programs and the rule now live in `experiments/11-usage-lab/`
+and the gate re-runs them. **The guarded program measures 23 against a ceiling
+of 25.**
+
+---
+
 ---
 
 ## 4. What this plan deliberately does NOT include
