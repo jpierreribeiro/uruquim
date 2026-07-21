@@ -1141,6 +1141,68 @@ commands and outputs.
   fields that the fault lab can actually demonstrate, exactly as WP36 sized its
   byte budgets.
 
+### Amendment 1 (2026-07-20) — the requirement stands; the MECHANISM was decided too early
+
+**What was wrong with this ADR as first written.** It fixed the mechanism —
+patch the vendored connection read — *before* WP41's fault laboratory exists to
+say how that server actually behaves under a slow client, a concurrent close or
+a fragmented read. That inverts this project's own method, which is measure
+first and decide second, and it was decided partly on a design constraint
+inferred from an offhand instruction rather than from evidence. The owner
+subsequently withdrew that constraint and asked for **the recommended solution**
+instead. This amendment is that correction, recorded rather than rewritten,
+because a decision log that quietly changes its mind teaches nothing.
+
+**The comparison that reframes it, and it is evidence rather than analogy.**
+The stated target is *"what Gin is in Go"*. **Gin does not implement timeouts.**
+It is a thin routing-and-middleware layer over `net/http`, and read, write and
+idle deadlines come from `http.Server` — the standard library's server, not the
+framework. Gin never patched `net/http`, because it never had to.
+
+So the gap here is **not a framework-design gap, it is a foundation gap**:
+Uruquim is already the thin, fast layer, and the server beneath it is not yet
+production-grade. Naming it correctly changes what the right fix is.
+
+**What stands.**
+
+* **The requirement.** A framework whose server can be held open indefinitely by
+  a slow client has a real hole, and byte budgets cannot reach it. Delegating
+  the deadline to a reverse proxy still leaves WP44's shutdown without a clock
+  to bound in-flight work with. Option A remains rejected as the *final* answer.
+
+**What changes.**
+
+* **The mechanism is no longer fixed here.** WP46 chooses it *after* WP41, with
+  the lab's evidence in hand, from: upstreaming to `odin-http`; a carried
+  vendored patch; or the deadline living in whatever transport WP42/WP43 leave
+  behind.
+* **Upstream is worth ONE attempt, but it is NOT a dependable path — checked,
+  not assumed.** `laytan/odin-http`'s own README states *"This is beta
+  software... can certainly contain edge cases and bugs"* and *"I do not
+  hesitate to push API changes at the moment, so beware"*, with 17 open issues
+  and 8 open pull requests against a single principal maintainer (checked
+  2026-07-20). An upstreamed timeout would wait in one maintainer's queue and
+  then have to be re-vendored across an API its author says moves. Code we do
+  not own is code we do not maintain — but a plan may not be built on someone
+  else's merge. See **ADR-033**, which makes the foundation itself the question
+  rather than this one field.
+* **It lands after WP42/WP43, not before.** Per-connection timers have lifetime
+  and cancellation semantics that the concurrency decision changes. Building
+  them first means building them twice, and timer-after-close is a classic
+  use-after-free — exactly the class of defect that "will not cause problems"
+  rules out.
+* **The interim is a documented boundary, not a hidden hole.** Until deadlines
+  ship, direct exposure without a proxy is **not a supported deployment**, and
+  WP55 says so in those words. That is what Gin's users do in practice too; the
+  difference is that this project writes it down.
+
+**The plan's own sequencing already protected against this error** — WP41
+precedes WP46 in §2c — which is the argument for the discipline rather than a
+coincidence. The ADR simply should not have pre-empted the package.
+
+**Reversibility of this amendment: HIGH.** It removes a commitment and adds
+none; the requirement it keeps is the one nobody disputes.
+
 ## ADR-032 — the ecosystem's relationship to the core, and when it may start
 
 - **Status.** **ACCEPTED** (2026-07-20, decided under the ADR-029 delegation).
@@ -1217,3 +1279,89 @@ commands and outputs.
 
 - **Reversibility. HIGH.** Nothing ships. Decision 1 is a refusal, which costs
   nothing to hold and can only be loosened deliberately; Decision 2 is a date.
+
+## ADR-033 — the transport foundation: keep it, patch it, or own it
+
+- **Status.** **OPEN, with the deciding evidence and the criteria fixed in
+  advance.** Decided at **WP41**, from the fault laboratory's results, and not
+  before. Same treatment ADR-030 (concurrency) gets, for the same reason: the
+  question is real, the evidence does not exist yet, and writing the procedure
+  now is what stops the decision being made later by whoever is tired.
+
+- **Context, and it is the most consequential thing Phase 4 has to face.**
+  Uruquim is a thin, fast layer — a radix router with flat dispatch, chains
+  flattened at registration, a frozen 50-symbol surface, and gates that hold all
+  of it. **The layer is in good shape. The foundation under it is not
+  established.** Three facts, each checked rather than recalled:
+
+  1. **The vendored server declares itself beta.** `laytan/odin-http`'s README:
+     *"This is beta software, confirmed to work in my own use cases but can
+     certainly contain edge cases and bugs"*, and *"I do not hesitate to push
+     API changes at the moment, so beware."* 419 stars, 17 open issues, 8 open
+     pull requests, one principal maintainer. The vendored snapshot is commit
+     `112c49b` (2026-04-11), vendored 2026-07-19.
+  2. **Most of what Phase 4 has left is SERVER work, not framework work.**
+     Read/write deadlines, connection lifetime and keep-alive, drain-or-close,
+     connection and queue limits, load shedding, stop and graceful shutdown,
+     response framing — WP44 through WP47 and WP52 all live BELOW the boundary.
+     Implementing them as patches on someone else's beta server means **writing
+     a server anyway, as a patch set against a moving target**, which is the
+     worst of both arms.
+  3. **The portability already lives in Odin's core, not in the dependency.**
+     `core:nbio` provides the event loop and the platform back-ends (io_uring,
+     IOCP, KQueue). What `odin-http` adds above it is the HTTP/1.1 parsing and
+     connection state machine — exactly the part Phase 4 must control, and
+     exactly the part that is beta.
+
+- **Why this is not simply reopening R-T3.** R-T3 ("rewrite the HTTP server")
+  was rejected as SCOPE, correctly, while the router was the priority and no
+  acceptance tests for a server existed. Three things have changed, and they are
+  why this is a question again rather than a settled one: the public surface is
+  frozen and the router is finished; the dependency has since declared its own
+  API unstable; and **the project now owns the acceptance tests for a server it
+  does not have** — WP9's raw-wire framing corpus, the conformance matrix that
+  runs identically against any transport, and WP41's planned fault laboratory.
+  That is an unusually strong position, because the tests were built before the
+  decision rather than to justify it.
+
+- **Options.**
+  - **(A) Keep and patch.** Stay on the vendored snapshot, carry patches for
+    deadlines and connection lifetime, re-vendor deliberately.
+  - **(B) Keep, and offer each patch upstream first.** A, plus a dependency on
+    one maintainer's queue.
+  - **(C) Own the connection layer.** An HTTP/1.1 connection state machine over
+    `core:nbio`, behind the existing ADR-009 boundary, as a **second adapter**
+    that must pass the same conformance matrix as the first — never a big-bang
+    replacement.
+
+- **Costs, without flattering any arm.** A is cheapest today and accumulates a
+  maintenance debt whose size is set by someone else's release cadence. B is A
+  plus a queue nobody here controls. **C is materially more work and is the only
+  arm that ends with the foundation as reviewed as the layer above it** — and
+  its risk is the classic one: a hand-written HTTP parser is where security bugs
+  live, which is precisely why it may only proceed against the existing corpus
+  and never ahead of it.
+
+- **The decision procedure, fixed now.** At WP41 the fault laboratory runs
+  **against the vendored server**, and its own success criterion already
+  requires it to find at least one defect the current tests miss. Then:
+  - the vendored server survives the seeded menu, and the deadline work is a
+    contained patch → **A or B**, and this ADR closes;
+  - the lab must reach into the connection loop to make faults reachable, or the
+    deadline patch spreads across the read path, keep-alive and close → that is
+    the evidence for **C**, which then proceeds as a **second adapter behind the
+    boundary**, gated on passing the full conformance matrix and the WP9 corpus
+    before it is ever made the default;
+  - **a tie means A.** The arm already shipping wins when the evidence does not
+    separate them.
+
+- **What is decided today, so the interim is a boundary and not a hole.** Until
+  this closes, the supported deployment is **behind a reverse proxy, under a
+  supervisor**, and WP55 documents it in those words. That is also how Gin is
+  deployed in practice; the difference is that this project writes the boundary
+  down instead of leaving it folklore.
+
+- **Reversibility.** A or B keeps C available at any later date, because the
+  boundary and the corpus are what make a swap possible and both already exist.
+  C is expensive to undo, which is why it needs evidence first and a second
+  adapter rather than a rewrite.

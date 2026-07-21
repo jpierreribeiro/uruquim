@@ -95,6 +95,25 @@ deadline rows, WP44 gets a real clock to bound its drain with, and the entry
 condition is discharged the way it was written. `E-2 → WP51 → WP46 → WP44` is
 the new critical path; see the sequencing amendment in §2c.
 
+**And the foundation itself became the question (ADR-033).** Checking the
+upstream to see whether a timeout could be contributed there turned up the
+larger fact: `laytan/odin-http` describes itself as *beta software* whose author
+*"does not hesitate to push API changes"*. Combined with the observation that
+**WP44–WP47 and WP52 are all server work rather than framework work**, that
+makes "keep, patch, or own the transport" the real Phase-4 decision, and WP41 —
+already first in the sequence — is where the evidence for it arrives. Recorded
+as ADR-033, OPEN with its criteria fixed in advance.
+
+**Amended the same day (ADR-031 Amendment 1).** The first version of this
+resolution also fixed the MECHANISM — patch the vendored connection read. That
+was decided before WP41 exists to say how that server behaves, and it was
+reached partly from an inferred design constraint rather than from evidence.
+**The requirement stands and the mechanism returns to WP46**, where upstreaming
+is attempted first and a carried patch is the fallback. The comparison that
+settles the framing: **Gin does not implement timeouts either** — they come from
+`net/http`'s server. The gap here is a foundation gap, not a framework-design
+gap, and the fix belongs at the foundation.
+
 
 
 ---
@@ -148,7 +167,7 @@ agent stops and records the finding instead of proceeding.**
 | **WP47 shedding** | Deterministic, bounded admission **before** any adaptive controller; rejection measured cheaper than admitted work. | Research item 10 before 11; an adaptive controller on top of unmeasured shedding is two unknowns multiplied. |
 | **WP50** | Redaction policy is the spec half and lands **first**; observability keys on the route pattern, never the raw path; drop policy observable. | Separating redaction from observability invites shipping them in the wrong order. Phase 1's "nothing reaches a log line" property is preserved deliberately, not by accident. |
 | **WP56 freeze** | Delegated to the gate, WP38-style: freeze if and only if every gate is green, every ledger amended, seeds and soak results recorded. Any breach stops and goes to the owner. | Same reasoning as WP38: criteria met and refused is ceremony; criteria breached and passed is a lie. |
-| **Read and write deadlines (ADR-031)** | **BUILT, not delegated to a proxy.** New rows in WP36's boot-derived runtime, enforced on the serving path, proven by the WP41 fault lab with a seeded slow client, and governed by WP51's vendor policy because they require a patch to the vendored connection read. | The primitive exists in the pinned toolchain — `core:nbio` exports `timeout` and `close`, and the vendored server already uses both — so this is a timer beside an existing read, not a rewrite (R-T3 stays rejected). Byte budgets cannot reach slowloris: the request never gets large, only slow. And a proxy's timeout cannot bound the framework's own in-flight work, which is what WP44 needs a clock for. |
+| **Read and write deadlines (ADR-031, as amended)** | **The REQUIREMENT is fixed; the MECHANISM is WP46's to choose, after WP41.** Deadlines are the framework's problem and not the proxy's — but which mechanism (upstream to `odin-http`, a carried vendored patch, or the transport WP42/WP43 leaves behind) is decided with the fault lab's evidence in hand. **Upstream is attempted first; a carried patch is the fallback.** Until it ships, direct exposure without a proxy is not a supported deployment, and WP55 says so. | Byte budgets cannot reach slowloris — the request never gets large, only slow — and a proxy's timeout cannot bound the framework's own in-flight work, which is what WP44 needs a clock for. But the first draft of this row fixed the mechanism *before* the lab existed to say how the server behaves under a slow client, which inverts this project's method. Code we do not own is code we do not maintain; and per-connection timers have cancellation semantics the concurrency decision changes, so building them first means building them twice. |
 | **WP42 concurrency — THE OPEN ONE** | **Not pre-resolved, deliberately.** Whether `serve` stays single-threaded by construction is the phase's architectural decision (audit A-4, A-14), and deciding it today, without prototypes, would be taste wearing a delegation. What is written instead is the **procedure**: prototype both arms — the current single-threaded event loop, and a threaded model — measure both under WP53's workloads (including slow-client and slow-writer), and decide by **ADR-030** with the losing arm's numbers recorded. Two constraints bind whichever wins: fail-closed (no shared-mutable `App` state without a guard equivalent to the existing poison mechanism), and the Phase-3 decision that registration after `serve` begins is rejected — WP42 inherits that, it does not reopen it. | C-5's lesson generalises: "real systems use threads" is not evidence about Uruquim's workloads. The mission's tie-breaker applies only after the measurements. |
 
 **WP42 stays open, and the delegation does not change that.** ADR-029 hands over
@@ -427,7 +446,12 @@ worth promising.
   shipped and been measured (research items 10 → 11, in that order).
 * **HTTP/2, WebSocket, streaming** — Phase-5 backlog, spec-gated, may be
   declined.
-* **Rewriting the HTTP server** — R-T3, rejected and staying rejected.
+* **Rewriting the HTTP server** — R-T3, rejected and staying rejected **as a
+  rewrite**. ADR-033 asks a narrower question with evidence attached: whether
+  Uruquim eventually owns the HTTP/1.1 connection layer over `core:nbio` as a
+  SECOND ADAPTER behind the ADR-009 boundary, gated on the conformance matrix.
+  That is not a rewrite and not a big-bang replacement, and it is decided at
+  WP41 or not at all.
 * **Anything Phase 5 wants early.** A Phase-4 package that finds it needs one
   writes the finding down; it does not absorb the scope.
 
