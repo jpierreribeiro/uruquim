@@ -102,6 +102,58 @@ wire_send :: proc(port: int, payload: string) -> Wire_Result {
 	return result
 }
 
+// wire_collect reads whatever is pending into `r.raw` and re-scans for statuses.
+//
+// Split out for `wire_send_sequential`, which reads TWICE on one connection.
+// It APPENDS rather than replaces, so the second read does not discard the
+// first response — and `collect_statuses` re-scans the whole stream, which is
+// what makes "two statuses means two responses" hold across both reads.
+@(private)
+wire_collect :: proc(sock: net.TCP_Socket, r: ^Wire_Result) {
+	builder := strings.builder_make()
+	defer strings.builder_destroy(&builder)
+
+	if len(r.raw) > 0 {
+		strings.write_string(&builder, r.raw)
+	}
+
+	deadline := time.now()
+	buf: [4096]u8
+	for {
+		n, recv_err := net.recv_tcp(sock, buf[:])
+		if n > 0 {
+			strings.write_bytes(&builder, buf[:n])
+		}
+		if n == 0 {
+			r.saw_eof = true
+			break
+		}
+		if recv_err != nil {
+			if time.since(deadline) >= WIRE_READ_BUDGET {
+				r.timed_out = true
+			} else {
+				r.saw_eof = true
+			}
+			break
+		}
+		if time.since(deadline) >= WIRE_READ_BUDGET {
+			break
+		}
+		// One response is enough for this read: a sequential case must not
+		// swallow the NEXT response into this collection.
+		if strings.contains(strings.to_string(builder), "\r\n\r\n") {
+			break
+		}
+	}
+
+	if len(r.raw) > 0 {
+		delete(r.raw)
+	}
+	r.raw = strings.clone(strings.to_string(builder))
+	clear(&r.statuses)
+	collect_statuses(r)
+}
+
 // collect_statuses finds every `HTTP/1.x NNN` status line in the stream. Two
 // statuses mean two responses — which is how the keep-alive case is confirmed
 // and how a smuggled request would betray itself.
