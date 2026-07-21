@@ -31,6 +31,9 @@ Recorded :: struct {
 	status:  int,
 	body:    string,
 	headers: []Header,
+	// WP49 — the same headers in wire form, so the facade can return them
+	// without naming a machinery type.
+	lines:   []string,
 }
 
 // Recorder is the App-owned test-support storage. It is LAZY: the zero value is
@@ -80,8 +83,30 @@ recorder_capture :: proc(
 		}
 	}
 
-	append(&r.records, Recorded{status = status, body = body_copy, headers = headers_copy})
+	// WP49 — the wire-form lines the facade hands back. Built HERE, beside the
+	// pairs they come from, so the facade never has to name a `Header` type:
+	// the machinery owns the representation and exports strings, which is the
+	// one-way dependency this package exists to keep (WP3, probe C5).
+	lines_copy := make([]string, len(headers_copy), r.allocator)
+	for h, i in headers_copy {
+		lines_copy[i] = strings.concatenate({h.name, ": ", h.value}, r.allocator)
+	}
+
+	append(
+		&r.records,
+		Recorded{status = status, body = body_copy, headers = headers_copy, lines = lines_copy},
+	)
 	return status, body_copy
+}
+
+// recorder_last_lines returns the header lines of the most recent record, or
+// nil. Views into recorder-owned storage, valid until `recorder_destroy`.
+@(private)
+recorder_last_lines :: proc(r: ^Recorder) -> []string {
+	if !r.active || len(r.records) == 0 {
+		return nil
+	}
+	return r.records[len(r.records) - 1].lines
 }
 
 // recorder_destroy releases every recorded copy exactly once and returns the
@@ -98,6 +123,10 @@ recorder_destroy :: proc(r: ^Recorder) {
 			delete(h.name, r.allocator)
 			delete(h.value, r.allocator)
 		}
+		for line in rec.lines {
+			delete(line, r.allocator)
+		}
+		delete(rec.lines, r.allocator)
 		delete(rec.headers, r.allocator)
 	}
 	delete(r.records)

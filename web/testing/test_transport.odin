@@ -43,6 +43,17 @@ capture :: proc(
 // destroy releases everything the transport owns, exactly once, and returns it
 // to its zero state. It is a no-op for a transport that never recorded an
 // exchange, and a second call is a safe no-op.
+// WP49 — the last response's header lines, in `"Name: value"` wire form.
+//
+// A THIRD BRIDGE EXPORT, and the bridge is locked and exact in both directions
+// (`check_public_api.sh`), so this is a deliberate widening rather than a
+// convenience: the facade cannot reach into the recorder, and the machinery
+// must not name a `web` type. Strings are the only vocabulary both sides
+// already share.
+last_headers :: proc(t: ^Test_Transport) -> []string {
+	return recorder_last_lines(&t.recorder)
+}
+
 destroy :: proc(t: ^Test_Transport) {
 	recorder_destroy(&t.recorder)
 	t.served = 0

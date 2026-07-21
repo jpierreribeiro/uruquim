@@ -129,20 +129,25 @@ printf '\nextra_bridge :: proc() {}\n' >>"$T/web/testing/test_transport.odin"
 expect_reject "$T" "extra web/testing bridge export" \
   "outside the locked bridge set"
 
-# 8. A public `headers` field smuggled onto Recorded_Response.
+# 8. A FOURTH field smuggled onto Recorded_Response.
+#
+# RE-AIMED BY WP49. This mutation used to ADD `headers`, because `headers` was
+# the forbidden field. WP49 ratified it (D-14.3), so the mutation now adds a
+# fourth field instead — the list is exact in both directions, and what this
+# probe has always really tested is that the list is EXACT, not that one
+# particular name was absent.
 T="$(fresh_tree)"; TREES+=("$T")
 python3 - "$T/web/test_support.odin" <<'PY'
 import sys
 p = sys.argv[1]
 s = open(p).read()
-old = "\tstatus: Status,\n\tbody:   string,\n}"
+old = "\theaders: []string,\n}"
 assert old in s, "BROKEN PROBE: the Recorded_Response field block was not found; the probe no longer matches the source"
-s = s.replace(old,
-              "\tstatus:  Status,\n\tbody:    string,\n\theaders: int,\n}", 1)
+s = s.replace(old, "\theaders: []string,\n\tcommitted: bool,\n}", 1)
 open(p, "w").write(s)
 PY
-expect_reject "$T" "public headers field on Recorded_Response" \
-  "must expose exactly status and body"
+expect_reject "$T" "a fourth field on Recorded_Response" \
+  "must expose exactly status, body and headers"
 
 echo "PASS: WP3 mutation checks (8 forbidden states all rejected)"
 

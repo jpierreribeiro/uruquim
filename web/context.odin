@@ -158,6 +158,15 @@ Context_Internal :: struct {
 	state:      rawptr,
 	state_type: typeid,
 
+	// WP49 — whether `secure_headers` is in this application's chain.
+	//
+	// A FLAG READ BY THE RESPONSE BUILDER, not a stamp applied as the chain
+	// unwinds, and the distinction is the whole reason it works: the driver
+	// finalizes a missing response AFTER the chain has unwound (WP22 measured
+	// it), so a stamping middleware would miss the 500 — which is exactly the
+	// response an attacker is most likely to be looking at.
+	secure_headers: bool,
+
 	// WP48 — the connected peer's address (a view over transport-owned storage,
 	// request-scoped) and the App's trusted-proxy set, copied by the driver.
 	//

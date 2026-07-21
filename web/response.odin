@@ -168,10 +168,23 @@ response_destroy :: proc(res: ^Response) {
 // ---------------------------------------------------------------------------
 
 // RESPONSE_HEADER_MAX is the worst case: a 405 carries `Allow` and
-// `Content-Type`, and WP23 appends `X-Request-Id` when the request-ID
-// middleware is in use. Nothing carries more.
+// `Content-Type`, WP23 appends `X-Request-Id` when the request-ID middleware is
+// in use, and WP49 appends three more when `secure_headers` is. Nothing carries
+// more.
+//
+// SIX, and the number is arithmetic rather than headroom: 2 + 1 + 3. A response
+// that needed a seventh would be a work package, not an edit, because this array
+// is fixed request-local storage and the capacity ledger does not accept a bound
+// without a behaviour when full. There is no "when full" here BY CONSTRUCTION —
+// every writer is a compile-time-known step, so the bound is a proof rather than
+// a limit, and `#assert` below is what keeps that true.
 @(private)
-RESPONSE_HEADER_MAX :: 3
+RESPONSE_HEADER_MAX :: 6
+
+// The proof that the bound is arithmetic. If a future writer is added without
+// raising the bound, this fails at COMPILE time rather than overflowing
+// request-local storage at run time.
+#assert(RESPONSE_HEADER_MAX >= 2 + 1 + 3)
 
 @(private)
 CONTENT_TYPE_HEADER_NAME :: "Content-Type"
@@ -236,6 +249,28 @@ response_text_headers :: proc(ctx: ^Context) -> []Header_Pair {
 @(private)
 response_headers_finish :: proc(ctx: ^Context, n: int) -> []Header_Pair {
 	count := n
+
+	// WP49 — the security headers, attached at the SAME funnel as the request
+	// ID and for the same reason: this is the one place every response path
+	// passes through, so a 404, a 405 and the driver's 500 all get them.
+	if ctx.private.secure_headers {
+		ctx.private.response_headers[count] = Header_Pair {
+			name  = SECURE_CONTENT_TYPE_OPTIONS_NAME,
+			value = SECURE_CONTENT_TYPE_OPTIONS,
+		}
+		count += 1
+		ctx.private.response_headers[count] = Header_Pair {
+			name  = SECURE_FRAME_OPTIONS_NAME,
+			value = SECURE_FRAME_OPTIONS,
+		}
+		count += 1
+		ctx.private.response_headers[count] = Header_Pair {
+			name  = SECURE_REFERRER_POLICY_NAME,
+			value = SECURE_REFERRER_POLICY,
+		}
+		count += 1
+	}
+
 	if ctx.private.request_id_set {
 		ctx.private.response_headers[count] = Header_Pair {
 			name  = REQUEST_ID_HEADER,
