@@ -1048,3 +1048,95 @@ commands and outputs.
 - **Reversibility.** HIGH — revoking the delegation restores the previous
   regime untouched, and every decision made under it is individually
   revisitable by the owner at any time.
+
+## ADR-031 — read and write deadlines: built in the core, not delegated to a proxy
+
+- **Status.** **ACCEPTED** (2026-07-20, decided under the ADR-029 delegation).
+  Supersedes nothing: the question had never been decided, only deferred, and
+  WP36 deferred it with evidence rather than by preference.
+
+- **Context.** Phase 3 shipped `web.Limits` **without timeout fields**. The
+  WP36 prototype found the vendored server has no read or write deadline to
+  configure: `Server_Opts` carries `limit_request_line` and `limit_headers` and
+  nothing temporal, and its request read still carries an unfinished-work
+  comment asking for a timeout. Shipping a field that did nothing would have
+  been a lie with a version number on it, so `Limits` shipped with three byte
+  budgets and no time budget. **That left a real hole, and this ADR closes it
+  rather than documenting it.**
+
+  A framework with no read deadline cannot defend itself against a client that
+  opens a connection and sends one byte a minute. That is slowloris, it is
+  cheap, and no amount of byte limits reaches it — the request never gets large,
+  it only gets slow. Phase 4's own theme is *"mistakes stop being inconvenient
+  and become remotely exploitable"*; a missing deadline is exactly that class.
+
+- **Options.**
+  - **(A) Delegate to the reverse proxy.** Document that the supported topology
+    terminates TLS and enforces timeouts upstream, and state the absence.
+  - **(B) Build deadlines in the core**, as new rows in WP36's boot-derived
+    runtime, enforced on the serving path.
+  - **(C) Replace the vendored server** with one that has deadlines.
+
+- **Benefits and costs.**
+  - **A** costs nothing and is honest, and the topology it names is the one
+    most deployments already use. Its cost is that the framework's *own*
+    guarantee stops at the byte budget: `web.serve` bound directly to a port is
+    not a defensible configuration, and every document has to keep saying so.
+  - **B** costs a vendored patch and the obligation to prove it. Its benefit is
+    that the guarantee becomes the framework's, and the sentence *"Uruquim
+    bounds its own per-request working memory"* gains a time dimension it
+    currently lacks.
+  - **C** is R-T3, rejected and staying rejected.
+
+- **Evidence, and it is the reason this ADR exists at all.** The primitive is
+  present in the pinned toolchain: `core:nbio` exports `timeout(duration, cb)`
+  and `close(subject)`, and **the vendored server already uses both** — a fixed
+  close delay and a one-second date tick. So a per-connection deadline is a
+  timer armed beside an existing read and a close on expiry, not a new
+  concurrency mechanism and not a rewrite. What it does require is touching the
+  vendored server's connection handling, because the adapter does not see
+  individual connections; `http.serve` owns the loop.
+
+  **That is a known, disciplined path in this repository rather than new
+  territory: five vendored patches already ship, and the WP9 corpus asserts
+  their behaviour rather than their text**, so a correct re-application written
+  differently still passes.
+
+- **Decision. Option B.** Read and write deadlines are built, and they are
+  **rows in `web.Limits`** — the same boot-derived, validated-once runtime WP36
+  established, never a second mechanism. Three constraints bind the work:
+
+  1. **`Limits` grows by amendment, and the fields are named at spec time.**
+     WP36's rule stands: every field is a promise kept for as long as the type
+     exists. The number of new fields is decided against the fault lab's menu,
+     not against a wish list.
+  2. **The vendor patch is governed before it is written.** WP51's vendor
+     maintenance policy therefore moves **before** the package that patches —
+     see the Phase-4 plan's sequencing amendment. A patch that predates the
+     policy governing patches is how a fork starts.
+  3. **It is proven by the WP41 fault laboratory, not by a unit test.** A
+     deadline is a claim about a slow client, and the only honest proof is a
+     seeded slow client. The claim ledger row carries that as its positive test
+     and an unbounded-read variant as its negative control.
+
+- **Risks.** The patch is on the connection read path, which is the hottest and
+  least forgiving code in the tree; a deadline that fires early is a broken
+  server, and one that never fires is a claim that lies. Both are why the fault
+  lab precedes it. Second risk: the deadline interacts with the concurrency
+  decision (ADR-030) — if `serve` becomes threaded, timer ownership changes.
+  This ADR therefore **does not fix the mechanism**, only the requirement and
+  the shape; WP42 lands first and WP46 inherits whatever it decides.
+
+- **Doc impact.** The capacity ledger's timeout row (currently *"still not
+  configurable, and not on a schedule"*) becomes a bounded, configurable row at
+  the Phase-4 freeze. `docs/ai-context.md` and `docs/canonical-patterns.md`
+  currently instruct agents that no timeout field exists and none may be
+  invented; both are amended in the same change that ships the fields, never
+  before.
+
+- **Reversibility. LOW once shipped**, and deliberately so: an operator who
+  configures a deadline builds a timeout budget around it, and withdrawing the
+  field breaks the build while withdrawing the DEFAULT breaks their traffic
+  silently. That asymmetry is the argument for shipping the smallest set of
+  fields that the fault lab can actually demonstrate, exactly as WP36 sized its
+  byte budgets.

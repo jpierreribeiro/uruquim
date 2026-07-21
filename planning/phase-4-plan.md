@@ -37,14 +37,65 @@ Mandatory refresh, applied and recorded before any Phase-4 package starts
 
 ---
 
+## 0b. The hand-over, APPLIED — E-4 discharged 2026-07-20
+
+Phase 3 is frozen (`planning/phase-3-freeze.md`, ledger 50 + 2 = 52). Every row
+of §0 is re-checked below against what actually shipped, which is what E-4 asked
+for. **A plan that skips its refresh is folklore with a section number.**
+
+| §0 row | What Phase 3 actually delivered | Effect on this plan |
+|---|---|---|
+| WP36's options struct and derived runtime | Shipped as designed: `Limits` + `DEFAULT_LIMITS` constant + boot-derived, validated once, copied onto each request. **But with three BYTE budgets and no time budget.** | **WP46 is amended** (§3): it inherits the mechanism unchanged AND gains read/write deadlines as new rows in it (ADR-031). No second mechanism. |
+| WP35's arena policy and R-16 | The decision was to change nothing; **no slot reuse exists.** | **WP54 loses its generational-token contingency.** P-T7's rule applies literally: no reuse, no abstraction. It returns only if Phase 4 introduces reuse. |
+| WP29's router representation | Internal-only, as predicted — and WP30 added registration-conflict poisoning on top of it. | **WP41's fault menu gains a row**: a conflict diagnostic is now a trippable boot failure, not only a dispatch outcome. |
+| WP34's route identity accessor | Shipped as `web.route(ctx)`, with the pattern-never-path rule enforced at every write to the slot. | **WP50 may depend on it**, and inherits the gate assertion rather than restating the rule. |
+| FINDING-A on the pinned toolchain | Re-verified and **worse than recorded**: the WP26 harness derived a tolerance floor of **13,821 bp (138%)** on this machine, and binary size quantises at roughly a 4 KiB page. | **WP53 inherits a hard constraint:** any Phase-4 performance claim needs a paired-run design or a quieter machine. A single-figure comparison is not evidence here, and WP47's "rejection is cheaper than admitted work" claim is the first one this bites. |
+| Concept-budget headroom after WP38 | Guarded lab program at **23 of 25**. | **WP44 has two concepts of headroom for the entire stop/shutdown surface.** That is the budget, and it is tight on purpose — see §2b. |
+| Any ADR accepted or amended in Phase 3 | ADR-028 ACCEPTED (option 1, no request-scoped state); ADR-029 delegation in force; **ADR-031 accepted here.** | §2b re-checked row by row below; two rows amended, one added. |
+
+**One row of §0 turned out to be missing, and it is recorded rather than
+quietly added:** nothing in §0 anticipated that Phase 3 would ship a *hole*
+(timeouts) rather than a shape. The hand-over table assumed Phase 3's outputs
+would feed Phase 4; it had no row for a Phase-3 output that Phase 4 must
+**repair**. ADR-031 is that repair, and future phase plans should carry a
+"what did the previous phase leave undone" row explicitly.
+
+---
+
 ## 1. Entry conditions (not work packages)
 
-| ID | Item |
-|---|---|
-| E-1 | Phase 3 frozen — WP38 merged, full gate green on `main` |
-| E-2 | Configurable limits and timeouts exist (WP36 shipped) — the roadmap's hard dependency: shutdown with a deadline is meaningless without timeouts |
-| E-3 | The full gate exits 0 on `main` at the moment Phase 4 starts |
-| E-4 | **This plan re-reviewed against §0**, amendments applied and recorded the way the Phase-3 plan's §4b records its own — a plan that skips its refresh is folklore with a section number |
+| ID | Item | Status, 2026-07-20 |
+|---|---|---|
+| E-1 | Phase 3 frozen — WP38 merged, full gate green on `main` | ✅ **met** — `planning/phase-3-freeze.md`, ledger 50 + 2 = 52 |
+| E-2 | Configurable limits and timeouts exist (WP36 shipped) — the roadmap's hard dependency: shutdown with a deadline is meaningless without timeouts | ⚠️ **HALF MET, and this is the one that had to be decided.** Limits shipped; **timeouts did not.** See the resolution immediately below. |
+| E-3 | The full gate exits 0 on `main` at the moment Phase 4 starts | ✅ **met** |
+| E-4 | **This plan re-reviewed against §0**, amendments applied and recorded | ✅ **met** — §0b above |
+
+**E-2, resolved 2026-07-20 under the ADR-029 delegation.** The condition was
+written expecting WP36 to ship both halves. It shipped one, for a measured
+reason. There were two ways to satisfy the condition and only one of them is
+honest:
+
+* **Amend E-2 away** — accept that shutdown deadlines come from the reverse
+  proxy, and let the entry condition read as met. This was the arm previously
+  recommended, on the grounds that it is reversible and ships nothing.
+* **Satisfy E-2 by building the missing half.** ← **chosen (ADR-031).**
+
+The deciding argument is not preference, it is what the condition was *for*.
+E-2 exists because *"shutdown with a deadline is meaningless without
+timeouts"* — and that reasoning does not care where the timeout comes from
+until you notice that **a proxy's read timeout cannot drain the framework's own
+in-flight work.** The proxy can stop feeding the process; it cannot tell WP44's
+shutdown that a handler has been running for four minutes. Delegating the
+deadline delegates the *defence* while leaving the *lifecycle* without the
+clock it was specified against.
+
+So E-2 is met **by construction rather than by exception**: WP46 grows the
+deadline rows, WP44 gets a real clock to bound its drain with, and the entry
+condition is discharged the way it was written. `E-2 → WP51 → WP46 → WP44` is
+the new critical path; see the sequencing amendment in §2c.
+
+
 
 ---
 
@@ -97,7 +148,53 @@ agent stops and records the finding instead of proceeding.**
 | **WP47 shedding** | Deterministic, bounded admission **before** any adaptive controller; rejection measured cheaper than admitted work. | Research item 10 before 11; an adaptive controller on top of unmeasured shedding is two unknowns multiplied. |
 | **WP50** | Redaction policy is the spec half and lands **first**; observability keys on the route pattern, never the raw path; drop policy observable. | Separating redaction from observability invites shipping them in the wrong order. Phase 1's "nothing reaches a log line" property is preserved deliberately, not by accident. |
 | **WP56 freeze** | Delegated to the gate, WP38-style: freeze if and only if every gate is green, every ledger amended, seeds and soak results recorded. Any breach stops and goes to the owner. | Same reasoning as WP38: criteria met and refused is ceremony; criteria breached and passed is a lie. |
+| **Read and write deadlines (ADR-031)** | **BUILT, not delegated to a proxy.** New rows in WP36's boot-derived runtime, enforced on the serving path, proven by the WP41 fault lab with a seeded slow client, and governed by WP51's vendor policy because they require a patch to the vendored connection read. | The primitive exists in the pinned toolchain — `core:nbio` exports `timeout` and `close`, and the vendored server already uses both — so this is a timer beside an existing read, not a rewrite (R-T3 stays rejected). Byte budgets cannot reach slowloris: the request never gets large, only slow. And a proxy's timeout cannot bound the framework's own in-flight work, which is what WP44 needs a clock for. |
 | **WP42 concurrency — THE OPEN ONE** | **Not pre-resolved, deliberately.** Whether `serve` stays single-threaded by construction is the phase's architectural decision (audit A-4, A-14), and deciding it today, without prototypes, would be taste wearing a delegation. What is written instead is the **procedure**: prototype both arms — the current single-threaded event loop, and a threaded model — measure both under WP53's workloads (including slow-client and slow-writer), and decide by **ADR-030** with the losing arm's numbers recorded. Two constraints bind whichever wins: fail-closed (no shared-mutable `App` state without a guard equivalent to the existing poison mechanism), and the Phase-3 decision that registration after `serve` begins is rejected — WP42 inherits that, it does not reopen it. | C-5's lesson generalises: "real systems use threads" is not evidence about Uruquim's workloads. The mission's tie-breaker applies only after the measurements. |
+
+**WP42 stays open, and the delegation does not change that.** ADR-029 hands over
+*approvals*; it does not manufacture *evidence*. Deciding the concurrency model
+today would be exactly the "taste wearing a delegation" this row already
+refuses, and it would be the one decision in the phase that cannot be walked
+back cheaply.
+
+**What IS decided now, because it is decidable without a prototype, is the
+default and the stopping rule:**
+
+1. **The default arm is single-threaded** — the status quo, `thread_count = 1`.
+   It is what ships today, it is what every existing test and every measured
+   number describes, and it is the only arm that is free to abandon.
+2. **The burden of proof is on threading.** A threaded model is adopted only if
+   WP53's workloads show a material improvement *and* WP41's fault lab shows the
+   threaded arm surviving the same seeded faults. "Material" is defined before
+   the run, against FINDING-A's re-verified noise floor — which on this machine
+   is **138%**, so a threaded arm that wins by 20% has not won anything this
+   instrument can see.
+3. **An inconclusive prototype means single-threaded.** Written down in advance
+   precisely because the temptation at that moment will be to read a wide noise
+   band as a mild preference. A tie goes to the arm already shipping.
+4. **Two constraints bind either arm** (unchanged): fail-closed — no
+   shared-mutable `App` state without a guard equivalent to the existing poison
+   mechanism — and the Phase-3 decision that registration after `serve` begins
+   is **rejected**. WP42 inherits that; it does not reopen it.
+
+---
+
+## 2c. Sequencing amendment (2026-07-20)
+
+**WP51 moves before WP46.** WP51 is the vendor maintenance policy; ADR-031 makes
+WP46 the package that patches the vendored connection read. **A patch that
+predates the policy governing patches is how a fork starts** — and this
+repository already carries five vendored patches whose behaviour, not text, the
+WP9 corpus asserts. That method has to be written down as policy before it is
+applied to the hottest code in the tree, not afterwards.
+
+The critical path is therefore: **{39, 40, 41} → 42 → 43 → 51 → 46 → 44 → 45 →
+47**, with 48, 49, 50 independent once 42 lands, 52/53 growing alongside, and
+all → 54 → 55 → 56.
+
+WP44 moving after WP46 is the second consequence, and it is the point of
+ADR-031: shutdown-with-a-deadline is specified against a clock, and now there is
+one to specify it against.
 
 ---
 
@@ -130,7 +227,9 @@ at WP56. **Rollback: HIGH.**
 **TESTS.** This is **P-T5**, deferred here by name from the Phase-3 plan.
 Seeded and reproducible: fragmentation, slow reader/writer, timeout before and
 after completion, concurrent close, failure after N bytes, slot reuse, an
-artificially small pool, shutdown during a request. Success criterion, stated
+artificially small pool, shutdown during a request. **Added at E-4:** a
+registration-conflict poisoning (WP30) is now a trippable boot failure, so the
+menu covers boot-time refusals and not only dispatch-time ones. Success criterion, stated
 before it is built: **replay the same seed and get the same trail, and find at
 least one mutation the current tests miss** — a lab that cannot demonstrate a
 missed mutation has not earned its complexity. **Rollback: HIGH** (tests only).
@@ -169,9 +268,24 @@ behaviour, but behind spec-recorded RFC obligations rather than taste.
 
 ### WP46 — Limits: connections, queue depth, headers, minimum ingress rate
 
-**SPEC + IMPLEMENTATION.** New rows in WP36's boot-derived runtime — the same
+**SPEC + IMPLEMENTATION. Amended 2026-07-20 by ADR-031: this package now also
+carries READ AND WRITE DEADLINES**, the half WP36 could not ship. They are rows
+in the same `Limits` value, derived and validated at boot exactly like the byte
+budgets, and they are the reason WP51 now precedes this package — enforcing them
+requires patching the vendored connection read, and the primitive to do it
+(`core:nbio`'s `timeout` and `close`) is already used by that server.
+
+The deadline fields are **named at spec time, against WP41's fault menu rather
+than against a wish list**, and sized by WP36's rule: every field is a promise
+kept for as long as the type exists. A deadline is proven by a **seeded slow
+client in the WP41 lab**, never by a unit test, and enters the claim ledger with
+an unbounded-read negative control.
+
+New rows in WP36's boot-derived runtime — the same
 validate-once pattern, never a second mechanism. The slowloris mitigation is a
-minimum ingress rate; OWASP names the technique and no numbers, so the chosen
+minimum ingress rate **on top of the deadline, not instead of it**: a deadline
+bounds one connection's total patience, an ingress rate bounds the trickle that
+stays inside it; OWASP names the technique and no numbers, so the chosen
 numbers are recorded **as judgement, not as citation** (the C-5 honesty rule),
 in the capacity ledger with behaviour-when-full. **Rollback: MEDIUM** — a
 default, once shipped, is a promise about traffic.
@@ -208,7 +322,11 @@ inverted the hierarchy. **Rollback: MEDIUM.**
 
 ### WP51 — Vendor maintenance policy
 
-**SPEC.** Audit A-9/A-10: upstream the security patches or record why not;
+**SPEC. MOVED BEFORE WP46 (§2c), because ADR-031 makes WP46 a patching
+package** and a patch that predates the policy governing patches is how a fork
+starts. This package's output is therefore a precondition, not a retrospective.
+
+Audit A-9/A-10: upstream the security patches or record why not;
 replace code-shape greps over vendored sources with corpus assertions (a
 correct re-application of a patch, written differently, must still pass);
 name who watches upstream and how often. **Rollback: HIGH.**
@@ -232,7 +350,13 @@ HIGH.**
 **TESTS.** Tracking allocator over the full serve path; baseline is WP35's
 shipped policy. Generational tokens for slots and timers **only if reuse
 exists by now** — P-T7's discipline restated: the abstraction arrives with the
-reuse, never before. **Rollback: HIGH.**
+reuse, never before.
+
+**Resolved at E-4:** WP35 decided to change nothing and **no slot reuse
+exists**, so the contingency is OUT of scope as this plan stands. It returns
+only if a Phase-4 package introduces reuse — and ADR-031's per-connection timers
+are the one candidate, so WP46 owns the finding if it creates any. **Rollback:
+HIGH.**
 
 ### WP55 — Operations documentation
 
@@ -249,6 +373,48 @@ WP40 resource; the fault-lab seeds recorded as data; a claim-ledger row with a
 negative control for every shed/stop/drain promise; soak results recorded; the
 usage lab re-run — the concept budget conversation does not end at Phase 3.
 Approval delegated to the gate exactly as WP38's was.
+
+---
+
+## 3b. What "no deficiencies" means here, and what it does not
+
+The owner's instruction for this phase is a framework **without deficiencies**,
+accepting hard architecture to get there. That is a real constraint and it
+needs a definition, or it becomes a licence to build everything.
+
+**A deficiency is a gap between what the framework CLAIMS and what it DOES.**
+That is the standard this phase is held to, and by it the current tree has
+exactly three:
+
+1. **No deadline of any kind.** The capacity ledger says Uruquim bounds its own
+   per-request working memory; it bounds the *bytes* and not the *time*, and a
+   slow client walks through the byte budget untouched. → ADR-031, WP46.
+2. **No way to stop.** `web.serve` blocks until the process ends, so the only
+   shutdown is a kill, and in-flight requests are cut. → WP39, WP44.
+3. **No bound on connections, accept queue or header count.** The ledger says
+   so plainly today, which makes it honest rather than a lie — but honest about
+   a hole is still a hole. → WP40, WP46, WP47.
+
+**An absence is NOT a deficiency when it is stated, reasoned, and belongs to
+someone else.** In-process TLS, CORS, uploads, static files, WebSocket and
+streaming are absent by decision, with the reasoning recorded and the surface
+assigned to optional packages or to the deployment. Building them into the core
+would not remove a deficiency; it would add attack surface to a framework whose
+value proposition is a small, frozen, gate-enforced one — and the mission's
+precedence puts discipline above convenience for exactly this case.
+
+**The one place the distinction is uncomfortable, stated rather than hidden:**
+panic aborts the process (ADR-020). That is not a deficiency — Odin has no
+recoverable panic, so it is a property of the language, and the framework's
+duty is to say so and to make the supervisor expectation explicit (WP55). A
+framework that pretended otherwise would have a deficiency; this one has a
+constraint it documents.
+
+**The test for the phase, then:** at WP56, every row of the capacity ledger
+states a bound and a behaviour-when-full, every claim in the claim ledger has a
+negative control, and no document describes a limit the framework does not
+enforce. That is "no deficiencies" made checkable, which is the only form of it
+worth promising.
 
 ---
 
