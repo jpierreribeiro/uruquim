@@ -1355,6 +1355,19 @@ none; the requirement it keeps is the one nobody disputes.
   - **a tie means A.** The arm already shipping wins when the evidence does not
     separate them.
 
+- **First evidence in, 2026-07-21 (WP41).** The fault laboratory shipped and
+  ran against the vendored server. Two results bear on this ADR:
+  - **The faults were reachable from OUTSIDE.** A hostile client over a real
+    socket was enough to produce every fault in the menu; the lab never had to
+    reach into the connection loop. By §the decision procedure that is evidence
+    toward **A/B (keep)** rather than toward C.
+  - **It found the hole anyway.** A truncated or trickling client is held open
+    indefinitely — the vendored server has no read deadline, exactly as
+    §ADR-031 predicted from reading it. So "keep" does not mean "nothing to
+    do"; it means the work is a patch rather than a replacement.
+  **The ADR stays open**, because the second half of its criterion is whether
+  the deadline patch stays CONTAINED, and only WP46 can answer that.
+
 - **What is decided today, so the interim is a boundary and not a hole.** Until
   this closes, the supported deployment is **behind a reverse proxy, under a
   supervisor**, and WP55 documents it in those words. That is also how Gin is

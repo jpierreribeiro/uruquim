@@ -69,6 +69,7 @@ bash -n "$URUQUIM_ROOT/build/check_phase2_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase3_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase4_spec.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp39_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp41_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp38_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
 bash -n "$URUQUIM_ROOT/experiments/run_checks.sh"
@@ -1037,6 +1038,16 @@ bash "$URUQUIM_ROOT/build/check_phase3_freeze.sh"
 # statement, and an unchecked statement decays into folklore (the WP21 lesson).
 echo "--- WP39/WP40 Phase-4 spec (lifecycle states, capacity rows, the reservation) ---"
 bash "$URUQUIM_ROOT/build/check_phase4_spec.sh"
+
+# WP41 — the deterministic fault laboratory. Real sockets, seeded faults, a
+# replayable trail. It runs in the gate rather than on demand because its two
+# findings are LIVE defects: a truncated or trickling client is never
+# disconnected. When a read deadline ships those assertions must be amended in
+# the same change, and a suite nobody runs is a suite nobody amends.
+echo "--- WP41 fault laboratory: seeded faults over real sockets (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp41-fault" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp41-fault"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
