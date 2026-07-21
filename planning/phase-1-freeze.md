@@ -1871,14 +1871,15 @@ second interpretation of values already owned by the stdlib. The two imports
 therefore keep the implementation thin: standard grammar and conversion,
 private structural comparison only.
 
-**Cost evidence.** On the pinned `819fdc7` toolchain, the full examples gate
-measured `01-hello-world` at 970,648 bytes versus 966,552 before WP68: **+4,096
-bytes** for an application that never calls `body`. The JSON example measured
-1,133,432 bytes versus 1,116,048: **+17,384 bytes** when the feature is used.
-The unused cost is accepted as the price of RTTI-based strict decoding, and is
-small enough that introducing a registration system or code generator to erase
-it would violate the project's simplicity goal for less than 0.5% of Hello
-World. These exact measurements are evidence, not a permanent size promise.
+**Cost evidence.** Two adjacent worktrees (WP67 parent `5db85d0` and WP68), the
+same pinned `819fdc7` compiler and byte-identical build commands measured
+`01-hello-world` at 966,720 versus 966,768 bytes: **+48 bytes** for an
+application that never calls `body`. The JSON example measured 1,116,288
+versus 1,133,768 bytes: **+17,480 bytes** when the feature is used. The result
+shows that the linker removes practically the whole preflight when unused;
+introducing registration or code generation to chase the residual 48 bytes
+would oppose the project's simplicity goal. These exact measurements are
+evidence, not a permanent size promise.
 
 **Ownership and failure.** The preflight tree lives in a disposable dynamic
 arena and is destroyed before the authoritative typed decode. Its field path
