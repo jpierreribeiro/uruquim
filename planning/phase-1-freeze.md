@@ -1390,3 +1390,56 @@ phase would pass against a server that refused every connection.
 |---|---|---|---|---|---|---|
 | `Limits.max_connections` | A | WP47 | `build/phase1-public-signatures.txt` | `tests/wp41-fault/fault_test.odin::phase_admission_is_bounded_with_a_reservation` | `docs/ai-context.md::web.Limits` | plain `int` on a value type; the count lives per serving thread |
 | `Limits.reserved_conns` | A | WP47 | `build/phase1-public-signatures.txt` | `tests/wp41-fault/fault_test.odin::phase_a_reservation_larger_than_the_budget_is_rejected` | `docs/ai-context.md::web.Limits` | as above; validated against `max_connections` at boot |
+
+## Amendment 16 — WP48: the effective client address (`client_ip`, `trust_proxies`)
+
+**Date: 2026-07-21. Authority: the ADR-029 delegation, over ADR-013 (ACCEPTED
+in direction, option A).**
+**Ledger effect: application 51 → 53.** 53 application + 2 test-support = 55.
+The snapshot diff was exactly two added lines.
+
+```
+application	proc	client_ip :: proc(ctx: ^Context) -> string
+application	proc	trust_proxies :: proc(a: ^App, prefixes: []string)
+```
+
+**TWO SYMBOLS, AND THE PAIR IS THE POINT.** One without the other would be
+either a value you cannot use behind a proxy, or a value you cannot trust.
+
+**THIS IS A SECURITY DECISION WEARING AN ERGONOMIC NAME.** `X-Forwarded-For` is
+a request header; any client can send one. The things applications do with a
+client address — rate-limit buckets, audit logs, allow-lists, abuse counters —
+are exactly the things an attacker must not be allowed to choose. **Trusting the
+header by default is not a convenience with a caveat; it is an authorization
+bypass with a default.**
+
+So the effective address is the **connected peer**, always, unless that peer
+matches a prefix the operator registered — and only then is the leftmost
+`X-Forwarded-For` entry believed.
+
+**PREFIXES RATHER THAN CIDR, and the reason is the asymmetry rather than
+effort.** A correct CIDR implementation needs IPv4 and IPv6 parsing, mask
+arithmetic and the IPv4-mapped-IPv6 edge, and each is a place to be subtly wrong
+inside a security boundary. **A wrong CIDR mask can trust a network you did not
+mean to trust; a wrong prefix can only fail to trust one you did.** The failure
+mode of the simpler design points the safe way. If a deployment genuinely needs
+CIDR, that is evidence for a later package and adding it is a strengthening.
+
+**REGISTRATION FAILS CLOSED, twice over.** An EMPTY prefix matches every peer —
+it would trust the whole internet through one typo — and more prefixes than the
+bound is refused rather than truncated: a dropped entry fails in the safe
+direction, but leaves the operator's configuration quietly untrue, and a
+security boundary that is quietly untrue is worse than one that refuses to
+start. `TRUSTED_PROXY_MAX` is 8, with that behaviour-when-full stated, as the
+capacity ledger requires.
+
+**Evidence, and note where the suite spends its length: on the case where the
+header must be IGNORED.** The tests run over `test_request`, which has no socket
+and therefore no peer — which makes them the sharpest possible test of the
+default: with no peer, nothing is trusted, and a forged header must be ignored
+however the App is configured.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `client_ip` | A | WP48 | `tests/wp48-public-surface/contract_test.odin::wp48_the_signatures_are_pinned` | `tests/wp48-public-surface/contract_test.odin::wp48_an_untrusted_request_ignores_a_forwarded_header` | `docs/ai-context.md::web.client_ip` | returns a request-scoped VIEW over the peer string or the header; allocates nothing; copy to keep (G-05) |
+| `trust_proxies` | A | WP48 | `tests/wp48-public-surface/contract_test.odin::wp48_the_signatures_are_pinned` | `tests/wp48-public-surface/contract_test.odin::wp48_an_empty_prefix_rejects_the_application` | `docs/ai-context.md::web.trust_proxies` | stores up to 8 caller-owned string views on the App; no allocation, no teardown; the caller's strings must outlive the App |

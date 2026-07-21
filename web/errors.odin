@@ -819,6 +819,17 @@ FRAMEWORK_MESSAGE_LIMITS_INVALID ::
 	"change what you mean to change. This application is rejected fail-closed: " +
 	"every request will answer 500 and web.serve will refuse to start."
 
+// WP48 — an unusable trusted-proxy set.
+@(private)
+FRAMEWORK_MESSAGE_TRUST_INVALID ::
+	"uruquim: web.trust_proxies was given more prefixes than the framework " +
+	"stores, or an EMPTY prefix. An empty prefix matches every peer, which " +
+	"would trust the whole internet through a typo, and a dropped entry would " +
+	"leave your configuration quietly untrue. Trusting a proxy decides whose " +
+	"X-Forwarded-For is believed, so it fails closed rather than partially. " +
+	"This application is rejected fail-closed: every request will answer 500 " +
+	"and web.serve will refuse to start."
+
 // WP47 — a reservation that swallows its own budget.
 @(private)
 FRAMEWORK_MESSAGE_LIMITS_RESERVATION ::

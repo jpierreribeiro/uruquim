@@ -91,6 +91,11 @@ App_Internal :: struct {
 	// traffic. Three ints, no allocation; the laziness claim is unaffected.
 	limits: Limits,
 
+	// WP48 — the trusted-proxy set (ADR-013). A fixed inline array, no
+	// allocation, no teardown; the driver copies it onto each request beside
+	// the observer, the state and the limits.
+	trusted: Trusted_Proxies,
+
 	// WP37 — ADR-004 option A: the application's typed state, as an untyped
 	// pointer plus the `typeid` that makes it typed again at the boundary.
 	//

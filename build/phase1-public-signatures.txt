@@ -5,6 +5,7 @@ application	proc	bad_request :: proc(ctx: ^Context, message: string)
 application	proc	bare :: proc() -> App
 application	proc	bearer_token :: proc(ctx: ^Context) -> (value: string, ok: bool)
 application	proc	body :: proc(ctx: ^Context, dst: ^$T) -> bool
+application	proc	client_ip :: proc(ctx: ^Context) -> string
 application	proc	created :: proc(ctx: ^Context, value: $T)
 application	proc	delete :: proc(a: ^App, pattern: string, handler: Handler)
 application	proc	destroy :: proc(a: ^App)
@@ -36,6 +37,7 @@ application	proc	serve :: proc(a: ^App, port: int)
 application	proc	state :: proc(ctx: ^Context, $T: typeid) -> ^T
 application	proc	stop :: proc(a: ^App)
 application	proc	text :: proc(ctx: ^Context, status: Status, s: string)
+application	proc	trust_proxies :: proc(a: ^App, prefixes: []string)
 application	proc	unauthorized :: proc(ctx: ^Context, message: string)
 application	proc	use :: proc(a: ^App, middleware: Handler)
 application	type	App :: struct {private: App_Internal}

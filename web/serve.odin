@@ -128,6 +128,11 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 	// rather than by two implementations happening to hold the same number.
 	ctx.private.limits = a.private.limits
 
+	// WP48: the trusted set travels the same way. The peer itself comes from
+	// the inbound request below, because it is per-connection rather than
+	// per-application.
+	ctx.private.trusted = a.private.trusted
+
 	if inbound.over_limit {
 		// The adapter rejected the body for length BEFORE the handler. The core
 		// authors the WP7 413 envelope; the handler never runs (WP8 D3).
@@ -140,6 +145,8 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 	// untouched. HEAD becomes GET for every downstream purpose.
 	resolved_method, implicit := implicit_from_token(inbound.method)
 	ctx.private.implicit = implicit
+
+	ctx.private.peer = inbound.peer
 
 	ctx.request = Request {
 		method  = resolved_method,
