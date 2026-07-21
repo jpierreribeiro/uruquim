@@ -1,5 +1,6 @@
 web	import "core:encoding/json"
 web	import "core:mem"
+web	import "core:os"
 web	import "core:strings"
 web	import "uruquim:web/internal/transport"
 web	import "uruquim:web/testing"

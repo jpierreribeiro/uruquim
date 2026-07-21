@@ -1,0 +1,4 @@
+
+
+# WP61 — the static-file suite builds its fixture directory at run time.
+tests/wp61-public-surface/fixture/

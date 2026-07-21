@@ -172,6 +172,34 @@ empty prefix, or more than eight, **rejects the application at boot** — an emp
 prefix would match every peer. The result is a request-scoped view: copy it to
 keep it.
 
+### Static files
+
+```text
+Static_Options{max_file_size, index}
+static(&app, "/assets", "public/assets")     before the first request
+```
+
+A mount OWNS its prefix: a request under it is answered from the filesystem or
+answered 404, never falling through to a route. That is the reverse-proxy
+`location` rule, and it means "why is my route shadowed" never depends on
+whether a file happens to exist.
+
+Refused, always, as REJECTIONS rather than repairs: `..`, `%` (the path is never
+decoded, so `%2e%2e` would pass a textual check), `\`, NUL, empty interior
+segments, a leading `.` on any segment, a trailing `/`, anything that is not a
+regular file, and **every symlink whatever it points at**.
+
+Responses are buffered whole (ADR-014), so a file costs its size in memory:
+`max_file_size` defaults to 8 MiB and a larger file is answered 404. No
+`Last-Modified` (it would link a date formatter into every application), no
+ranges, no directory listing. `ETag` and `If-None-Match` work, answering 304.
+
+<!-- fragment: phase5/static -->
+```odin
+app := web.app()
+web.static(&app, "/assets", "public/assets", web.Static_Options{index = "index.html"})
+```
+
 ### CORS
 
 ```text
@@ -744,7 +772,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-57 application symbols.
+59 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

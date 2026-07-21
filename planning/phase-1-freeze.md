@@ -1700,3 +1700,80 @@ be evidence the frozen six-member enum had grown.
 private, the request path reads a flag that is never set, and no other symbol
 references either name. The one shared edit is `RESPONSE_HEADER_MAX`, raised
 from 6 to 12 — a fixed array on the Context, no allocation either way.
+
+---
+
+## Amendment 21 — WP61: `static` and `Static_Options`
+
+**Date: 2026-07-21. Authority: ADR-034, recorded in `planning/phase-5-spec.md` §1.**
+**Ledger effect: application 57 → 59.** 59 application + 2 test-support = 61.
+**Dependency ledger: `web` gains `core:os`** — the first change to
+`build/phase1-direct-dependencies.txt` since Phase 1.
+
+```
+application	proc	static :: proc(a: ^App, prefix: string, dir: string, o: Static_Options = {...})
+application	type	Static_Options :: struct {max_file_size: int, index: string}
+```
+
+**IT IS CONFIGURATION, NOT A ROUTER, for a mechanical reason.** A `Handler` is a
+plain procedure with no captured state, so a handler produced by `static` could
+not know which directory it belonged to. The App holds the mounts and the
+request path reads them — the same shape `cors` takes, for the same reason.
+
+**A MOUNT OWNS ITS PREFIX.** A request under it is answered from the filesystem
+or answered 404; it never falls through to the router. That is the `location`
+rule every reverse proxy already uses. The alternative — try the router, then
+fall back to files — makes "why is my route shadowed?" depend on whether a file
+happens to exist, which is a question nobody can answer from the source.
+
+**THE REJECTIONS ARE THE FEATURE.** Every rule is a refusal, never a repair,
+because a normaliser that gets it wrong produces a path the check already
+approved: `..`, `%`, `\`, NUL, empty interior segments, a leading `.` on any
+segment, a trailing `/`, anything that is not a regular file, and **every
+symlink whatever it points at**.
+
+Two of those deserve their reasons in the ledger:
+
+- **`%` is refused outright.** Uruquim never decodes the path (WP31a,
+  permanent), so `%2e%2e` would sail past a textual `..` check untouched and be
+  decoded by something downstream. A file whose name needs percent encoding is
+  not worth that.
+- **All symlinks are refused, not just escaping ones.** The stat does not follow
+  links, so a link reports its own type and is refused before anything resolves
+  it. Resolving and then comparing against the mount root is a string comparison
+  between paths that may be spelled differently, and **every wrong answer to
+  that comparison serves a file it should not.** This was not theoretical: the
+  first implementation did compare a resolved path against the root, and it
+  silently 404'd *every* file because `stat` returns an absolute path while the
+  mount was configured relative. The corpus caught it; a reviewer would not have.
+
+**GUARDRAIL 3 WAS VIOLATED AND THEN FIXED, and the measurement is why the fix
+exists.** Calling the file server directly from `driver_run` links `core:os`
+into every binary: `examples/01-hello-world`, which serves no files,
+**grew by 20 176 bytes.** The server is now reached through a proc pointer whose
+only assignment is inside `static`, exactly as `test_teardown` is under G-11, so
+the linker drops it — and `core:os` with it — from applications that mount
+nothing. The residual is 1 936 bytes across WP60 and WP61 together: the pointer
+field, the two inline config structs, and nothing executable.
+
+**WHAT IT DOES NOT DO**, each with its reason recorded rather than omitted:
+no file above `max_file_size` (8 MiB default) because responses are buffered
+whole under ADR-014 and a 100 MB download is 100 MB of RSS; no `Last-Modified`
+because an HTTP date needs a formatter linked into every application, and
+`ETag` validates as well without one; no ranges, which need the partial-response
+machinery streaming needs; no directory listing, which is a feature that leaks a
+filesystem.
+
+`STATUS_NOT_MODIFIED` carries 304 **without adding a public `Status` member**,
+on the `STATUS_BODY_TOO_LARGE` precedent: the enum is frozen member-by-member,
+and 304 is a cache negotiation the framework performs on the application's
+behalf — no handler returns it, so no handler needs a name for it.
+
+| Symbol | L | Owner | Compile evidence | Behavior evidence | Docs | Ownership |
+|---|---|---|---|---|---|---|
+| `static` | A | WP61 | `tests/wp61-public-surface/contract_test.odin::wp61_the_signatures_are_pinned` | `tests/wp61-public-surface/contract_test.odin` — twelve cases, nine of them rejections | `docs/ai-context.md::Static files`, fragment `phase5/static` with a compiling fixture | stores bounded inline mounts on the App; the prefix and directory strings are the caller's; the served bytes are allocated per request and owned by the `Response`, released by `response_destroy` |
+| `Static_Options` | A | WP61 | `build/phase1-public-signatures.txt` (struct shape frozen field-by-field) | `tests/wp61-public-surface/contract_test.odin::wp61_a_file_over_the_cap_is_refused`, `::wp61_the_index_is_served_at_the_mount_root` | `docs/ai-context.md::Static files` | a by-value policy; owns nothing |
+
+**Rollback.** Removing `static` removes the feature and the `core:os`
+dependency with it: the mounts are private, the request path calls through a
+pointer that is never assigned, and no other symbol references either name.

@@ -192,6 +192,11 @@ Context_Internal :: struct {
 	// same terms as `allow_buffer`: the committed response holds a view over it.
 	cors_max_age_buffer:   [CORS_MAX_AGE_DIGITS]u8,
 
+	// WP61 — request-local storage for the rendered ETag, on the `allow_buffer`
+	// terms: the committed response holds a view over it and reads it after
+	// dispatch returns.
+	static_etag_buffer:    [STATIC_ETAG_MAX]u8,
+
 	// WP36 — the byte budget this request is held to, copied from the App by
 	// the driver alongside the observer and the state.
 	//
