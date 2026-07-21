@@ -111,6 +111,33 @@ Limits :: struct {
 	// Ignored when `max_connections` is zero — there is nothing to reserve from
 	// an unbounded pool.
 	reserved_conns:   int,
+
+	// WP59 — how long a graceful shutdown may take, in nanoseconds, measured
+	// from the moment `web.stop` is observed. Zero means no deadline, which is
+	// what shipped before this field existed.
+	//
+	// **Phase 4 withdrew this field rather than ship one that bounded nothing,
+	// and the withdrawal was correct.** The attempt then bounded the drain loop
+	// and left two waits behind it; WP58 measured the result of having neither —
+	// with eight idle keep-alive connections the drain never ended, and letting
+	// those connections complete crashed the process on a freed pointer. This
+	// field ships now because the mechanism underneath it cancels the operation
+	// instead of waiting around it.
+	//
+	// WHAT IT BOUNDS: the drain loop, the forced close of connections still
+	// serving a request when it expires, and the final wait for outstanding
+	// close operations. All three, because bounding one of them is what failed.
+	//
+	// WHAT IT DOES NOT BOUND, stated here because a deadline that is quietly
+	// conditional is worse than none: **a handler that blocks.** The event loop
+	// is single-threaded (ADR-030), so a handler that sleeps for a minute holds
+	// the very thread this deadline is enforced on. The supervisor's
+	// `TimeoutStopSec` remains the outer bound, and `docs/operations.md` says so.
+	//
+	// `i64` nanoseconds rather than `time.Duration` for the same measured reason
+	// as `max_request_time`: `package web` may not import `core:time`
+	// (FINDING-B). The transport converts at the boundary.
+	max_drain_time:   i64,
 }
 
 // DEFAULT_LIMITS is what every application gets without asking.
@@ -131,7 +158,26 @@ DEFAULT_LIMITS :: Limits {
 	max_request_time = REQUEST_TIME_LIMIT,
 	max_connections  = CONNECTION_LIMIT,
 	reserved_conns   = RESERVED_CONNECTION_LIMIT,
+	max_drain_time   = DRAIN_TIME_LIMIT,
 }
+
+// DRAIN_TIME_LIMIT is ten seconds, in nanoseconds.
+//
+// THE NUMBER IS JUDGEMENT AND IS RECORDED AS SUCH (the C-5 honesty rule). No
+// specification sets a shutdown deadline. Ten seconds is chosen against the one
+// number that actually constrains it: systemd's `TimeoutStopSec` defaults to
+// 90 seconds, and Kubernetes' termination grace period to 30. A drain deadline
+// is only useful if it expires BEFORE the supervisor's kill — otherwise the
+// kill is the real deadline and this field is decoration — so it is set well
+// inside the tighter of the two.
+//
+// IT IS A DEFAULT, NOT A RECOMMENDATION. An operator whose handlers legitimately
+// run longer should raise it, and one running behind a proxy with a short
+// timeout should lower it. What matters is that the default bounds shutdown
+// rather than leaving it open, because the previous default was "forever" and
+// nobody chose that either.
+@(private)
+DRAIN_TIME_LIMIT :: i64(10 * 1_000_000_000)
 
 // REQUEST_LINE_LIMIT and HEADER_BLOCK_LIMIT are the vendored backend's own
 // defaults, restated here so `DEFAULT_LIMITS` does not silently inherit a
@@ -238,6 +284,12 @@ limits :: proc(a: ^App, l: Limits) {
 		return
 	}
 	if l.max_request_time < 0 {
+		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
+		return
+	}
+	// Same rule as `max_request_time`: zero is a meaningful choice (no
+	// deadline), negative is a mistake.
+	if l.max_drain_time < 0 {
 		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
 		return
 	}

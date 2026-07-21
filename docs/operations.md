@@ -103,22 +103,34 @@ web.stop(&app)   // returns immediately; safe from a signal handler
 `stop` ends admission and lets in-flight work finish; `web.serve` returns when
 the drain completes.
 
-> **⚠ `stop` has NO deadline. A connection a client holds open can delay the
-> drain indefinitely.**
+**`stop` has a deadline: `Limits.max_drain_time`, ten seconds by default.**
+When it expires, connections still serving a request are closed rather than
+waited for, and `web.serve` returns.
 
-This is a real limitation and it is not scheduled away: WP44 attempted an
-absolute drain deadline, found it could not be built as a contained patch to the
-vendored server, and **withdrew it rather than ship a field that did not bound
-anything.**
+This shipped in WP59 and it is worth knowing what it replaced, because the
+history is the reason to trust it. WP44 attempted the same field, measured a
+drain that never terminated, and **withdrew it rather than ship a field that did
+not bound anything.** WP58 then measured why, and found something worse than a
+missing deadline: with idle keep-alive connections the drain never ended, and
+letting those connections complete **crashed the process** on a connection the
+shutdown path had already freed. Both failures came from one pending read that
+nothing could cancel. Cancelling it fixed both.
 
-**What to do about it:**
+**What it does not bound, and this has not changed:**
 
-* set `max_request_time` — it bounds how long a stuck *request* survives, which
-  is the common case;
-* **keep the supervisor's kill timeout as your real deadline.** `systemd`'s
-  `TimeoutStopSec` is the backstop, and it should be shorter than your
-  orchestrator's grace period;
-* **do not build a control plane that assumes `stop` always completes.**
+> **⚠ A blocking handler blocks the drain.** The event loop is single-threaded
+> (ADR-030), so a handler that sleeps or makes a synchronous call holds the very
+> thread this deadline is enforced on. `max_drain_time` cannot interrupt it.
+
+**So the advice is narrower than it was, not absent:**
+
+* set `max_request_time` — it bounds how long a stuck *request* survives;
+* **keep the supervisor's kill timeout as your outer bound.** `systemd`'s
+  `TimeoutStopSec` should be longer than `max_drain_time` and shorter than your
+  orchestrator's grace period. The default of ten seconds is chosen to sit
+  inside both;
+* set `max_drain_time = 0` to get the old unbounded behaviour back, if you would
+  rather wait than cut a request off.
 
 **And a blocking handler blocks the drain**, because the event loop is
 single-threaded (ADR-030). A handler that sleeps or makes a synchronous call
@@ -219,15 +231,23 @@ you set cookies, you set the headers, and you own their attributes.
 ## 10. Known limitations, in one place
 
 * **No TLS**, by decision. Use a proxy.
-* **No shutdown deadline.** The supervisor's kill is the real one.
+* **A blocking handler is not bounded by anything.** `max_drain_time` bounds
+  shutdown, `max_request_time` bounds arrival; neither can interrupt a handler
+  that does not return, because the loop is single-threaded.
 * **A faulting handler aborts the process.** By construction, not by defect.
 * **No write deadline.** The read side has one; the write side does not.
 * **No bound on the accept backlog or inbound header count.**
 * **One server per process.**
-* **No CORS, uploads, static files, WebSocket or streaming.** Out of core by
-  decision; each is a security surface with its own answer.
+* **No WebSocket or streaming.** Out of core by decision, and both need a
+  response model this framework does not have (ADR-014 buffers responses
+  whole). CORS, static files and uploads were on this list until Phase 5 moved
+  them into the core (ADR-034).
 * **The HTTP server underneath is a vendored snapshot of `laytan/odin-http`,
-  which describes itself as beta.** Seven local patches are carried, four of
-  them fixing upstream defects — including one found here that broke keep-alive
-  for every GET. `planning/vendor-policy.md` governs them, and ADR-033 is an
-  open question about the foundation itself.
+  which describes itself as beta.** Eleven local patches are carried, five of
+  them fixing upstream defects — including one that broke keep-alive for every
+  GET, and one use-after-free on the shutdown path.
+  `planning/vendor-policy.md` governs them. **This is scheduled to end:** Odin's
+  standard library gains an official `core:net/http` in January 2027, and
+  ADR-033 now points at swapping to it rather than owning a connection layer.
+  The three drain patches are marked `BRIDGE` and are expected to be deleted
+  rather than ported.

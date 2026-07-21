@@ -1092,6 +1092,18 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp50-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp50-public-surface"
 
+# WP58/WP59 — the drain deadline. Under an EXTERNAL timeout, because the defect
+# this suite was written against presents as a hang: a suite that hangs here
+# would stall the gate rather than fail it, and "the gate is still running" is
+# not a test result. The bound is generous — the suite's own phases take about
+# four seconds — so a timeout means genuinely stuck, never slow.
+echo "--- WP58/59 drain deadline: stop returns with connections held open (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  timeout 120 \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp58-drain" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp58-drain" \
+  || fail "the drain suite failed or timed out; a timeout means the drain is stuck, which is the defect it exists to catch"
+
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
 if find "$URUQUIM_ROOT" -maxdepth 1 -type f -name 'uruquim-*' -print -quit | grep -q .; then

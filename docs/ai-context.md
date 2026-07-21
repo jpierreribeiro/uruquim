@@ -101,10 +101,10 @@ it is a request, not a join — so it is safe to call from a signal handler. The
 `web.serve` call returns when the drain finishes. Calling it twice, or with no
 server running, is a no-op.
 
-**It has no deadline.** A connection a client holds open can delay the drain
-indefinitely; `Limits.max_request_time` bounds how long a request may take to
-arrive, but it does not bound the drain itself. Run under a supervisor that can
-kill, and do not build a control plane that assumes `stop` always completes.
+**It has a deadline: `Limits.max_drain_time`, ten seconds by default.** When it
+expires, connections still serving a request are closed rather than waited for.
+Set it to zero for the old unbounded behaviour. Keep the supervisor's kill as
+the outer bound — it should be longer than `max_drain_time`.
 
 **A blocking handler blocks the drain**, because the event loop is
 single-threaded (ADR-030). A handler that sleeps or makes a synchronous call
@@ -176,8 +176,9 @@ keep it.
 
 ```text
 Limits{max_body, max_request_line, max_headers, max_request_time,
-       max_connections, reserved_conns}
-DEFAULT_LIMITS   4 MiB, 8000, 8000, 30 s (ns), 1024 conns, 16 reserved
+       max_connections, reserved_conns, max_drain_time}
+DEFAULT_LIMITS   4 MiB, 8000, 8000, 30 s (ns), 1024 conns, 16 reserved,
+                 10 s drain (ns)
 limits(&app, l)                    set it; before the first request
 ```
 

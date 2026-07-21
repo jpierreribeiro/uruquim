@@ -91,6 +91,11 @@ Config :: struct {
 	// WP47 — bounded admission. Zero is unbounded.
 	max_connections:  int,
 	reserved_conns:   int,
+	// WP59 — the absolute drain deadline in NANOSECONDS, for the same reason
+	// `max_request_time` is one: the core may not import `core:time`, so the
+	// neutral boundary carries a plain integer and the adapter converts on the
+	// side of the line where a clock is already linked. Zero disables it.
+	max_drain_time:   i64,
 	dispatch:         Dispatch_Proc,
 	user:             rawptr,
 	on_ready:         proc(user: rawptr),
