@@ -240,6 +240,10 @@ single source of truth for what "passing" means in this repository.
 
 All seven examples compile in the mandatory gate.
 
+**Deploying it?** [`docs/operations.md`](docs/operations.md) is the one to read:
+the supported topology, what is bounded and what is not, what to monitor, and a
+known-limitations section that does not flatter the framework.
+
 ## Licence, security and contributing
 
 Uruquim is [MIT licensed](LICENSE).

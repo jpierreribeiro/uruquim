@@ -1,0 +1,233 @@
+# Operating Uruquim
+
+**Who this is for:** whoever has to deploy this and be woken up by it.
+
+It says what is bounded, what is not, what to monitor, and — the section most
+documents leave out — **what this framework does not protect you from.** A
+deployment guide that only lists features is a guide that gets someone paged.
+
+---
+
+## 1. The supported topology
+
+**Behind a reverse proxy, under a supervisor.** Both halves are load-bearing.
+
+```
+    internet → reverse proxy (TLS) → Uruquim (HTTP) → your handlers
+                                        ↑
+                                   supervisor
+```
+
+**Why a proxy.** Uruquim does not terminate TLS and will not: in-process TLS
+would import an enormous attack surface into a framework whose value is a small,
+frozen, gate-enforced one. The proxy holds the certificate, and it is also the
+thing that should assert HSTS — a framework behind it asserting HSTS on a
+cleartext hop is asserting something it cannot know.
+
+**Why a supervisor, and this is not a nicety.** **A faulting handler aborts the
+process.** Odin has no recoverable panic (ADR-020), so a nil dereference, a
+failed assertion or an out-of-bounds index in your handler ends the program. The
+supervisor restarting it *is* the recovery mechanism. There is no other one and
+there will not be.
+
+`systemd` is the ordinary answer:
+
+```ini
+[Service]
+ExecStart=/usr/local/bin/your-app
+Restart=always
+RestartSec=1
+```
+
+**This is also how Gin is deployed in practice.** The difference is that this
+document writes the boundary down instead of leaving it folklore.
+
+---
+
+## 2. What the framework bounds
+
+Set these explicitly rather than inheriting them, because a default you did not
+choose is a default you will not remember under load:
+
+```odin
+budget := web.DEFAULT_LIMITS
+budget.max_body         = 1 * 1024 * 1024   // 4 MiB default
+budget.max_request_time = 10 * 1_000_000_000 // 30 s default, nanoseconds
+budget.max_connections  = 512                // 1024 default
+web.limits(&app, budget)
+```
+
+| Bound | Default | What happens at the limit |
+|---|---|---|
+| `max_body` | 4 MiB | `413`, before the parser and before any arena |
+| `max_request_line` | 8000 | the backend refuses the request |
+| `max_headers` | 8000 | the backend refuses the request |
+| `max_request_time` | 30 s | **the connection is closed** — this is the slowloris defence |
+| `max_connections` | 1024 | the connection is **closed at accept**, not queued |
+| `reserved_conns` | 16 | slots held back from admission so a shutdown always has room |
+
+**`max_request_time` is a REQUEST deadline, not an idle timeout.** An idle timer
+is reset by every byte, so a client trickling one byte per second resets it
+forever — which is precisely the attack. This bounds the total time a request
+may take to *arrive*.
+
+**It does not bound your handler.** A slow handler is your program's time, and
+killing its connection would turn a slow page into a broken one.
+
+---
+
+## 3. What the framework does NOT bound — read this section twice
+
+| Not bounded | Who owns it |
+|---|---|
+| **your handler's own allocations** | you |
+| **your response body's size** | you |
+| **how long your handler runs** | you |
+| the accept **backlog** | the kernel |
+| inbound header **count** (the block's bytes are bounded) | the transport |
+| total process memory | the OS — set a cgroup limit |
+| middleware chain **depth** | you; ~100k frames, and exceeding it is a **segfault, not a diagnostic** |
+
+**Uruquim bounds its own per-request working memory. It does not bound the
+server.** Any sentence that says "bounded" without naming which perimeter is a
+sentence this project's gate exists to prevent.
+
+---
+
+## 4. Shutdown, and its sharp edge
+
+```odin
+web.stop(&app)   // returns immediately; safe from a signal handler
+```
+
+`stop` ends admission and lets in-flight work finish; `web.serve` returns when
+the drain completes.
+
+> **⚠ `stop` has NO deadline. A connection a client holds open can delay the
+> drain indefinitely.**
+
+This is a real limitation and it is not scheduled away: WP44 attempted an
+absolute drain deadline, found it could not be built as a contained patch to the
+vendored server, and **withdrew it rather than ship a field that did not bound
+anything.**
+
+**What to do about it:**
+
+* set `max_request_time` — it bounds how long a stuck *request* survives, which
+  is the common case;
+* **keep the supervisor's kill timeout as your real deadline.** `systemd`'s
+  `TimeoutStopSec` is the backstop, and it should be shorter than your
+  orchestrator's grace period;
+* **do not build a control plane that assumes `stop` always completes.**
+
+**And a blocking handler blocks the drain**, because the event loop is
+single-threaded (ADR-030). A handler that sleeps or makes a synchronous call
+holds the loop, and nothing — no deadline, no stop — runs until it returns.
+
+---
+
+## 5. One server per process
+
+`web.serve` blocks and the transport keeps per-process state. **Two servers in
+one process is not supported.** Scale horizontally: one process per server, many
+processes.
+
+The concurrency model is a **single-threaded event loop**, decided in ADR-030
+against a measured prototype. A threaded arm finished ~31% sooner, which sits far
+inside this machine's 138% noise floor, and adopting it would have falsified
+three shipped guarantees. **If your service is CPU-bound inside handlers, run
+more processes.**
+
+---
+
+## 6. What to monitor
+
+```odin
+web.refused_connections()   // running total of admission refusals
+web.observe(&app, on_framework_error)
+web.use(&app, web.logger)
+web.use(&app, web.request_id)
+```
+
+* **`refused_connections()` is your saturation signal.** It rising means you are
+  at `max_connections`. Zero means either nothing was refused or no server is
+  running — those are deliberately not distinguished.
+* **`observe`** receives a typed event for every framework-detected failure.
+  It cannot change the response; it is for exporting to metrics or alerting.
+* **Key every metric on `web.route(ctx)`, never on `ctx.request.path`.** The
+  path has unbounded cardinality — one time series per user id — and it puts
+  user data in a dashboard.
+
+**What the framework will never log:** the path, the query, any header, any body
+byte, any parameter. It records the route pattern, the method, the status, the
+request ID, a closed error enum and its own counts. Nothing else
+(`planning/phase-4-spec.md` §3).
+
+---
+
+## 7. Behind a proxy: the client address
+
+```odin
+web.trust_proxies(&app, {"10.", "127.0.0.1"})
+ip := web.client_ip(ctx)
+```
+
+**`client_ip` returns the connected peer unless that peer is one you named.**
+Only then is `X-Forwarded-For` believed.
+
+**Never read `X-Forwarded-For` yourself.** It is a request header — any client
+can send one — and a rate limit, audit log or allow-list built on a forged value
+is an authorization bypass. If you configure nothing, you get the peer, which
+behind a proxy is the proxy: correct, if not what you wanted, and safe.
+
+---
+
+## 8. Security posture
+
+```odin
+web.use(&app, web.secure_headers)   // nosniff, DENY, no-referrer
+```
+
+**There is no CSP and no HSTS**, deliberately. A CSP not written for your
+application breaks it; HSTS belongs to whatever terminates TLS. Set both **at
+your proxy**, where they can be written against your actual deployment.
+
+**There is no cookie API**, so there is nothing to secure with `SameSite` — if
+you set cookies, you set the headers, and you own their attributes.
+
+---
+
+## 9. A deployment checklist
+
+1. Reverse proxy in front, terminating TLS, with its own timeouts and body caps.
+2. Supervisor with `Restart=always` and a `TimeoutStopSec` you chose.
+3. `web.limits` set explicitly, including `max_connections` below your
+   file-descriptor limit.
+4. `web.trust_proxies` naming your proxy's network — or nothing at all, never a
+   guess.
+5. `web.secure_headers` on, CSP and HSTS at the proxy.
+6. `web.logger` and `web.request_id` on; `web.observe` exporting to wherever you
+   alert from.
+7. A cgroup memory limit, because the framework does not bound your handlers.
+8. Metrics keyed on `web.route`, never on the path.
+9. One process per server; scale by adding processes.
+10. Load-test **your** handlers. This framework's dispatch is flat from 5 routes
+    to 5,000; your database is not.
+
+---
+
+## 10. Known limitations, in one place
+
+* **No TLS**, by decision. Use a proxy.
+* **No shutdown deadline.** The supervisor's kill is the real one.
+* **A faulting handler aborts the process.** By construction, not by defect.
+* **No write deadline.** The read side has one; the write side does not.
+* **No bound on the accept backlog or inbound header count.**
+* **One server per process.**
+* **No CORS, uploads, static files, WebSocket or streaming.** Out of core by
+  decision; each is a security surface with its own answer.
+* **The HTTP server underneath is a vendored snapshot of `laytan/odin-http`,
+  which describes itself as beta.** Seven local patches are carried, four of
+  them fixing upstream defects — including one found here that broke keep-alive
+  for every GET. `planning/vendor-policy.md` governs them, and ADR-033 is an
+  open question about the foundation itself.

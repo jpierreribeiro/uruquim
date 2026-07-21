@@ -774,6 +774,19 @@ HIGH.**
 
 ### WP55 — Operations documentation
 
+**DONE, 2026-07-21 — `docs/operations.md`.**
+
+**Written for whoever has to deploy this and be woken up by it**, which is why
+§3 ("what the framework does NOT bound") and §10 ("known limitations") are the
+two longest sections. A deployment guide that only lists features is a guide
+that gets someone paged.
+
+It states the supported topology (proxy + supervisor), the bounds and their
+defaults, **the shutdown edge WP44 could not close**, the single-threaded
+consequence for blocking handlers, what to monitor and what the framework will
+never log, and the ten-point checklist. Every limitation carries WHY it is a
+limitation rather than only that it is one.
+
 **DOCS.** How to deploy — reverse-proxy TLS termination as the documented
 topology (§2b) — what to bound, what to monitor, what is **not** hardened, and
 the supervisor expectation stated for operators (ADR-020: a faulting handler
