@@ -92,6 +92,18 @@ Essas decisões aprovam o **programa e seus gates**, não nomes públicos futuro
 WP66–WP113 ainda devem medir, recusar braços inseguros e congelar cada
 superfície antes de ela virar promessa.
 
+## Decisões do dono (2026-07-22) — composição, o BOM e a metade Crystals da Fase 7
+
+| Decisão | O que ficou decidido, em uma linha |
+|---|---|
+| **A Fase 7 tem duas metades** | Como a Fase 6 (concorrência no core, dados nos Crystals), a Fase 7 ganha uma metade Crystals: **composição** — Crystal `http_client` (HTTP/1.1 de saída com TLS e verificação real de certificado, pool limitado, orçamento de deadline, cancelamento no drain, retry limitado; substituição declarada = cliente do futuro `core:net/http`, espelho do ADR-033) e Crystal `metrics` (exposição Prometheus sobre os hooks de observer). Roda contra o core congelado da Fase 6, em paralelo ao streaming. **Sem renumeração de fases**: o gate congelado da Fase 6 afirma a numeração WP85–WP101/WP102–WP113, e renumerar seria churn sem capacidade. |
+| **O BOM composicional é obrigatório** | `planning/production-service-bom.md` classifica cada item que um serviço de produção precisa como CORE / CRYSTAL / DELEGADO / RECUSADO / ABERTO-com-gatilho. Nenhum item sem classificação; é gate de entrada do WP102. Causa-raiz corrigida: o programa só fazia perguntas voltadas para dentro, e o cliente de saída escapou por esse ângulo morto. |
+| **A app da Fase 8 chama para fora** | O sistema de referência faz pelo menos uma chamada HTTP de saída real (entrega de webhook com timeout, retry limitado e cancelamento no drain), exigida pela nova condição de entrada E8-7. Prova por uso sem chamada de saída provaria só metade de um microserviço. |
+
+Essas decisões seguem a regra de sempre: aprovam **escopo e gates**, não nomes
+públicos. `http_client` e `metrics` ainda passam por spec, RED-under-control,
+gates e freeze próprios no repositório Crystals antes de qualquer promessa.
+
 ## Fila de decisões abertas
 
 - **ADR-030 — concorrência.** Reaberta apenas para o workload de liveness da

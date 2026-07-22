@@ -4,6 +4,29 @@
 run. WP85 must refresh this plan against the Phase-6 freeze; no signature below
 is approved or frozen. Work packages continue at **WP85–WP101**.
 
+**Amendment 1 — 2026-07-22, owner decision: the composition half.** Phase 7
+adopts the two-half structure Phase 6 shipped with (concurrency in core, data
+in Crystals). This plan is the **core half**, unchanged: WP85–WP101, streaming
+in both directions. The **Crystals half — composition** ships in
+`uruquim-crystals` against the Phase-6 core freeze and may run in parallel
+with the core half:
+
+- an **`http_client`** Crystal: outbound HTTP/1.1 over `core:net` with a
+  bounded connection pool, timeouts and a deadline budget, cancellation
+  integrated with drain, bounded retry — and **outbound TLS with real
+  certificate verification as an inseparable part**. The official future
+  `core:net/http` client is the declared replacement path, mirroring
+  ADR-033's server side;
+- a **`metrics`** exposition Crystal (Prometheus text format) over the
+  existing observer hooks, preserving the redaction rules.
+
+Its spec anchor is `planning/production-service-bom.md`; its work packages
+follow the Phase-6 Crystals pattern (spec → RED → implementation → gate →
+freeze) and are numbered in the Crystals repository. Phase 8 gains entry
+condition E8-7 (composition Crystals frozen) and its reference application
+must place at least one real outbound HTTP call. WP85 records this structure
+in `planning/phase-7-spec.md`.
+
 The promise:
 
 > A handler may establish a long-lived response and return; later work can

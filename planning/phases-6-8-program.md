@@ -392,3 +392,29 @@ the evidence should eventually permit:
 > construction, and joyful to program.**
 
 Phase 8 decides whether the project earned every adjective.
+
+---
+
+## 11. Amendment — 2026-07-22: the composition half of Phase 7
+
+Phase 6 shipped in two halves — concurrency in core, data in Crystals. Phase 7
+adopts the same structure: streaming is its **core half** (WP85–WP101,
+unchanged), and **composition** is its **Crystals half** — an `http_client`
+Crystal (outbound HTTP/1.1 with TLS and real certificate verification, bounded
+connection pool, deadline budget, drain-integrated cancellation, bounded
+retry) and a `metrics` exposition Crystal over the existing observer hooks.
+The Crystals half builds against the Phase-6 core freeze and may run in
+parallel with streaming.
+
+The audit that produced this amendment also produced
+`planning/production-service-bom.md`: the composition-facing bill of materials
+in which every capability a production service needs is classified CORE /
+CRYSTAL / DELEGADO / RECUSADO / ABERTO-with-trigger. It becomes an entry gate
+for WP102 (E8-7), and the Phase-8 reference application must place at least
+one real outbound HTTP call.
+
+Rationale, recorded so the lesson outlives the fix: every earlier phase asked
+inward-facing questions ("what does a server need?"). The outbound HTTP client
+escaped through exactly that angle — present in the documents only as a test
+workload, never as a capability. The BOM makes the composition question ("what
+does a service among services need?") a standing gate instead of an accident.
