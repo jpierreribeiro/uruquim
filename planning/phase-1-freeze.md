@@ -334,7 +334,7 @@ Evidence: `tests/wp9-semantic/http_factory_test.odin::wp9_semantic_matrix_on_the
 
 ## 7. Dependency inventory
 
-Snapshot: `build/phase1-direct-dependencies.txt` (19 direct imports, diffed on
+Snapshot: `build/phase1-direct-dependencies.txt` (21 direct imports, diffed on
 every gate run).
 
 | Package | Direct imports |
@@ -1891,3 +1891,47 @@ tracking test caught that mismatch and now pins zero leaks and zero bad frees.
 **Rollback.** Removing `web/json_decode.odin`, the two 400 renderers and the
 preflight call restores the pre-WP68 decoder behavior and removes both imports.
 No signature, ledger row, Context field or transport contract changes.
+
+---
+
+## Amendment 24 — WP70: thread-safe framework core, no ledger growth
+
+**Date: 2026-07-22. Authority: `planning/phase-6-spec.md` §3 and
+`planning/phase-6-plan.md` WP70. Ledger effect: none; application remains 62
+and test-support remains 2.**
+
+**Dependency ledger:** `web` and `web/internal/transport` each gain
+`core:sync`. Both are Odin standard-library imports. The first owns atomic App
+publication and request-ID allocation; the second owns the short lifetime lock
+around the private backend server pointer. No synchronization type appears in a
+public signature.
+
+**Ownership is the mechanism.** Before a real server starts lanes, `web.serve`
+builds the lazy miss chain and publishes one immutable App snapshot. Late
+configuration is refused without mutating or poisoning live state. Request
+Contexts remain lane-local; the backend Date cache and connection map are
+lane-owned. Atomics are reserved for counters and state transitions that are
+genuinely shared.
+
+**Patch 12 is a bridge, not a new foundation.** It elects exactly one backend
+shutdown owner, makes the Date cache lane-owned and atomically aggregates
+admission refusals. WP69's unchanged four-lane drain obligation previously
+terminated with `Segmentation_Fault`; it is GREEN after the ownership repair.
+The vendor policy, patch ledger and in-source markers all identify the change
+for deletion with the bootstrap adapter.
+
+**Evidence:** `build/check_wp70_controls.sh` owns an eight-thread deterministic
+contention corpus, a sixteen-caller real-socket stop case and three semantic
+mutations. The complete boundary, including the explicit exclusion of
+application-owned `App_State`, observers' sinks and permanently blocking
+foreign code, is recorded in `planning/phase-6-thread-safety.md`.
+
+**Cost evidence:** adjacent worktrees at WP69 parent `1cd8175` and WP70, the
+same pinned compiler and identical `01-hello-world` build commands, measured
+967,248 and 971,616 bytes respectively: **+4,368 bytes** for the internal
+thread-safe foundation. This is paid before WP71 enables multiple lanes and is
+recorded explicitly rather than hidden in that feature's later measurement.
+
+**Rollback.** No public name or signature changed. Removing the private
+publication helpers, restoring the single-lane assumptions and dropping Patch
+12 removes both direct imports and returns the previous implementation.

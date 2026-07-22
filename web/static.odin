@@ -140,10 +140,14 @@ Static_Mounts :: struct {
 // a 404 nobody traces back to a typo, and one that silently works on the wrong
 // directory is worse.
 static :: proc(a: ^App, prefix: string, dir: string, o: Static_Options = {}) {
+	if app_is_serving(a) {
+		app_reject_late_configuration(a)
+		return
+	}
 	if a.private.poisoned {
 		return
 	}
-	if a.private.dispatched {
+	if app_has_dispatched(a) {
 		static_poison(a, FRAMEWORK_MESSAGE_STATIC_AFTER_DISPATCH)
 		return
 	}

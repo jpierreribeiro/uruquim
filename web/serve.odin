@@ -41,6 +41,11 @@ serve :: proc(a: ^App, port: int) {
 		return
 	}
 
+	// WP70: finish lazy App-lifetime construction before the adapter creates
+	// any lane, then publish the App as immutable. Every request sees this same
+	// snapshot; late configuration is refused rather than raced.
+	app_prepare_serving(a)
+
 	// WP36: the backend's options are DERIVED from the App's limits, once, here
 	// at boot. The adapter receives resolved numbers and never sees a `Limits`.
 	cfg := transport.Config {

@@ -168,11 +168,15 @@ Cors_Config :: struct {
 // chosen for the same reason — a security policy that is wrong in a way the
 // server tolerates is a policy nobody will discover.
 cors :: proc(a: ^App, o: Cors_Options) {
+	if app_is_serving(a) {
+		app_reject_late_configuration(a)
+		return
+	}
 	if a.private.poisoned {
 		// Already rejected and already reported; the first diagnosis stands.
 		return
 	}
-	if a.private.dispatched {
+	if app_has_dispatched(a) {
 		cors_poison(a, FRAMEWORK_MESSAGE_CORS_AFTER_DISPATCH)
 		return
 	}

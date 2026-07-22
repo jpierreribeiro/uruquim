@@ -140,14 +140,15 @@ Server :: struct {
 	handler:        Handler,
 
 	threads:        []Server_Thread,
-	// URUQUIM PATCH 8 (WP47/WP50) — connections refused for admission since this
-	// server started. Read by the adapter for the observable drop policy.
+	// URUQUIM PATCH 12 (WP70) — BRIDGE. Connections refused for admission since
+	// this server started. Written by every lane and read by the adapter, so the
+	// total is atomic; the lane-local transition counter below needs no sharing.
 	refused_total:  int,
 	// Once the server starts closing/shutdown this is set to true, all threads will check it
 	// and start their thread local shutdown procedure.
 	//
-	// NOTE: This is only ever set from false to true, and checked repeatedly,
-	// so it doesn't have to be atomic, this is purely to keep the thread sanitizer happy.
+	// URUQUIM PATCH 12 (WP70) — BRIDGE. The false-to-true transition also elects
+	// the single shutdown owner; repeated callers return before touching lanes.
 	closing:        Atomic(bool),
 	// Threads will decrement the wait group when they have fully closed/shutdown.
 	// The main thread waits on this to clean up global data and return.
@@ -155,7 +156,6 @@ Server :: struct {
 
 	// Updated every second with an updated date, this speeds up the server considerably
 	// because it would otherwise need to call time.now() and format the date on each response.
-	date:           Server_Date,
 }
 
 Server_Thread :: struct {
@@ -163,6 +163,9 @@ Server_Thread :: struct {
 	event_loop: ^nbio.Event_Loop,
 	conns:      map[net.TCP_Socket]^Connection,
 	state:      Server_State,
+	// URUQUIM PATCH 12 (WP70) — BRIDGE. Each lane owns the Date buffer it writes
+	// and reads; sharing the server-level buffer was a cross-thread data race.
+	date:       Server_Date,
 	accept:     ^nbio.Operation,
 
 	// URUQUIM PATCH 8 (WP47) — refusals since admission was last available.
@@ -229,9 +232,6 @@ serve :: proc(s: ^Server, h: Handler) -> (err: net.Network_Error) {
 		td.thread = thread.create_and_start_with_poly_data2(s, &td, _server_thread_init, context)
 	}
 
-	// Start keeping track of and caching the date for the required date header.
-	server_date_start(s)
-
 	_server_thread_init(s, &s.threads[0])
 
 	sync.wait(&s.threads_closed)
@@ -269,6 +269,11 @@ _server_thread_init :: proc(s: ^Server, ttd: ^Server_Thread) {
 	}
 
 	td.event_loop = nbio.current_thread_event_loop()
+
+	// WP70: the cached Date buffer is lane-owned. A shared buffer was written
+	// once per second by lane zero while every other lane read it, which is a
+	// data race even though the bytes usually looked harmless.
+	server_date_start(s)
 
 	log.debug("accepting connections")
 
@@ -312,7 +317,15 @@ SHUTDOWN_INTERVAL :: time.Millisecond * 100
 // 4. Close the main socket.
 // 5. Signal 'server_start' it can return.
 server_shutdown :: proc(s: ^Server) {
-	atomic_store(&s.closing, true)
+	// URUQUIM PATCH 12 (WP70) — BRIDGE. Exactly one caller owns wake-up.
+	// Repeated stop calls used to walk
+	// `s.threads` while the first drain was freeing it, which is the WP69
+	// multi-lane shutdown crash.
+	previous, changed := sync.atomic_compare_exchange_strong(&s.closing.raw, false, true)
+	_ = previous
+	if !changed {
+		return
+	}
 	for t in s.threads {
 		nbio.wake_up(t.event_loop)
 	}
@@ -627,8 +640,8 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 			// WP50 §3.5 — the DROP POLICY IS OBSERVABLE. A component that can
 			// discard work must count what it discarded, because a metric that
 			// silently stops being emitted reads as "nothing happened".
-			s_total := &server.refused_total
-			s_total^ += 1
+			// URUQUIM PATCH 12 (WP70) — BRIDGE. Every lane contributes.
+			_ = sync.atomic_add(&server.refused_total, 1)
 			if td.refused_connections == 1 {
 				log.warnf(
 					"uruquim: admission limit reached (%i of %i slots, %i reserved for shutdown); refusing connections. This is logged ONCE per exhausted period, not per refusal.",
@@ -846,7 +859,8 @@ Server_Date :: struct {
 
 @(private)
 server_date_start :: proc(s: ^Server) {
-	s.date.buf.buf = slice.into_dynamic(s.date.buf_backing[:])
+	// URUQUIM PATCH 12 (WP70) — BRIDGE. `td.date` is lane-owned.
+	td.date.buf.buf = slice.into_dynamic(td.date.buf_backing[:])
 	server_date_update(nil, s)
 
 	// URUQUIM PATCH 6 (WP46) — the deadline sweep starts on the same loop and
@@ -907,11 +921,14 @@ server_date_update :: proc(_: ^nbio.Operation, s: ^Server) {
 
 	nbio.timeout_poly(time.Second, s, server_date_update)
 
-	bytes.buffer_reset(&s.date.buf)
-	date_write(bytes.buffer_to_stream(&s.date.buf), time.now())
+	// URUQUIM PATCH 12 (WP70) — BRIDGE. Update only this lane's cache.
+	bytes.buffer_reset(&td.date.buf)
+	date_write(bytes.buffer_to_stream(&td.date.buf), time.now())
 }
 
 @(private)
 server_date :: proc(s: ^Server) -> string {
-	return string(s.date.buf_backing[:])
+	// URUQUIM PATCH 12 (WP70) — BRIDGE. Responses read their lane's cache.
+	_ = s
+	return string(td.date.buf_backing[:])
 }

@@ -71,8 +71,12 @@ App_Internal :: struct {
 	// test observes (`use()` returns void and cannot signal by return);
 	// `dispatched` records that a first dispatch happened, which is what closes
 	// the ADR-023 edge (`use()` after a served miss but before any route).
-	poisoned:   bool,
-	dispatched: bool,
+	poisoned: bool,
+	// Atomic publication flags. `dispatched` closes the test-transport
+	// registration edge; `serving` publishes the immutable real-server snapshot.
+	// No route or policy storage is mutated once `serving` becomes non-zero.
+	dispatched: u32,
+	serving:    u32,
 
 	// WP18 fail-closed state (ADR-019/ADR-024). `closed` marks a Router that
 	// `mount` has already copied: a later registration on it would be silently

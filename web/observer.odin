@@ -77,6 +77,10 @@ Framework_Event :: struct {
 // It allocates nothing: the observer is one procedure pointer on the App, and
 // the event is a value.
 observe :: proc(a: ^App, observer: proc(event: Framework_Event)) {
+	if app_is_serving(a) {
+		app_reject_late_configuration(a)
+		return
+	}
 	a.private.observer = observer
 }
 

@@ -73,6 +73,10 @@ Trusted_Proxies :: struct {
 // fail-closed. Passing an empty slice is legal and means "trust nothing", which
 // is also the default.
 trust_proxies :: proc(a: ^App, prefixes: []string) {
+	if app_is_serving(a) {
+		app_reject_late_configuration(a)
+		return
+	}
 	if a.private.poisoned {
 		return
 	}

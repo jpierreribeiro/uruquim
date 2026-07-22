@@ -54,16 +54,17 @@ README.md, odinfmt.json, .editorconfig, .gitignore — repo tooling
 
 ## Local patches
 
-**Eight.** Five added by WP9 (transport conformance), and one each by WP45,
-WP46 (ADR-031) and WP47; all minimal, and all fixing either a security issue,
-an upstream defect, or a capacity the server had no way to bound. Each is marked in the source with a `URUQUIM PATCH` comment naming
-the decision it implements, and each is covered by a raw-wire corpus case that
-FAILED before the patch. There are no opportunistic edits.
+**Twelve.** Five added by WP9 (transport conformance), one each by WP45, WP46
+(ADR-031) and WP47, three by WP59's drain repair, and one by WP70's multi-lane
+lifecycle repair. All are minimal and fix a security issue, an upstream defect,
+a lifecycle defect or a capacity the server had no way to bound. Each is marked
+in source with `URUQUIM PATCH`, recorded below, and covered by executable
+evidence that failed before it. There are no opportunistic edits.
 
-Upstream is not at fault for most of these: the package is a general HTTP
-server, while Uruquim commits to a deliberately stricter Phase-1 framing policy
-(planning/phase-1-plan.md §WP9 D2–D7). Two of the five, however, are outright
-crashes and would be bugs anywhere.
+The classification is mixed. Some patches encode Uruquim's deliberately
+stricter framing, capacity and shutdown policy; seven fix upstream lifecycle,
+parsing or keep-alive defects. The distinction is recorded per row because it
+decides whether a re-vendor carries a policy or expects a fix to disappear.
 
 | # | File | Conceptual change | Why |
 |---|---|---|---|
@@ -75,6 +76,10 @@ crashes and would be bugs anywhere.
 | 7 | `body.odin` (`_body_length`) | A request with NO `Content-Length` sets `_body_ok = true` on its success path, instead of leaving the `false` the procedure starts with. | **KEEP-ALIVE WAS BROKEN FOR EVERY GET.** `_body_ok = false` means "a body read failed" and `response_must_close` retires the connection on it — but a request with no body returned through the success path without setting it. Measured before the patch: two sequential requests on one socket, the first answered and the second met an orderly close, with **no `Connection: close` advertised**, so a client had no way to know it was paying a TCP handshake per request while HTTP/1.1 promised persistence. |
 | 6 | `server.odin` (`Server_Opts`, `Connection`, `server_deadline_sweep`, `server_date_start`, `conn_handle_req`) and `response.odin` (`clean_request_loop`) | A configurable REQUEST READ DEADLINE: `request_read_timeout`. A per-thread periodic sweep closes any connection whose current request has taken longer than that to arrive. Zero disables it, which is upstream's behaviour. | **REMOTE RESOURCE EXHAUSTION (slowloris).** The upstream read has no deadline — `scanner.odin` carries an unfinished-work comment at the recv site asking for exactly this — so a client that sends a valid prefix and stops, or trickles one byte at a time, holds a connection open indefinitely. Demonstrated against this server by `tests/wp41-fault` before the patch existed (WP41), closed by it (WP46/ADR-031). |
 | 5 | `http.odin` (`Method`, `Requestline`, `requestline_parse`) | A valid but unrecognized method becomes `.Unknown` and its original token is preserved in `Requestline.method_raw`, instead of the server answering `501`. | WP9 D7: method semantics are the framework's decision. `PROPFIND` must reach the dispatcher and follow the ratified 404/405 policy; the transport must not invent a status before the core sees the request. |
+| 9 | `scanner.odin` (`Scanner.pending_recv`, `scanner_scan`, `scanner_on_read`) | Preserve the outstanding receive operation until it fires or is cancelled. **BRIDGE.** | The upstream scanner discarded the only handle by which `core:nbio` can cancel a pending receive. WP58 proved that an idle keep-alive connection then made safe teardown structurally impossible. |
+| 10 | `server.odin` (`connection_close`) | Cancel the scanner's outstanding receive before freeing connection-owned state. **BRIDGE.** | Without cancellation, a later completion dereferenced a freed `Connection`: WP58 reproduced an endless drain followed by `free(): invalid pointer`. This is an upstream use-after-free. |
+| 11 | `server.odin` (`Server_Opts`, shutdown loop) | Apply one absolute `max_drain_time` across shutdown waits and cancel remaining reads at expiry. **BRIDGE.** | A graceful-stop knob must bound the whole operation, not only one loop. The WP58 laboratory is the executable deadline evidence. |
+| 12 | `server.odin` (`Server`, `Server_Thread`, `server_shutdown`, Date cache, refusal count) | Elect one shutdown owner; make the Date cache lane-owned; atomically aggregate refusals. **BRIDGE.** | WP69 reproduced a multi-lane stop walking state another caller had begun freeing. WP70's contention corpus also owns the shared-counter and lane-cache races. |
 
 Patch 5 also adds a tenth entry to `_method_strings` and makes `method_parse`
 skip the new member, so the existing `for r in Method` lookup (which indexes
@@ -82,7 +87,7 @@ that array under `#no_bounds_check`) stays in bounds.
 
 Every other line is byte-for-byte upstream.
 
-To update to a newer upstream commit, re-apply the eight patches above (they are
+To update to a newer upstream commit, re-apply the twelve patches above (they are
 small and each is commented at its site) and re-run the WP9 raw-wire corpus,
 which is what proves they are still needed and still sufficient.
 
@@ -100,7 +105,7 @@ this cost is not.
 
 To move to a different upstream commit: re-copy the root `.odin` files, the
 `LICENSE` and `mod.pkg` from a fresh checkout at the new commit, re-apply the
-eight patches listed above, update the provenance table, and re-run the full
+twelve patches listed above, update the provenance table, and re-run the full
 gate — including the WP9 raw-wire corpus, which is what proves the patches are
 still necessary and still sufficient. Do not make unrelated edits to these
 files.

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WP69 — deterministic blocking boundary, plus the unsafe multi-lane drain RED.
+# WP69 — deterministic blocking boundary. WP70 amended the drain obligation GREEN.
 set -euo pipefail
 
 URUQUIM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,21 +34,9 @@ run_green() {
     "-out:$URUQUIM_TMP/$suite"
 }
 
-for URUQUIM_SUITE in candidate negative saturation slow-io repeatability; do
+for URUQUIM_SUITE in candidate negative saturation slow-io repeatability drain; do
   run_green "$URUQUIM_SUITE"
 done
-
-URUQUIM_DRAIN_OUTPUT="$URUQUIM_TMP/drain-output"
-if timeout 20 env ODIN_ROOT="$URUQUIM_ODIN_ROOT" "$URUQUIM_ODIN" test \
-    "$URUQUIM_ROOT/tests/wp69-concurrency-lab/drain" \
-    "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
-    "-out:$URUQUIM_TMP/drain" >"$URUQUIM_DRAIN_OUTPUT" 2>&1; then
-  fail "unsafe multi-lane drain unexpectedly passed before WP72 owns it"
-fi
-grep -qF "Segmentation_Fault" "$URUQUIM_DRAIN_OUTPUT" || {
-  cat "$URUQUIM_DRAIN_OUTPUT" >&2
-  fail "drain failed for a reason other than the recorded lifecycle defect"
-}
 
 URUQUIM_REPORT="$(timeout 20 env ODIN_ROOT="$URUQUIM_ODIN_ROOT" "$URUQUIM_ODIN" run \
   "$URUQUIM_ROOT/experiments/15-blocking-boundary" \
@@ -76,5 +64,5 @@ grep -qF "opts.thread_count = 1" "$URUQUIM_ROOT/web/internal/transport/odin_http
 
 echo "wp69: one lane loses health; four lanes retain it at three blocked handlers"
 echo "wp69: idle/partial/slow-write I/O and repeated lifecycle controls are green"
-echo "wp69: multi-lane drain remains RED for WP72; no public setting shipped"
+echo "wp69: multi-lane drain is GREEN after WP70 made shutdown ownership exact-once"
 echo "PASS: WP69 blocking-boundary controls"
