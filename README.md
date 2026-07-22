@@ -144,6 +144,13 @@ safe through bounded Handler concurrency, then builds the SQL-first PostgreSQL
 and migration ecosystem outside `web`. The accepted contract is
 [`planning/phase-6-spec.md`](planning/phase-6-spec.md).
 
+The current synchronous-Handler decision is not treated as the last possible
+runtime. Its four-arm future evaluation, workloads and decision checklist are
+recorded in [`planning/sync-async-evaluation.md`](planning/sync-async-evaluation.md).
+Broader questions that require real experiments — including when Crystals stay
+elegant or should split — live in
+[`planning/architecture-evidence-questions.md`](planning/architecture-evidence-questions.md).
+
 **Before deploying, read [`docs/operations.md`](docs/operations.md)** — in
 particular what the framework does and does not bound.
 
