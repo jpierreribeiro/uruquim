@@ -39,8 +39,9 @@ Server_Opts :: struct {
 	limit_headers:           int,
 	// URUQUIM PATCH 8 (WP47) — bounded admission.
 	//
-	// The maximum number of concurrent connections ONE THREAD will hold. Zero
-	// means unbounded, which is the upstream behaviour and the default here.
+	// The maximum number of concurrent connections the SERVER will hold across
+	// all lanes. Zero means unbounded, which is the upstream behaviour and the
+	// default here.
 	//
 	// WHY: without it, concurrent connections are bounded only by the operating
 	// system's file-descriptor limit, and reaching that limit is not a graceful
@@ -76,9 +77,9 @@ Server_Opts :: struct {
 	// final drain runs under `run_until` rather than `run`.
 	//
 	// WHAT IT DOES NOT BOUND, and operations.md says so in these words: a
-	// handler that blocks. The event loop is single-threaded (ADR-030), so a
-	// handler that sleeps holds the same thread the deadline is enforced on.
-	// The supervisor's kill is still the outer bound.
+	// handler that blocks. A synchronous Handler cannot be preempted; its lane
+	// cannot finish teardown until it returns. Other lanes may still enforce
+	// their deadline. The supervisor's kill is still the outer bound.
 	max_drain_time:          time.Duration,
 	// URUQUIM PATCH 6 (WP46 / ADR-031) — the request read deadline.
 	//
@@ -140,6 +141,10 @@ Server :: struct {
 	handler:        Handler,
 
 	threads:        []Server_Thread,
+	// URUQUIM PATCH 8 (WP47, amended by WP71) — the admission budget is
+	// server-wide. A lane-local `len(td.conns)` multiplied the public limit by
+	// the number of Handler lanes once concurrent serving shipped.
+	active_connections: int,
 	// URUQUIM PATCH 12 (WP70) — BRIDGE. Connections refused for admission since
 	// this server started. Written by every lane and read by the adapter, so the
 	// total is atomic; the lane-local transition counter below needs no sharing.
@@ -167,6 +172,9 @@ Server_Thread :: struct {
 	// and reads; sharing the server-level buffer was a cross-thread data race.
 	date:       Server_Date,
 	accept:     ^nbio.Operation,
+	// URUQUIM PATCH 13 (WP71) — BRIDGE. Synchronous Handler execution owns one
+	// lane; its accept stays suspended until application code returns.
+	handler_active: bool,
 
 	// URUQUIM PATCH 8 (WP47) — refusals since admission was last available.
 	//
@@ -590,6 +598,7 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 
 			scanner_destroy(&c.scanner)
 			delete_key(&td.conns, c.socket)
+			_ = sync.atomic_add(&c.server.active_connections, -1)
 			free(c, c.server.conn_allocator)
 		})
 	})
@@ -612,8 +621,12 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 		fmt.panicf("accept error: %v", op.accept.err)
 	}
 
-	// Accept next connection.
-	td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+	// Accept next connection unless this lane has entered synchronous
+	// application code (Patch 13). A raced completion is installed without
+	// opening another admission slot on the blocked lane.
+	if !td.handler_active {
+		td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+	}
 
 	// URUQUIM PATCH 8 (WP47) — BOUNDED ADMISSION, and the inequality is the
 	// whole design.
@@ -630,12 +643,14 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 	// is not taking work. The count is not logged per event (WP40 §2.5): ten
 	// thousand refusals must not become ten thousand log lines, which is a
 	// denial of service the server would be performing on itself.
+	active_connections := sync.atomic_add(&server.active_connections, 1) + 1
 	if server.opts.max_connections > 0 {
 		budget := server.opts.max_connections - server.opts.reserved_connections
 		if budget < 1 {
 			budget = 1
 		}
-		if len(td.conns) >= budget {
+		if active_connections > budget {
+			_ = sync.atomic_add(&server.active_connections, -1)
 			td.refused_connections += 1
 			// WP50 §3.5 — the DROP POLICY IS OBSERVABLE. A component that can
 			// discard work must count what it discarded, because a metric that
@@ -645,7 +660,7 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 			if td.refused_connections == 1 {
 				log.warnf(
 					"uruquim: admission limit reached (%i of %i slots, %i reserved for shutdown); refusing connections. This is logged ONCE per exhausted period, not per refusal.",
-					len(td.conns),
+					active_connections - 1,
 					server.opts.max_connections,
 					server.opts.reserved_connections,
 				)
@@ -672,6 +687,52 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 
 	log.debugf("new connection with thread, got %d conns", len(td.conns))
 	conn_handle_reqs(c)
+}
+
+// URUQUIM PATCH 13 (WP71) — BRIDGE. Keep admission aligned with actual
+// synchronous Handler capacity. The adapter brackets only application dispatch,
+// so slow network reads and writes remain asynchronous and do not consume this
+// capacity unit.
+handler_lane_enter :: proc(res: ^Response, loc := #caller_location) -> bool {
+	assert_has_td(loc)
+	if td.handler_active {
+		return false
+	}
+	td.handler_active = true
+	if td.accept != nil {
+		server := res._conn.server
+		target := td.accept
+		// Keep the operation record until both the cancel and the Accept CQE have
+		// completed. `nbio.remove` is intentionally asynchronous; starting a
+		// blocking Handler before that completion can let a new connection satisfy
+		// the cancelled accept and disappear without a callback.
+		nbio.detach(target)
+		nbio.remove(target)
+		td.accept = nil
+		for target.accept.client == 0 && target.accept.err == nil {
+			_ = nbio.tick(time.Millisecond)
+		}
+		if target.accept.client != 0 {
+			// The accept won the cancellation race. Preserve it instead of silently
+			// dropping a connected client; `handler_active` keeps on_accept from
+			// rearming this lane.
+			on_accept(target, server)
+		}
+		nbio.reattach(target)
+	}
+	return true
+}
+
+// Re-arm this lane only after application code returns. If stop won the race,
+// shutdown owns admission and the accept remains absent.
+handler_lane_leave :: proc(res: ^Response, loc := #caller_location) {
+	assert_has_td(loc)
+	assert(td.handler_active, "handler lane leave without enter", loc)
+	td.handler_active = false
+	server := res._conn.server
+	if !atomic_load(&server.closing) && td.accept == nil {
+		td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+	}
 }
 
 @(private)

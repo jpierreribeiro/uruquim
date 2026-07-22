@@ -49,7 +49,7 @@ package web
 // process memory are the transport's and the operating system's, and no
 // document may say otherwise because this type exists.
 //
-// EVERY FIELD IS A PROMISE. There are six, and each is here because something
+// EVERY FIELD IS A PROMISE. There are eight, and each is here because something
 // downstream already enforces it — not because a tuning surface felt
 // incomplete. A field with no enforcement behind it would be a knob that lies.
 Limits :: struct {
@@ -129,15 +129,25 @@ Limits :: struct {
 	// close operations. All three, because bounding one of them is what failed.
 	//
 	// WHAT IT DOES NOT BOUND, stated here because a deadline that is quietly
-	// conditional is worse than none: **a handler that blocks.** The event loop
-	// is single-threaded (ADR-030), so a handler that sleeps for a minute holds
-	// the very thread this deadline is enforced on. The supervisor's
-	// `TimeoutStopSec` remains the outer bound, and `docs/operations.md` says so.
+	// conditional is worse than none: **a handler that blocks.** Each Handler is
+	// synchronous and cannot be preempted; a stuck foreign call holds its lane
+	// beyond this deadline. Other lanes retain progress, while the supervisor's
+	// `TimeoutStopSec` remains the outer process bound.
 	//
 	// `i64` nanoseconds rather than `time.Duration` for the same measured reason
 	// as `max_request_time`: `package web` may not import `core:time`
 	// (FINDING-B). The transport converts at the boundary.
 	max_drain_time:   i64,
+
+	// WP71 — the maximum number of Handlers that may execute concurrently.
+	// Zero selects the transport-neutral automatic policy; one is the explicit
+	// compatibility mode for applications with deliberately single-threaded
+	// state. Values above 256 are refused before the listener opens.
+	//
+	// This names application capacity, never backend threads or event loops. The
+	// current adapter implements one synchronous Handler lane per unit; a future
+	// adapter may use another mechanism but must preserve the same bound.
+	max_handlers:     int,
 }
 
 // DEFAULT_LIMITS is what every application gets without asking.
@@ -159,7 +169,13 @@ DEFAULT_LIMITS :: Limits {
 	max_connections  = CONNECTION_LIMIT,
 	reserved_conns   = RESERVED_CONNECTION_LIMIT,
 	max_drain_time   = DRAIN_TIME_LIMIT,
+	max_handlers     = 0,
 }
+
+// The public setting is bounded even when explicit. The automatic policy is
+// resolved by the adapter to [4, 32], based on available processor cores.
+@(private)
+MAX_HANDLER_CONCURRENCY :: 256
 
 // DRAIN_TIME_LIMIT is ten seconds, in nanoseconds.
 //
@@ -254,8 +270,8 @@ LIMITS_MIN_TEXT :: 1
 // a second offence rather than subsuming the first. Nothing shipped becomes
 // weaker.
 //
-// A ZERO OR NEGATIVE FIELD IS REJECTED the same way. It allocates nothing and
-// stores three integers.
+// A forbidden zero/negative field is rejected the same way. It allocates
+// nothing and stores the value by copy.
 limits :: proc(a: ^App, l: Limits) {
 	if app_is_serving(a) {
 		app_reject_late_configuration(a)
@@ -276,7 +292,8 @@ limits :: proc(a: ^App, l: Limits) {
 	// deliberate choice and a forgotten field.
 	// Negative is refused everywhere; zero means "unbounded" for the admission
 	// fields, as it does for the deadline.
-	if l.max_connections < 0 || l.reserved_conns < 0 {
+	if l.max_connections < 0 || l.reserved_conns < 0 ||
+	   l.max_handlers < 0 || l.max_handlers > MAX_HANDLER_CONCURRENCY {
 		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
 		return
 	}

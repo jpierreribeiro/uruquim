@@ -57,6 +57,7 @@ serve :: proc(a: ^App, port: int) {
 		max_connections  = a.private.limits.max_connections,
 		reserved_conns   = a.private.limits.reserved_conns,
 		max_drain_time   = a.private.limits.max_drain_time,
+		max_handlers     = a.private.limits.max_handlers,
 		dispatch         = serve_dispatch,
 		user             = a,
 	}

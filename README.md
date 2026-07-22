@@ -134,11 +134,18 @@ GET.** One upstream line meant every request paid a TCP handshake, with no
 a *bad* request retires a connection; nothing proved that a *good* one preserves
 it.
 
-**Before deploying, read [`docs/operations.md`](docs/operations.md)** — in
-particular what the framework does NOT bound, and the fact that `stop` has no
-deadline.
+**Phase 5 shipped the ordinary first-week surface:** CORS, secure static files,
+buffered multipart forms and an absolute graceful-drain deadline. It also fixed
+an upstream pending-read use-after-free found by the drain laboratory. The
+freeze is [`planning/phase-5-freeze.md`](planning/phase-5-freeze.md).
 
-Phase 5 is not planned.
+**Phase 6 is in progress.** It makes conventional synchronous application I/O
+safe through bounded Handler concurrency, then builds the SQL-first PostgreSQL
+and migration ecosystem outside `web`. The accepted contract is
+[`planning/phase-6-spec.md`](planning/phase-6-spec.md).
+
+**Before deploying, read [`docs/operations.md`](docs/operations.md)** — in
+particular what the framework does and does not bound.
 
 **What works today**
 
@@ -176,8 +183,13 @@ Phase 5 is not planned.
 - HTTP/1 conformance: ambiguous or malformed framing is rejected and the
   connection closed, proven by a raw-wire corpus (see
   `docs/transport-conformance.md`).
+- CORS middleware, secure static-file mounts with ETag/304, and bounded
+  buffered multipart fields/files.
+- Graceful shutdown with an absolute drain deadline.
+- Bounded synchronous Handler concurrency: automatic 4..32 capacity by
+  default, explicit `1` for compatibility, and no async Handler API.
 
-**Public surface:** 44 application symbols + 2 test-support symbols = 46 —
+**Public surface:** 62 application symbols + 2 test-support symbols = 64 —
 frozen. The gate compares the compiler's own exported inventory, down to every
 struct field, enum member and enum backing type, against
 `build/phase1-public-signatures.txt`, and the direct import set against
@@ -198,9 +210,10 @@ observable contracts hold.
 
 **Not yet, and named honestly**
 
-- Typed application state — Phase 3.
-- Configurable limits and read/write timeouts — Phase 3.
-- Graceful shutdown with a deadline — Phase 4.
+- PostgreSQL, explicit transactions and safe migrations — Phase 6 Crystals.
+- Response streaming and an opt-in large-body/spool path — separately gated
+  Phase 7 work, not implied by buffered multipart.
+- WebSocket, HTTP/2 and in-process TLS — outside the current core decision.
 
 **Never, and named just as honestly**
 
@@ -213,15 +226,11 @@ observable contracts hold.
   deferred (ADR-024): a closure cannot be returned from a procedure in Odin,
   and `web.Router` plus `web.mount` do the job with visible ownership.
 
-What exists today is usable for building and testing a JSON API, and
-`web.serve` is a working bootstrap server. It is not hardened for unattended
-production exposure — that is Phase 4's job, and the honest gap is named above
-rather than implied. A frozen contract is not a released one: the semantic
-version, the tag and any release remain the owner's decision.
-
-Phase 3 — performance core, configurable limits and typed application state —
-is planned in [`planning/phase-3-plan.md`](planning/phase-3-plan.md) and has
-not started.
+What exists today is a production-minded HTTP microframework for JSON APIs,
+with explicit operational boundaries and a bootstrap transport intended to be
+replaced by the official Odin HTTP package after that real implementation is
+available and passes the same conformance corpus. A frozen contract is not a
+tag: semantic versioning and any release remain the owner's decision.
 
 ## Supported platform and toolchain
 

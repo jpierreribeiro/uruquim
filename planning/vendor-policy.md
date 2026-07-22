@@ -14,7 +14,7 @@ and WP46 is the first work package held to them.
 
 `vendor/odin-http/` is a snapshot of the root server package of
 `laytan/odin-http` at commit `112c49b` (2026-04-11), vendored 2026-07-19, MIT.
-Twelve local patches, all security-, lifecycle- or ownership-motivated, all
+Thirteen local patches, all security-, lifecycle- or ownership-motivated, all
 marked `URUQUIM PATCH` at their site and all covered by an executable case that
 failed before the patch.
 
@@ -42,7 +42,7 @@ forever is a fork with extra steps.
 queue is not a schedule, and re-vendoring across an API its author says moves is
 work regardless of who wrote the fix.
 
-### 2.1 The twelve patches, each with its upstream disposition
+### 2.1 The thirteen patches, each with its upstream disposition
 
 | # | Patch | Is it upstream's bug? | Disposition |
 |---|---|---|---|
@@ -51,15 +51,16 @@ work regardless of who wrote the fix.
 | 3 | `Content-Length` + `Transfer-Encoding` rejected, not repaired | **No** — a policy difference. RFC 9112 §6.1 permits refusal; upstream chose repair | **CARRY.** Uruquim's WP9 D2 is stricter on purpose |
 | 4 | Any repeated `Content-Length` rejected, even if identical | **No** — same class as 3 | **CARRY** |
 | 5 | Unknown method becomes `.Unknown` with `method_raw` preserved, no 501 | **No** — a framework-ownership decision (WP9 D7) | **CARRY** |
-| 8 | Bounded admission: a connection past `max_connections - reserved_connections` is closed at accept | **No** — a capacity decision. Upstream is a general server and does not choose a limit; Uruquim does, because a framework that inherits the kernel's limit has a failure mode it did not choose | **CARRY** |
+| 8 | Server-wide bounded admission: a connection past `max_connections - reserved_connections` is closed at accept; the active count is atomic across lanes | **No** — a capacity decision. Upstream is a general server and does not choose a limit; Uruquim does, because a framework that inherits the kernel's limit has a failure mode it did not choose. WP71 proved a lane-local count multiplies the public limit by lane count | **CARRY** |
 | 7 | A request with no `Content-Length` reports its body read as SUCCEEDED rather than failed | **Yes** — a plain upstream defect. `_body_ok = false` means "read failed", and the no-body path returned through it without correcting the flag, so `response_must_close` retired the connection | **OFFER UPSTREAM.** It breaks keep-alive for every GET in any application, is one line, and has nothing to do with Uruquim's policies |
 | 6 | A configurable request read deadline; a per-thread sweep closes connections whose request has taken too long to arrive | **Yes** — the upstream read has no deadline, and `scanner.odin` carries an unfinished-work comment asking for one at the recv site | **OFFER UPSTREAM.** It is a general slowloris defence, not a Uruquim policy, and the upstream comment is as close to an invitation as one gets |
 | 9 | Preserve the `recv_poly` operation handle on the scanner | **Yes** — discarding the handle makes a pending receive structurally uncancellable | **OFFER UPSTREAM.** It is the prerequisite for safe connection teardown, independent of Uruquim policy |
 | 10 | Cancel a pending receive before freeing its connection | **Yes** — otherwise completion dereferences freed connection state | **OFFER UPSTREAM.** WP58 reproduced both an endless drain and `free(): invalid pointer` from this lifecycle defect |
 | 11 | Bound every drain wait by one absolute deadline | **No** — the deadline and refusal semantics are Uruquim lifecycle policy | **CARRY AS BRIDGE.** Delete when the official adapter replaces this backend |
 | 12 | Make multi-lane lifecycle state exact-once or lane-owned: shutdown election, Date cache and refusal total | **Yes** — repeated shutdown walked freed lane state; the shared Date buffer and refusal increment race across lanes | **OFFER UPSTREAM AS BRIDGE.** General multi-threaded server correctness, retained locally only until the adapter transition |
+| 13 | Suspend one lane's accept while its synchronous application Handler runs | **No** — upstream optimizes connection acceptance; Uruquim defines Handler capacity and liveness under blocking dependencies | **CARRY AS BRIDGE.** The official adapter must satisfy the liveness corpus, not reproduce this mechanism |
 
-**Seven of twelve are upstream bugs; five are deliberate divergences.** WP70's
+**Seven of thirteen are upstream bugs; six are deliberate divergences.** WP70's
 multi-lane lifecycle correction joins the upstream group; WP59's absolute drain
 deadline joins the policy group. The bridge label changes expected lifetime,
 not the evidence or upstream-offer obligation.
