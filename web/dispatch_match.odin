@@ -313,7 +313,7 @@ allow_value :: proc(a: ^App, path: string, buffer: []u8) -> (value: string, allo
 // allocation, not a per-request one).
 @(private)
 dispatch :: proc(a: ^App, ctx: ^Context) {
-	a.private.dispatched = true
+	app_mark_dispatched(a)
 
 	if mw_poison_intercept(a, ctx) {
 		return

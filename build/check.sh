@@ -74,6 +74,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp41_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_vendor_policy.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp38_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
@@ -1166,6 +1167,9 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
 # The gate leaves NO artifact in the working tree.
 echo "--- WP69 blocking boundary: process-isolated liveness evidence ---"
 bash "$URUQUIM_ROOT/build/check_wp69_controls.sh"
+
+echo "--- WP70 thread-safe core: immutable publication and exact-once stop ---"
+bash "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"

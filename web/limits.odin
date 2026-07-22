@@ -257,11 +257,15 @@ LIMITS_MIN_TEXT :: 1
 // A ZERO OR NEGATIVE FIELD IS REJECTED the same way. It allocates nothing and
 // stores three integers.
 limits :: proc(a: ^App, l: Limits) {
+	if app_is_serving(a) {
+		app_reject_late_configuration(a)
+		return
+	}
 	if a.private.poisoned {
 		// Already rejected and already reported; the first diagnosis stands.
 		return
 	}
-	if a.private.dispatched {
+	if app_has_dispatched(a) {
 		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_AFTER_DISPATCH)
 		return
 	}

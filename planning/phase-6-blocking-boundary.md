@@ -41,11 +41,12 @@ would require a continuation and new request/response ownership.
    Handler is active. Existing keep-alive connections remain lane-owned and are
    honestly inside the blocked lane's blast radius. WP72 repeats blocker counts
    one through three; all must preserve a newly connected health request.
-2. **Concurrent drain is currently unsafe.** Calling shutdown while one of four
-   lanes is held inside a Handler reproducibly terminates with
-   `Segmentation_Fault`. This is retained as a RED process-isolated obligation.
-   WP72 may turn it GREEN only by making cross-lane lifecycle exactly-once; it
-   may not weaken or delete the case.
+2. **Concurrent drain was unsafe, and WP70 turned the unchanged obligation
+   GREEN.** Calling shutdown while one of four lanes was held inside a Handler
+   reproducibly terminated with `Segmentation_Fault`: repeated callers could
+   walk lane storage while the first shutdown was freeing it. Patch 12 now
+   elects one shutdown owner with the existing atomic transition. The
+   process-isolated case and external timeout remain; WP72 must keep them green.
 
 Arbitrary foreign blocking code is still not preemptible. Even after the
 backend lifecycle defect is fixed, `max_drain_time` can cancel framework-owned
@@ -54,7 +55,8 @@ part of the public concurrency contract, not an implementation bug.
 
 ## Reproduction
 
-`build/check_wp69_controls.sh` runs five GREEN process-isolated obligations, the
-RED drain obligation under an external timeout, the report executable and a
-one-lane mutation of the candidate. A mutation that leaves the candidate green
-invalidates this evidence.
+`build/check_wp69_controls.sh` runs six GREEN process-isolated obligations,
+including drain under an external timeout, the report executable and a one-lane
+mutation of the candidate. A mutation that leaves the candidate green
+invalidates this evidence. The RED-to-GREEN ownership and mutation record lives
+in `planning/phase-6-thread-safety.md`.

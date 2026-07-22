@@ -166,6 +166,10 @@ ALLOW_VALUE_MAX :: 29
 // takes the early exit above and the first diagnosis stands.
 @(private)
 route_register :: proc(a: ^App, method: Method, pattern: string, handler: Handler) {
+	if app_is_serving(a) {
+		app_reject_late_configuration(a)
+		return
+	}
 	// WP18: a registration on an already-rejected owner stays quiet (the first
 	// diagnosis stands); a registration on a CLOSED Router — one that `mount`
 	// already copied — fails closed, because the route would otherwise be

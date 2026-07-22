@@ -49,6 +49,10 @@ package web
 // lazily (an application that never calls `use` and registers no route
 // allocates nothing here) and released exactly once by `destroy`.
 use :: proc(a: ^App, middleware: Handler) {
+	if app_is_serving(a) {
+		app_reject_late_configuration(a)
+		return
+	}
 	if a.private.poisoned {
 		// Already rejected and already reported; the first diagnosis names the
 		// first offence, which is the one that orders the fix.
@@ -67,7 +71,7 @@ use :: proc(a: ^App, middleware: Handler) {
 		mw_poison_use_after_route(a)
 		return
 	}
-	if a.private.dispatched {
+	if app_has_dispatched(a) {
 		mw_poison_use_after_dispatch(a)
 		return
 	}

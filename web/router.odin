@@ -85,6 +85,10 @@ router :: proc() -> Router {
 // counts as a registration for the application, so a later app-level `use`
 // fails closed exactly as it would after `get`.
 mount :: proc(a: ^App, prefix: string, r: ^Router) {
+	if app_is_serving(a) {
+		app_reject_late_configuration(a)
+		return
+	}
 	if a.private.poisoned {
 		// Already rejected and already reported; the first diagnosis stands.
 		return

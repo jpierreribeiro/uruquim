@@ -41,6 +41,8 @@
 package web
 // uruquim:file application
 
+import "core:sync"
+
 // REQUEST_ID_HEADER is the exact header name, on the request and the response.
 // Not `X-Request-ID`, not `x-request-id`: one spelling, so a log pipeline
 // grepping for it never half-matches. Inbound lookup is case-insensitive
@@ -163,16 +165,9 @@ REQUEST_ID_HEX :: "0123456789abcdef"
 @(private)
 request_id_seed: u64
 
-// The counter is incremented without atomics, and that is a stated assumption
-// rather than an oversight: exactly one server per process is supported (audit
-// R-10) and the transport's event loop is single-threaded, so no two dispatches
-// race here. Phase 4 owns concurrency, and it owns this line with it — a
-// multi-threaded dispatcher must make this an atomic increment or two requests
-// can be handed the same ID.
-//
-// Note what the counter guarantees even so: a thread cannot collide with
-// ITSELF, because its own calls are sequential and the value only moves
-// forward. Uniqueness within one request stream is therefore not at risk.
+// WP70: both seed publication and counter allocation are atomic. The value is
+// still only a correlation handle, but concurrent handlers must never receive
+// the same handle.
 @(private)
 request_id_counter: u64
 
@@ -191,7 +186,8 @@ request_id_counter: u64
 // Allocation-free and bounded.
 @(private)
 request_id_generate :: proc(dst: []u8) -> int {
-	if request_id_seed == 0 {
+	seed := sync.atomic_load(&request_id_seed)
+	if seed == 0 {
 		// Two ASLR sources: a global's address (image base) and a stack local's
 		// (stack base). Racy only in the sense that two threads could both seed
 		// it — either seed is equally valid, and the counter is what carries
@@ -203,13 +199,15 @@ request_id_generate :: proc(dst: []u8) -> int {
 			// Keep the sentinel meaningful: 0 means "not yet seeded".
 			seed = 1
 		}
-		request_id_seed = seed
+		_, won := sync.atomic_compare_exchange_strong(&request_id_seed, 0, seed)
+		if !won {
+			seed = sync.atomic_load(&request_id_seed)
+		}
 	}
 
-	request_id_counter += 1
-	counter := request_id_counter
+	counter := sync.atomic_add(&request_id_counter, 1) + 1
 
-	n := request_id_write_hex(dst, request_id_seed)
+	n := request_id_write_hex(dst, seed)
 	dst[n] = '-'
 	n += 1
 	n += request_id_write_hex(dst[n:], counter)

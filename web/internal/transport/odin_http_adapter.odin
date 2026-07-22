@@ -18,6 +18,7 @@ import "core:net"
 import "core:time"
 import "core:slice"
 import "core:strings"
+import "core:sync"
 
 // WP43 — PER-SERVER STATE. The config no longer lives in a package global.
 //
@@ -36,11 +37,18 @@ import "core:strings"
 // by `request_stop`. That one is a genuinely process-wide question today
 // ("stop the running server") and it is WP44 that gives it a proper answer, by
 // making a server a thing a caller HOLDS. Removing it here would mean inventing
-// half of WP44's public surface in an internal package — and ADR-030's
-// single-threaded decision means one loop, so the residual risk is a second
-// `serve` in one process, which is already unsupported and already documented.
+// half of WP44's public surface in an internal package. WP70 protects its whole
+// pointer lifetime while retaining the documented one-server-per-process rule.
 @(private)
-g_server: ^http.Server
+Server_Global :: struct {
+	mutex:  sync.Mutex,
+	server: ^http.Server,
+}
+
+// The one ratified process-global server lifetime (WP43), now one protected
+// record rather than a pointer plus an ungoverned second package global.
+@(private)
+g_server: Server_Global
 
 // Server_Runtime is the per-server state the handler needs. It lives in
 // `serve`'s frame and is reached through the backend handler's `user_data`, so
@@ -74,7 +82,9 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	}
 
 	s: http.Server
-	g_server = &s
+	sync.lock(&g_server.mutex)
+	g_server.server = &s
+	sync.unlock(&g_server.mutex)
 
 	opts := http.Default_Server_Opts
 	opts.thread_count = 1
@@ -107,7 +117,9 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	}
 
 	if err := http.listen(&s, endpoint, opts); err != nil {
-		g_server = nil
+		sync.lock(&g_server.mutex)
+		g_server.server = nil
+		sync.unlock(&g_server.mutex)
 		return .Listen_Failed
 	}
 
@@ -122,7 +134,9 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	handler := runtime_handler(&runtime)
 	http.serve(&s, handler)
 
-	g_server = nil
+	sync.lock(&g_server.mutex)
+	g_server.server = nil
+	sync.unlock(&g_server.mutex)
 	return .None
 }
 
@@ -133,18 +147,22 @@ serve :: proc(cfg: Config) -> Serve_Error {
 // request in hand when an operator asks for it.
 @(private)
 _refused_connections :: proc() -> int {
-	server := g_server
+	sync.lock(&g_server.mutex)
+	defer sync.unlock(&g_server.mutex)
+	server := g_server.server
 	if server == nil {
 		return 0
 	}
-	return server.refused_total
+	return sync.atomic_load(&server.refused_total)
 }
 
 // request_stop asks the running server to stop. Idempotent and thread-safe: the
 // backend's shutdown is an atomic flag plus an event-loop wake-up, and calling
 // it when no server is running is a no-op.
 request_stop :: proc() {
-	server := g_server
+	sync.lock(&g_server.mutex)
+	defer sync.unlock(&g_server.mutex)
+	server := g_server.server
 	if server != nil {
 		http.server_shutdown(server)
 	}
