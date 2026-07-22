@@ -1164,6 +1164,10 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   || fail "the drain suite failed or timed out; a timeout means the drain is stuck, which is the defect it exists to catch"
 
 # The gate leaves NO artifact in the working tree.
+echo "--- WP69 blocking boundary: process-isolated liveness evidence ---"
+bash "$URUQUIM_ROOT/build/check_wp69_controls.sh"
+
+# The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
 if find "$URUQUIM_ROOT" -maxdepth 1 -type f -name 'uruquim-*' -print -quit | grep -q .; then
   fail "a test-runner binary was left in the repository root"
