@@ -52,7 +52,12 @@ Required workflows:
 - transactional multi-row operations;
 - streamed board notifications over SSE;
 - reconnect after process deploy/network interruption;
-- admin health/readiness and operational metrics.
+- admin health/readiness and operational metrics;
+- at least one real outbound HTTP call — webhook delivery to an external
+  endpoint through the Phase-7 composition `http_client` Crystal, with
+  timeout, bounded retry and drain cancellation (owner amendment,
+  2026-07-22: proof-by-use without an outbound call would prove only half of
+  a microservice).
 
 This is a **real application**, not a generic admin generator. Domain code is
 ordinary Odin and remains outside framework repositories.
@@ -92,6 +97,7 @@ exception.
 | E8-4 | A supported deployment target, reverse proxy, supervisor and dedicated PostgreSQL instance are available. |
 | E8-5 | Security and data-retention scope is written before real user data; synthetic/non-sensitive data is the default. |
 | E8-6 | Observability can distinguish route pattern, query name, pool state, stream state and failure class without personal data. |
+| E8-7 | The Phase-7 composition Crystals are frozen — `http_client` (with outbound TLS and certificate verification) and `metrics` exposition — and `planning/production-service-bom.md` carries no unclassified item and no ABERTO item without a registered trigger. |
 
 The product uses ordinary HTTP commands plus the SSE Crystal directly. No
 additional rendering, session or client-runtime abstraction is an entry

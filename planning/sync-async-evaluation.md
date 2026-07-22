@@ -61,6 +61,13 @@ to workers. The prototype must copy request-derived input, return an owned
 result and resume response construction on the owning lane. A worker queue is
 hard-capped and reports `Full`/timeout.
 
+The canonical form of this arm runs the **whole Handler** on the worker while
+the event lane keeps only the connection; a variant that splits the Handler
+before/after the dependency is arm C in disguise and is evaluated there.
+Phase 7's detached-stream machinery — registry, bounded cross-lane delivery,
+owner-lane wakeup — is the natural substrate for this arm and must be reused,
+not duplicated.
+
 ### C — fully asynchronous application execution
 
 Non-blocking PostgreSQL and outbound I/O register readiness with an executor.
@@ -138,10 +145,21 @@ warm-up, repetition count, load-generator placement and protocol version.
 Use `-o:speed` for product performance and a separate debug/fault run. The load
 generator must be shown not to be the bottleneck.
 
+Load is generated **open-loop**: arrivals continue at the configured rate while
+the server slows, so coordinated omission cannot hide collapse. A closed-loop
+client that waits for each response before sending the next is not acceptable
+evidence at or near saturation (amendment, 2026-07-22).
+
 ## 7. Decision rule
 
 Before seeing shootout results, the executing WP derives a noise floor on the
 target machine and registers a material-improvement threshold above it.
+
+The **expected-win envelope** is pre-registered with that threshold: async can
+win materially only where dependency wait ≫ service time, concurrent demand
+exceeds the lane cap, and the database pool is not the binding constraint. A
+workload that cannot satisfy that conjunction on paper kills the shootout arm
+early, by arithmetic, before implementation (amendment, 2026-07-22).
 
 - Correctness, bounds and exactly-once lifecycle are vetoes, not scores.
 - If all performance differences lie inside noise, keep the current model.

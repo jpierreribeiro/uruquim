@@ -44,6 +44,7 @@ Every promoted question receives a small spec with:
 | Are large requests better served by spool or direct streaming? | buffered cap blocks a real use | memory/disk/quota/disconnect shootout | opt-in spool policy and ownership |
 | Is WebSocket needed beyond SSE? | a real bidirectional product cannot fit HTTP/SSE | equivalent product slice over SSE and WebSocket, including proxy/drain costs | Crystal, separate package or refusal |
 | Does HTTP/2 add product value behind the supported proxy? | measured deployment/protocol need | proxy HTTP/2 versus in-process candidate under real multiplex workload | remain proxy-only or package plan |
+| Can outbound HTTP live as a Crystal without a second lifecycle model? | Phase-7 composition half (owner, 2026-07-22) | bounded-pool client over `core:net` with TLS/certificate verification, deadline budget, cancellation and drain corpus; official `core:net/http` client as declared replacement | `http_client` Crystal contract or recorded refusal |
 
 ## 4. Data path
 
@@ -147,6 +148,8 @@ code; convenience is not enough to introduce an ABI.
 | Is process-abort still the right handler-fault policy? | Odin gains supported recovery or real product evidence demands isolation | abort, process worker and any supported recovery mechanism | preserve supervisor model or new ADR |
 | Are redacted metrics sufficient to diagnose production failure? | Phase-8 incident cannot be explained | incident replay with current events/counters and no request-derived bytes | smallest safe observability amendment |
 | Which defaults remain safe across platforms? | macOS/Windows/other arch support begins | complete conformance, fault, descriptor and timing corpus | support matrix and platform-specific limits |
+| Is a scrapeable metrics exposition needed beyond observer hooks? | Phase-7 composition half (owner, 2026-07-22) | Prometheus text exposition as a Crystal over existing hooks, redaction rules preserved | `metrics` Crystal or documented per-app pattern |
+| Can one request deadline budget propagate to dependencies? | the `http_client` Crystal exists | request deadline → pool wait → query → outbound call budget laboratory, including cancellation races | deadline-budget contract or per-dependency documented limits |
 
 ## 8. Developer experience and Odin fit
 
