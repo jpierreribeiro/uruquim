@@ -54,9 +54,11 @@ README.md, odinfmt.json, .editorconfig, .gitignore — repo tooling
 
 ## Local patches
 
-**Thirteen.** Five added by WP9 (transport conformance), one each by WP45, WP46
+**Fifteen.** Five added by WP9 (transport conformance), one each by WP45, WP46
 (ADR-031) and WP47, three by WP59's drain repair, one by WP70's multi-lane
-lifecycle repair, and one by WP71's Handler-capacity mapping. All are minimal and fix a security issue, an upstream defect,
+lifecycle repair, one by WP71's Handler-capacity mapping, and two security
+hardening fixes for chunked-body decoding (a negative chunk size and a trailer
+field, each of which aborted the process). All are minimal and fix a security issue, an upstream defect,
 a lifecycle defect or a capacity the server had no way to bound. Each is marked
 in source with `URUQUIM PATCH`, recorded below, and covered by executable
 evidence that failed before it. There are no opportunistic edits.
@@ -81,6 +83,8 @@ decides whether a re-vendor carries a policy or expects a fix to disappear.
 | 11 | `server.odin` (`Server_Opts`, shutdown loop) | Apply one absolute `max_drain_time` across shutdown waits and cancel remaining reads at expiry. **BRIDGE.** | A graceful-stop knob must bound the whole operation, not only one loop. The WP58 laboratory is the executable deadline evidence. |
 | 12 | `server.odin` (`Server`, `Server_Thread`, `server_shutdown`, Date cache, refusal count) | Elect one shutdown owner; make the Date cache lane-owned; atomically aggregate refusals. **BRIDGE.** | WP69 reproduced a multi-lane stop walking state another caller had begun freeing. WP70's contention corpus also owns the shared-counter and lane-cache races. |
 | 13 | `server.odin` (`Server_Thread`, `on_accept`, `handler_lane_enter`, `handler_lane_leave`) | Suspend a lane's accept before its synchronous application Handler begins, preserving a raced accept rather than losing it. **BRIDGE.** | Without it, the kernel can assign a new health connection to a lane blocked in PostgreSQL while another Handler lane is free. `nbio.remove` is asynchronous, so the patch also waits for cancellation completion and preserves a connection that won the race. |
+| 14 | `body.odin` (`_body_chunked.on_scan`) | A chunked chunk-size must parse to a non-negative value; `-1` and overflow-wrapped hex are rejected as an invalid size. | **REMOTE DENIAL OF SERVICE.** The same class as patch 1 in the sibling path. `strconv.parse_int` accepts `-1` and wraps overflow, and the chunked decoder had no guard, so a negative size reached `scanner.max_token_size` and tripped `scanner.odin`'s `n >= 0` assertion, **killing the server process** — even for handlers that ignore the body, because the response path drains it. |
+| 15 | `body.odin` (`_body_chunked.on_scan_trailer`) | Clear `headers.readonly` around trailer-field parsing, restoring it afterwards, so a trailer does not mutate the frozen header map under assertion. | **REMOTE DENIAL OF SERVICE on legal HTTP/1.1.** The server freezes request headers before dispatch, but a chunked body's trailer section is parsed after the freeze; the first trailer field reached `header_parse` → `assert(!h.readonly)` and **killed the process**. Trailers are legal, so even benign clients could trigger it. |
 
 Patch 5 also adds a tenth entry to `_method_strings` and makes `method_parse`
 skip the new member, so the existing `for r in Method` lookup (which indexes
@@ -88,7 +92,7 @@ that array under `#no_bounds_check`) stays in bounds.
 
 Every other line is byte-for-byte upstream.
 
-To update to a newer upstream commit, re-apply the thirteen patches above (they are
+To update to a newer upstream commit, re-apply the fifteen patches above (they are
 small and each is commented at its site) and re-run the WP9 raw-wire corpus,
 which is what proves they are still needed and still sufficient.
 
@@ -106,7 +110,7 @@ this cost is not.
 
 To move to a different upstream commit: re-copy the root `.odin` files, the
 `LICENSE` and `mod.pkg` from a fresh checkout at the new commit, re-apply the
-thirteen patches listed above, update the provenance table, and re-run the full
+fifteen patches listed above, update the provenance table, and re-run the full
 gate — including the WP9 raw-wire corpus, which is what proves the patches are
 still necessary and still sufficient. Do not make unrelated edits to these
 files.
