@@ -1976,3 +1976,32 @@ even when the application leaves the field at its default.
 **Rollback.** Remove the field, the two private imports, Patch 13 and the
 adapter bracket. Restore the single-lane mapping. No route, Handler signature,
 in-memory behavior or Phase-5 feature changes.
+
+---
+
+## Amendment 26 — WP72: concurrent-serving verdict, no ledger growth
+
+**Date: 2026-07-22. Authority: `planning/phase-6-spec.md` §5.2 and
+`planning/phase-6-plan.md` WP72. Ledger effect: none; application remains 62
+and test-support remains 2. Dependency effect: none.**
+
+WP72 adds no public name, field, signature or import. It is the combined gate
+that permits the WP71 capacity to become the accepted default: the historical
+drain and use-after-free obligation, concurrent stop, immutable registration,
+request-ID uniqueness, slow I/O, 3,000 completed idle keep-alives and the
+Phase-5 CORS/static/multipart paths remain green while three of four Handlers
+are blocked by database-like synchronous work.
+
+The scale laboratory raises its process-local soft descriptor limit to 8,192
+because each in-process client consumes a descriptor beside its accepted
+server socket. A 512-connection mutation fails before the 3,000th connection,
+proving that the result owns the server-wide admission mechanism rather than
+only the laboratory limit.
+
+**Decision evidence:** `planning/phase-6-concurrency.md`, ADR-030 Amendment 1
+and `build/check_wp72_controls.sh`. Full Handler saturation and arbitrary
+non-preemptible foreign code remain explicit capacity boundaries; neither is
+misrepresented as a drain guarantee.
+
+**Rollback.** The evidence and ADR amendment are removable without changing a
+binary. Runtime compatibility remains available through `max_handlers = 1`.

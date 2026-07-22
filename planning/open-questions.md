@@ -81,12 +81,11 @@ Deferred to the **Phase-2 gate** (ADR-005). Evidence exp-07 gathered; no
 Phase-1 impact.
 
 ### OQ-8 · Threading model of handlers
-**Reopened by Phase 6 (ADR-030 Amendment 1).** Waiting for the official
-`core:net/http` adapter is no longer the rule: a conventional synchronous
-PostgreSQL call demonstrates the liveness problem on today's transport. WP69
-compares one lane and bounded multi-lane serving; WP72 decides after the race,
-shutdown and Phase-5 feature corpus. The Handler API stays synchronous from the
-application view regardless.
+**CLOSED by Phase 6 (ADR-030 Amendment 1, WP72).** Bounded multi-lane
+synchronous serving is accepted: automatic 4..32, explicit `1` compatibility,
+exact 2..256. One lane failed independent-request liveness; four retained it
+through three blockers, and the combined race/shutdown/Phase-5 corpus passed.
+Full saturation and permanently stuck foreign code remain explicit bounds.
 
 ### OQ-9 · Path *string* extractor: empty vs missing
 `path_int` is covered (exp-09). The empty-vs-missing semantics of a raw
