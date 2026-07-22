@@ -11,7 +11,7 @@ Phase 8 is intentionally not another infrastructure feature phase.
 > passing packages.
 
 The application lives in a separate repository. It depends only on released or
-pinned public Uruquim/Crystals/Live contracts. It receives no friend imports,
+pinned public Uruquim and Crystals contracts. It receives no friend imports,
 test-only privileges or core exceptions.
 
 ---
@@ -50,7 +50,7 @@ Required workflows:
 - filtering, search and stable cursor pagination;
 - audit history;
 - transactional multi-row operations;
-- live board updates and notifications;
+- streamed board notifications over SSE;
 - reconnect after process deploy/network interruption;
 - admin health/readiness and operational metrics.
 
@@ -87,15 +87,15 @@ exception.
 | ID | Condition |
 |---|---|
 | E8-1 | Phase 6 frozen with PostgreSQL runtime, migrations and reference app green. |
-| E8-2 | Phase 7 frozen with bounded streams, SSE and Live vertical slice green. |
+| E8-2 | Phase 7 frozen with bounded streams, SSE, large-body ingestion and the large-transfer vertical slice green. |
 | E8-3 | Pinned consumption/release method exists for core and every used Crystal; no branch-relative hidden dependency. |
 | E8-4 | A supported deployment target, reverse proxy, supervisor and dedicated PostgreSQL instance are available. |
 | E8-5 | Security and data-retention scope is written before real user data; synthetic/non-sensitive data is the default. |
 | E8-6 | Observability can distinguish route pattern, query name, pool state, stream state and failure class without personal data. |
 
-If Uruquim Live is not product-ready, Phase 8 uses the Phase-7 vertical API or
-SSE Crystal directly for a deliberately thin server-driven slice. The system
-must not wait for the entire Live product to prove the core.
+The product uses ordinary HTTP commands plus the SSE Crystal directly. No
+additional rendering, session or client-runtime abstraction is an entry
+condition.
 
 ---
 
@@ -137,7 +137,7 @@ evidence are the gate.
 | 104 | Identity, sessions and authorization | IMPLEMENTATION |
 | 105 | Core relational workflows and transactions | IMPLEMENTATION |
 | 106 | Files, validation, search and pagination | IMPLEMENTATION |
-| 107 | Live collaboration and reconnection | IMPLEMENTATION |
+| 107 | Streamed notifications and reconnection | IMPLEMENTATION |
 | 108 | Conflict, backpressure and concurrency tests | TESTS |
 | 109 | Observability and operational dashboard | IMPLEMENTATION + OPS |
 | 110 | Failure and recovery drills | TESTS + OPS |
@@ -170,7 +170,7 @@ Hypotheses include:
    services own their synchronization;
 3. explicit SQL remains readable at the application's real query count;
 4. migrations can evolve the schema without server boot coupling;
-5. live updates do not require backend/internal access;
+5. streamed notifications do not require backend/internal access;
 6. bounded pool and stream policies fail predictably under saturation;
 7. one reverse-proxy deployment story is sufficient;
 8. documentation lets a human and coding agent implement the same canonical
@@ -258,25 +258,26 @@ and orphan cleanup job/procedure explicitly.
 
 **Rollback:** HIGH — application code.
 
-### WP107 — Live collaboration and reconnection
+### WP107 — Streamed notifications and reconnection
 
-Build a board view where two browser clients observe task changes:
+Build a board view where two browser clients observe task changes through
+ordinary HTTP commands and SSE notifications:
 
-- initial render;
-- server-pushed add/update/move/comment patches;
-- ordinary HTTP events mapped to domain commands;
-- session/stream token ownership;
+- ordinary initial HTTP render or JSON load;
+- server-pushed add/update/move/comment notifications;
+- HTTP requests mapped to domain commands;
+- user/stream token ownership;
 - heartbeat and reconnect;
 - lost-connection state resynchronization;
 - authorization rechecked for events and reconnect;
 - process deploy while clients are connected;
 - no core/internal imports.
 
-Use the Phase-7 render shootout winner only if it remains best in this real
-view. The application may revert to full-region morphing if generated splits do
-not pay their complexity.
+The notification tells the client which state changed; the client refreshes or
+updates its own view through an explicit application contract. The framework
+does not prescribe DOM patching or rendering policy.
 
-**Rollback:** HIGH — application/Live layer.
+**Rollback:** HIGH — application code.
 
 ### WP108 — Conflict, backpressure and concurrency tests
 
@@ -287,7 +288,7 @@ Automate:
 - reconnect during update;
 - slow consumer and queue saturation;
 - many fast clients plus one slow client;
-- `lanes - 1` blocked queries while live patches continue;
+- `lanes - 1` blocked queries while stream delivery continues;
 - database pool at cap;
 - stale stream token after reconnect;
 - route registration and application config immutable while serving;
@@ -311,9 +312,9 @@ Expose and consume:
 - process memory and lane health;
 - readiness versus liveness.
 
-The application's own admin view may use Uruquim Live, but the monitoring path
-must still diagnose Live failure. Logs and metrics have cardinality/redaction
-budgets.
+The application's own admin view may consume SSE metrics, but the monitoring
+path must still diagnose stream failure. Logs and metrics have
+cardinality/redaction budgets.
 
 **Rollback:** HIGH — application/ops.
 
@@ -365,11 +366,11 @@ This is a product gate, not marketing research.
 Give a human contributor and at least two coding-agent conditions only public
 docs/examples, then ask them to implement bounded tasks such as:
 
-- add a validated field through migration, SQL, handler and live view;
+- add a validated field through migration, SQL, handler and notification;
 - add a protected endpoint;
 - add a transactional command;
 - diagnose pool exhaustion;
-- add one live notification.
+- add one streamed notification.
 
 Record:
 
@@ -401,7 +402,7 @@ Produce:
 - recommendation on whether README retains “microframework”;
 - recommendation on release readiness, reserved to the owner.
 
-The README may claim production-oriented data/server-driven capability only
+The README may claim production-oriented data and streaming capability only
 for the exact scope proven. Release/tag remains an owner decision.
 
 **Rollback:** HIGH — freeze docs; production data/history is retained.
@@ -421,7 +422,7 @@ least one expand/contract deployment.
 
 ### G8-3 — Concurrent product correctness
 
-Two-user conflicts, blocked queries, pool saturation, live updates and reconnect
+Two-user conflicts, blocked queries, pool saturation, streamed notifications and reconnect
 produce declared outcomes without global stall or silent data loss.
 
 ### G8-4 — Operable failure
@@ -462,7 +463,7 @@ if the seven tests in `phases-6-8-program.md` still hold.
 ## 9. What Phase 8 can legitimately conclude
 
 Success does not prove every web application. It proves one demanding,
-multi-user, data-backed, server-driven system can be built, evolved and
+multi-user, data-backed system with bounded streaming can be built, evolved and
 operated through public Uruquim contracts — and that the framework remains
 pleasant when its independently designed parts meet.
 

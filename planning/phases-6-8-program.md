@@ -8,7 +8,7 @@ Phase 6 still performs an exact entry verification, and no future signature
 described here is frozen by this program document.
 
 The program turns Uruquim from a production-capable HTTP core into a proven
-platform for ordinary data-backed applications and server-driven interfaces,
+platform for ordinary data-backed applications and bounded streaming,
 without turning the common API into a full-stack framework.
 
 ```text
@@ -20,9 +20,6 @@ Phase 7 — streaming foundation
                          ↓
 Phase 8 — proof by use
   one deployed multi-user product, evolved and faulted on purpose
-                         ↓
-Uruquim Live
-  separate repository: sessions, rendering, events and reconnection
 ```
 
 The governing statement remains:
@@ -48,9 +45,9 @@ app → route → extract → respond → serve
 ```
 
 Phase 6 does not put PostgreSQL in `web`; the application owns a pool through
-`App_State`. Phase 7 adds the smallest core primitive that only the core can
-own — a transport-neutral long-lived response — while SSE and Live semantics
-remain packages above it. Phase 8 adds no convenience surface merely because
+`App_State`. Phase 7 adds the smallest core primitives that only the core can
+own — transport-neutral long-lived responses and bounded large-body ingestion
+— while SSE remains a package above them. Phase 8 adds no convenience surface merely because
 the validation application wants it; friction becomes evidence for a later
 spec.
 
@@ -64,10 +61,6 @@ uruquim:web                         microframework core
 crystals:*                          batteries available
   PostgreSQL, migrations, validation,
   SSE and optional tooling
-
-uruquim-live                        separate full-stack layer
-  sessions, rendering, events,
-  reconnection, client runtime
 ```
 
 This is comparable to Flask's historical meaning of “micro”: keep policy and
@@ -80,7 +73,7 @@ The README may continue to say microframework only while all are true:
 
 1. a JSON endpoint requires no database, stream, CLI or code generator;
 2. there is one canonical Handler model;
-3. `web` never imports a Crystal or Uruquim Live;
+3. `web` never imports a Crystal;
 4. optional packages do not make the core public surface grow (CE-E3);
 5. transport, allocator and lane details remain absent from the Quick Start;
 6. a new user can learn the ordinary path from three compiling examples;
@@ -105,7 +98,7 @@ For Uruquim, those statements become executable rules:
 |---|---|---|
 | Simplicity and readability | One canonical path for each common operation; conventional names | public ledger, examples, Phase-8 usability trial |
 | Minimal: one way | No alias families, second Handler model or equivalent responders | public-surface gate |
-| Orthogonality | HTTP, data, migrations, SSE and Live have one-way dependencies and separate owners | dependency scan, CE-E3 |
+| Orthogonality | HTTP, data, migrations and SSE have one-way dependencies and separate owners | dependency scan, CE-E3 |
 | Transform data, not the type system | Structs and procedures; explicit SQL and row decoding; no ORM magic or runtime DI | API review and real application |
 | Explicitness | Lifetimes, capacities, cancellation and destructive operations are visible in contracts | lifetime/capacity ledgers |
 | High performance through control | Bounded allocation and queues, immutable serving state, allocator ownership | allocation/fault/soak gates |
@@ -237,7 +230,7 @@ The core additionally supports:
 - bounded streaming multipart and safe temporary-file spool;
 - explicit persistence transfer, disk quotas and disconnect cleanup;
 - large downloads/static responses through bounded output;
-- an SSE Crystal and a minimal Uruquim Live vertical slice.
+- an SSE Crystal, a proxy interoperability lab and a large-transfer vertical slice.
 
 Comparable product category: **Axum-style modular HTTP plus a safe SSE/server
 push foundation**, but with synchronous handlers and explicit memory ownership.
@@ -246,7 +239,7 @@ push foundation**, but with synchronous handlers and explicit memory ownership.
 
 The claim changes from “the contracts pass” to “a product used them”:
 
-- multi-user CRUD, auth, files and live updates coexist;
+- multi-user CRUD, auth, files and streamed notifications coexist;
 - real schemas evolve through several deploys;
 - PostgreSQL restarts, slow queries, pool exhaustion, client disconnects and
   stream backpressure have been rehearsed;
@@ -258,7 +251,7 @@ The claim changes from “the contracts pass” to “a product used them”:
 - every friction point is accepted, fixed or recorded as a refused feature.
 
 Only after this phase may the README make strong “production-ready data stack”
-or “foundation for server-driven applications” claims.
+or bounded streaming claims.
 
 The Phase-5 in-memory multipart path remains the simplest option for ordinary
 files. Phase 7 adds a distinct opt-in large-body path rather than silently
@@ -274,8 +267,7 @@ contracts, not one magical stream abstraction.
 |---|---|---|
 | `uruquim:web` | Gin, Echo, Fiber, Flask core | Rails/Django batteries included |
 | `web` + data Crystals | Gin + pgx + goose/sqlc; Axum + SQLx | GORM/Active Record ORM |
-| `web` + stream primitive + SSE | Axum SSE, htmx/Hotwire backend foundations | Phoenix LiveView runtime |
-| Uruquim Live repository | early Phoenix LiveView/Hotwire product category | feature or maturity parity before Phase 8 evidence |
+| `web` + stream primitive + SSE | Axum SSE and explicit HTTP streaming stacks | a browser UI/session runtime |
 
 Uruquim's prospective differentiation is not “more features than all four”. It
 is a combination that is rare in Odin and uncommon elsewhere:
@@ -286,7 +278,7 @@ is a combination that is rare in Odin and uncommon elsewhere:
 4. synchronous programming over bounded concurrency;
 5. explicit SQL without ORM ambiguity;
 6. transport replaceability;
-7. server-driven UI built on bounded, owned long-lived streams;
+7. bounded, owned long-lived streams and large-body ingestion;
 8. documentation tested for humans and coding agents.
 
 These are hypotheses until Phase 8 proves them in one system.
@@ -344,11 +336,11 @@ allocator or transport selection. Existing handlers do not change shape.
 ### P-2 — One-way architecture
 
 ```text
-application → Live / Crystals → web → private transport adapter
+application → Crystals → web → private transport adapter
 ```
 
 No arrow points back. Core tests never need a Crystal; Crystals pin a core
-revision; Live pins both.
+revision.
 
 ### P-3 — No hidden waits
 
@@ -378,13 +370,11 @@ the validation app never works around it silently.
 ## 9. Sequencing and stopping rule
 
 Phase 6 must freeze before Phase 7 changes handler concurrency assumptions.
-Phase 7 must freeze before Phase 8 treats streams as product capability. The
-render shootout for Uruquim Live may run in parallel because it changes no core
-symbol.
+Phase 7 must freeze before Phase 8 treats streams as product capability.
 
 If Phase 7 cannot provide safe cross-lane ownership, bounded backpressure and
-honest drain without leaking the backend, Uruquim Live stops. Phase 8 may still
-validate the excellent JSON/data framework.
+honest drain without leaking the backend, streaming is recorded as not
+delivered. Phase 8 may still validate the JSON/data framework.
 
 If Phase 8 finds that the ordinary API has accumulated too many required
 concepts, the answer is subtraction or moving capability out of core — not
@@ -398,7 +388,7 @@ The program does not place this sentence in the README today. It defines what
 the evidence should eventually permit:
 
 > **Uruquim is an explicit, production-oriented Odin microframework for JSON,
-> data-backed and server-driven applications: simple by default, bounded by
+> data-backed applications and explicit streaming workloads: simple by default, bounded by
 > construction, and joyful to program.**
 
 Phase 8 decides whether the project earned every adjective.

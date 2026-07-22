@@ -33,7 +33,7 @@ opt-in spool/stream solution. No release has been made.
 | **4 — Production** | "I can run this facing real traffic: shut it down cleanly, sit behind a proxy, bound its resources, and see what it is doing." | Today there is no way to stop the server, no timeouts, no proxy handling, and no observability. This is the phase that makes deployment defensible. |
 | **5 — Table stakes** | "Deploys drain, and my first app has CORS, static files and bounded multipart." | The original demand gate was circular at zero users; the owner rescoped the phase and each symbol still paid G-09. |
 | **6 — Real applications** | "I can write a conventional PostgreSQL service with synchronous handlers, honest input errors and safe deploy migrations." | Ordinary blocking dependencies currently stall the single lane, and the data lifecycle has no accepted contract. |
-| **7 — Streaming foundation** | "I can push bounded incremental responses and receive large bodies without RAM proportional to body size." | Live interfaces and large uploads require lifecycle, backpressure, partial-write and spool ownership that buffered request/response cannot express. |
+| **7 — Streaming foundation** | "I can push bounded incremental responses and receive large bodies without RAM proportional to body size." | Incremental responses and large uploads require lifecycle, backpressure, partial-write and spool ownership that buffered request/response cannot express. |
 | **8 — Proof by use** | "The framework has survived a real multi-user product, repeated evolution, deploys and faults using only public APIs." | Examples prove syntax; a separately deployed system proves composition, operations and Joy of Programming. |
 
 ## Sequencing, and why this order
@@ -172,13 +172,13 @@ shutdown and health progress; all new ledgers and non-deliveries are frozen.
 **Planned, not signature-frozen.** Response streaming and large-body ingestion
 are one bidirectional lifecycle problem with two different public paths. The
 ordinary buffered `web.body`/multipart path remains the simple default; an
-opt-in bounded spool path supports bodies larger than memory limits. SSE and
-Uruquim Live remain ecosystem consumers of the smallest core primitive.
+opt-in bounded spool path supports bodies larger than memory limits. SSE
+remains an ecosystem consumer of the smallest core primitive.
 
 **Entry:** Phase 6 frozen; WP85 refreshes every threshold and ADR against its
 actual output. **Exit:** detached response ownership, partial-write security,
-bounded backpressure, safe multipart spool, drain and the SSE/Live vertical
-proof all pass without backend types escaping.
+bounded backpressure, safe multipart spool, drain, proxy interoperability and
+the large-transfer vertical proof all pass without backend types escaping.
 
 ### Phase 8 — Proof by use
 
@@ -225,7 +225,7 @@ Carried forward from Phase 1 because they are why Phase 1 stayed small:
    in Phase 5, paying G-09 in full. The amendment names three items; the rule is
    unchanged for every other. **Further owner amendment:** Phase 6's
    first-real-application class and Phase 7's minimal streaming/body primitives
-   have their own explicit spec gates. PostgreSQL and SSE/Live remain Crystals;
+   have their own explicit spec gates. PostgreSQL and SSE remain Crystals;
    only semantics that a transport/core alone can own may enter `web`.
 5. **Measurements decide performance questions**, not preference — and the
    losing options get recorded.
