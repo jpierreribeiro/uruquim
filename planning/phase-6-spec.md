@@ -84,12 +84,22 @@ to prove that the dependency direction works in practice.
 ### 2.3 SQL-first is the accepted direction
 
 The data stack uses explicit SQL, separate parameters, explicit row decoding,
-typed errors, explicit transactions and migrations as a deploy step. It may
-offer an optional CI checker. It does not hide table names, writes,
-transactions or schema changes behind reflection or conventions.
+typed errors, explicit transactions and migrations as an explicit lifecycle
+step. The same migration engine supports a separate CLI and an application
+call made before `web.serve`; neither path is hidden inside `web`. It may offer
+an optional CI checker. It does not hide table names, writes, transactions or
+schema changes behind reflection or conventions.
 
 No server boot automatically migrates production. No row mismatch becomes a
 zero value. No relevant database operation returns only an unexplained `bool`.
+
+**Owner amendment, 2026-07-22.** Explicit in-band migration is a first-class
+deployment path for self-hosted and small installations, not a development-only
+convenience. It means application code deliberately calls the migration engine,
+handles its typed result, and only then constructs/serves HTTP. The equivalent
+CLI remains first-class for SaaS, privilege separation and long-running schema
+work. Starting `web`, constructing an App or importing a package never applies
+migrations as a side effect.
 
 ### 2.4 The future official transport is an exit, not a guessed API
 
@@ -239,7 +249,13 @@ capacity** that preserves control progress.
 - dirty/uncertain state refuses further apply;
 - transactional failure leaves no partial schema change;
 - non-transactional failure can never be recorded as clean;
-- the HTTP server has no boot path that applies migrations.
+- an unknown applied ID (database ahead of the binary/manifest) refuses by
+  default before serving or applying new DDL;
+- directory and compile-time embedded sources produce the same validated
+  migration manifest and checksums;
+- the CLI and explicit pre-serve call exercise the same engine and history;
+- `web` has no boot path that applies migrations; only application code may
+  explicitly invoke the engine before calling `web.serve`.
 
 ### 5.6 Row and error safety
 
@@ -323,7 +339,8 @@ Phase 6 freezes only when:
 - the first Route Crystal proves CE-E3 without a core amendment;
 - PostgreSQL execution, pool, cancellation and transactions pass against a
   pinned disposable server;
-- the migration tool is fail-closed and never runs at web-server boot;
+- the migration engine is fail-closed, supports both the separate CLI and the
+  explicit pre-serve application path, and is never invoked by `web` itself;
 - the reference application demonstrates CRUD, constraints, conflict,
   pagination, transaction, migration, cancellation and health liveness;
 - cost, ownership and public ledgers are frozen literally;
