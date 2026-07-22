@@ -757,7 +757,9 @@ serialization retries is considered later only with an idempotence contract.
 
 ### WP79 — Migration contract
 
-**Repository:** a migration Tool Crystal, separate from the HTTP server.
+**Repository:** one transport-free migration engine Crystal, consumed by a
+separate Tool Crystal and, when the application opts in, by an explicit call
+in its composition root before `web.serve`. The engine never imports `web`.
 
 Specify and commit RED tests for:
 
@@ -769,29 +771,59 @@ Specify and commit RED tests for:
 - explicit `no_transaction` for operations PostgreSQL forbids in a transaction;
 - applied/failed/dirty history with timestamp, duration and tool version;
 - refusal on dirty state;
+- refusal by default when history contains an applied ID absent from the
+  binary/directory manifest (the database is ahead of this application);
 - `up`, `status` and `dry-run`;
-- optional `down`, never presented as guaranteed data recovery;
+- a forward-only canonical surface with no `down` or `force` command in the
+  first release;
+- equivalent manifests loaded from a directory or declared by the application
+  with SQL embedded through `#load`;
+- identical behaviour from the CLI and an explicit pre-serve application call;
 - deploys with mixed application versions documented as an application
   compatibility responsibility.
 
-The server never runs migrations automatically at boot. Development schema
-sync/diff is a separate future convenience, not production migration.
+The application may deliberately run `migrate.up` after initializing its
+database dependency and before constructing/serving HTTP. This is the
+first-class self-hosted/small-installation path: one artifact can own its SQL,
+take the advisory lock, fail closed, and serve only after success. It is not
+AutoMigrate: importing a package, constructing an App or calling `web.serve`
+has no migration side effect.
+
+The CLI calls the same engine and remains first-class for SaaS, rolling deploys,
+separate DDL credentials and work that outlives a normal startup deadline.
+Neither path is labelled the “serious” one. The operational topology chooses.
+
+Forward-only is safe only with **expand-contract** discipline. Additive schema
+lands before code requires it; old readers/writers stop using a field in a
+later deploy; destructive removal happens in a still later migration. WP79
+must document that a strict ahead-of-binary refusal can deliberately prevent
+an old binary from restarting after a newer schema lands, and that rolling
+deploys therefore require compatible migrations and explicit coordination.
+
+One transaction per migration remains the canonical baseline: every committed
+ID is independently clean and resumable. WP79 may prototype an explicit
+atomic-batch policy for a wholly transactional pending set, but cannot imply
+batch atomicity across `no_transaction` work. Development schema sync/diff is
+a separate future convenience, not production migration.
 
 **Rollback:** HIGH — spec and tests only.
 
 ### WP80 — Migration runner
 
-Implement WP79 as a separate executable/package. It acquires the advisory
-lock, validates the entire history fail-closed, applies one migration, records
-the result atomically where PostgreSQL permits, and exits non-zero on every
-refusal or failure.
+Implement WP79 as a transport-free engine plus a separate executable/package.
+The executable and explicit pre-serve integration call the same procedures.
+The engine acquires the advisory lock, validates the entire history fail-closed,
+applies one migration, records the result atomically where PostgreSQL permits,
+and returns a typed failure; the executable exits non-zero on every refusal or
+failure.
 
 The gate runs two concurrent processes against the disposable database,
 mutates an already-applied file, simulates a failed non-transactional migration
 and proves the database is never reported clean when state is uncertain.
 
-No `force` command ships in the first surface. Recovery from dirty state is a
-documented operator procedure requiring an explicit database inspection.
+No `force` or `down` command ships in the first surface. Recovery from dirty
+state is a documented operator procedure requiring an explicit database
+inspection.
 
 **Rollback:** MEDIUM — separate deploy tool.
 
@@ -853,7 +885,8 @@ example that demonstrates:
 - unique-constraint conflict;
 - a multi-statement transaction;
 - pagination with stable ordering;
-- migrations run as a separate deploy step;
+- the same migrations run through a separate deploy command and an explicit
+  pre-serve path, with no implicit `web` hook;
 - integration tests against pinned PostgreSQL;
 - one deliberately blocked query while `/health` remains responsive;
 - query cancellation and bounded pool exhaustion;
@@ -943,7 +976,9 @@ connections are quarantined and cancellation races are covered.
 
 Only one runner applies at a time; changed history and dirty state refuse;
 transactional failure rolls back; non-transactional uncertainty cannot be
-reported clean; the web server never migrates on boot.
+reported clean; ahead-of-binary history refuses by default; directory and
+embedded manifests agree; `web` never initiates migration, while the explicit
+application pre-serve path and CLI share one engine.
 
 ### G6-G — Transport replaceability
 

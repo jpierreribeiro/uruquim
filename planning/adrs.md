@@ -1808,8 +1808,10 @@ none; the requirement it keeps is the one nobody disputes.
 
 - **Decision.** Uruquim's data path is explicit SQL, positional bindings,
   fail-closed row decoding, typed errors with SQLSTATE, bounded pooling,
-  explicit transactions and a separate migration executable. Optional CI
-  verification may prepare queries against a disposable PostgreSQL database.
+  explicit transactions and a transport-free migration engine. A separate CLI
+  and an explicit application call before `web.serve` consume the same engine.
+  Optional CI verification may prepare queries against a disposable PostgreSQL
+  database.
 
 - **Dependency direction.** PostgreSQL, migrations, validation and SQL tools
   are Crystals. The application owns the pool and stores it in `App_State`.
@@ -1826,8 +1828,19 @@ none; the requirement it keeps is the one nobody disputes.
   parameters, credentials and personal data are not default diagnostics.
 
 - **Migration rule.** Migrations are immutable history with checksum, lock and
-  dirty/uncertain state. They are a deploy action, never a side effect of
-  starting replicas.
+  dirty/uncertain state. They are an explicit deploy/lifecycle action, never a
+  side effect of importing a package, constructing an App or calling
+  `web.serve`.
+
+- **Amendment 1, 2026-07-22 — equal explicit execution paths.** Self-hosted and
+  small installations may call the engine in-band before serving; SaaS and
+  multi-instance deployments may call the same engine through the CLI with
+  separate DDL credentials. Both use advisory locking and fail closed. Applied
+  history unknown to the manifest refuses by default. Directory SQL and
+  compile-time `#load` manifests have identical validation/checksum semantics.
+  The canonical runner is forward-only and expand-contract is the required
+  operational discipline. This amendment does not admit AutoMigrate into
+  `web`.
 
 - **Reversibility. HIGH at direction level.** The contract leaves query
   builders and ORM-like packages possible outside the canonical path if later

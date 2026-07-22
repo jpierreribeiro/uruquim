@@ -83,6 +83,14 @@ grep -q 'CE-E3 remains intact' "$URUQUIM_SPEC" ||
   fail "CE-E3 is not preserved"
 grep -q 'No server boot automatically migrates production' "$URUQUIM_SPEC" ||
   fail "the no-auto-migrate rule is missing"
+grep -q 'explicit pre-serve application call' "$URUQUIM_PLAN" ||
+  fail "the owner-approved in-band migration path is missing"
+grep -q 'ahead-of-binary history refuses by default' "$URUQUIM_PLAN" ||
+  fail "the ahead-of-binary migration refusal is missing"
+grep -q 'expand-contract' "$URUQUIM_PLAN" ||
+  fail "the forward-only expand-contract discipline is missing"
+grep -q 'Directory SQL and' "$URUQUIM_ROOT/planning/adrs.md" ||
+  fail "directory/embedded migration source parity is missing"
 grep -q 'No row mismatch becomes a' "$URUQUIM_SPEC" ||
   fail "fail-closed row decoding is missing"
 case "$URUQUIM_FLAT" in
