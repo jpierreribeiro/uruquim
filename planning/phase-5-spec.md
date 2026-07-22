@@ -222,9 +222,8 @@ and enters by its own PR against `main`.
 
 ## 4. What Phase 5 does not do
 
-- **No streaming, WebSocket, HTTP/2, OpenAPI or LiveView.** The `Dispatch_Proc`/`Outbound`
-  boundary is not touched. A LiveView-style layer was proposed and **declined by the owner**
-  as premature and too invasive for a framework whose value is being pleasant to write.
+- **No streaming, WebSocket, HTTP/2 or OpenAPI.** The `Dispatch_Proc`/`Outbound`
+  boundary is not touched.
 - **No ecosystem work.** CE-E3 stands, PR #49 stays draft, and the first Crystal is not this
   phase — even though AMEND-P5-4 records that its gate opened.
 - **No concurrency change.** ADR-030 stays single-threaded; none of its three reopening

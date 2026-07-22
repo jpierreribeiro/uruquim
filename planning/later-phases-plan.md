@@ -381,7 +381,7 @@ in-process TLS retain their gates.
 | Automatic documentation | SHOULD_BE_OPTIONAL_PACKAGE | follows OpenAPI |
 | Validation | **PHASE 6, CRYSTAL, PROTOTYPE-GATED** | explicit transport-free validation is the canonical arm; tags/reflection and mandatory generation remain rejected unless evidence changes the decision |
 | WebSocket | SHOULD_BE_OPTIONAL_PACKAGE | its own protocol surface (RFC 6455) |
-| Streaming request/response | **PHASE 7, SPLIT OWNERSHIP** | the core owns only transport lifecycle, bounded response delivery and opt-in large-body ingestion/spool; SSE and Live remain ecosystem packages; buffered bodies remain canonical for ordinary requests |
+| Streaming request/response | **PHASE 7, SPLIT OWNERSHIP** | the core owns only transport lifecycle, bounded response delivery and opt-in large-body ingestion/spool; SSE remains an ecosystem package; buffered bodies remain canonical for ordinary requests |
 | HTTP/2 | SHOULD_BE_OPTIONAL_PACKAGE | only as the transport permits; RFC 9113 is a large surface |
 | Advanced API (`app_init`, `Advanced_Config`, `serve_transport`) | ACCEPTABLE_WITH_GUARDRAILS | ADR-010 — **ACCEPTED 2026-07-20** under the ADR-029 delegation, with activation deferred: designed, not shipped, until a real external user asks, and never in the Quick Start. (This row said "still PROPOSED" until 2026-07-21; corrected against `adrs.md:202`) |
 | Templates | **REJECT for core** | ecosystem territory |

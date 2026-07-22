@@ -376,7 +376,20 @@ done
 echo "docs: the fault-behaviour statement is present and no document promises recovery (ADR-020)"
 
 # ---------------------------------------------------------------------------
-# 7. No GitHub Actions workflow (owner decision; the gate is local/VPS).
+# 7. A discarded speculative product must not return through documentation.
+#
+# Keep the fragments separated here so the checker does not create the very
+# tracked vocabulary it rejects. Ordinary uses of "live" and "rendering" are
+# intentionally not banned.
+# ---------------------------------------------------------------------------
+URUQUIM_REMOVED_PRODUCT_PATTERN='live''view|uruquim[ -]?''live|phoenix[ -]+''live|hot''wire|server[ -]''driven'
+if git -C "$URUQUIM_ROOT" grep -I -n -i -E "$URUQUIM_REMOVED_PRODUCT_PATTERN" -- .; then
+  fail "discarded speculative product vocabulary returned to a tracked file"
+fi
+echo "docs: discarded speculative product remains absent"
+
+# ---------------------------------------------------------------------------
+# 8. No GitHub Actions workflow (owner decision; the gate is local/VPS).
 # ---------------------------------------------------------------------------
 if test -d "$URUQUIM_ROOT/.github/workflows"; then
   fail ".github/workflows exists; GitHub Actions is not a mandatory gate for this project"

@@ -12,9 +12,10 @@ The promise:
 > incrementally without occupying RAM proportional to its size, and shutdown
 > can still prove cleanup in both directions.
 
-This phase builds the core primitive Uruquim Live needs and closes Phase 5's
-explicit large-upload limitation. It does not build the Live framework, a
-template language or WebSocket.
+This phase closes two independent HTTP limitations recorded by Phase 5:
+incremental long-lived responses and request bodies larger than the in-memory
+buffer budget. It does not build a template language, client runtime or
+WebSocket.
 
 ---
 
@@ -38,10 +39,9 @@ multi-gigabyte body cannot be supported by raising `max_body` honestly. The
 owner has now made that limitation an explicit Phase-7 requirement; no later
 “real demand” gate remains.
 
-CE-E3 remains unchanged. Uruquim Live is ecosystem work and cannot make the
-core bend. Phase 7 is an explicit **core decision**, through the core's spec,
-ledger and gates. Once the primitive exists, SSE and Live consume it without
-further core growth.
+CE-E3 remains unchanged. Phase 7 is an explicit **core decision**, through the
+core's spec, ledger and gates. Optional protocols such as SSE consume the
+smallest accepted primitive without privileged access or further core growth.
 
 ---
 
@@ -53,7 +53,7 @@ further core growth.
 | E7-2 | The final handler-concurrency/default contract and application-state rules are reflected here. |
 | E7-3 | PostgreSQL pool exhaustion is bounded, so the stream lab cannot be invalidated by handlers waiting forever for database capacity. |
 | E7-4 | ADR-008, ADR-009 and ADR-012 are explicitly reopened only for the long-lived path; buffered responses remain unchanged. |
-| E7-5 | The owner records that long-lived response capability is core work while SSE and Uruquim Live remain separate packages/repositories. |
+| E7-5 | The owner records that bounded long-lived responses and large-body ingestion are core HTTP capabilities, while protocol policy such as SSE remains outside `web`. |
 | E7-6 | Current transport and Odin toolchain are pinned. Official `core:net/http` is used only if its real API exists and passes a spike. |
 
 If concurrent serving is refused by Phase 6, Phase 7 stops. A long-lived
@@ -169,8 +169,8 @@ At minimum Phase 7 fixes:
 
 The generic core does not invent semantic coalescing for arbitrary bytes. Its
 canonical full result is refusal or disconnect according to a predeclared
-policy. Uruquim Live may coalesce component patches before enqueue because it
-understands their meaning.
+policy. An application protocol may coalesce replaceable state before enqueue
+only when it understands that state semantically.
 
 No producer blocks a handler lane indefinitely while waiting for stream space.
 
@@ -193,8 +193,8 @@ No producer blocks a handler lane indefinitely while waiting for stream space.
 | 95 | Stream/body stop, drain and forced cancellation | IMPLEMENTATION |
 | 96 | Scale, fairness, sanitizer and fault laboratory | TESTS |
 | 97 | SSE as the first consumer Crystal | IMPLEMENTATION |
-| 98 | Uruquim Live rendering shootout | PROTOTYPE, separate repository |
-| 99 | Uruquim Live vertical slice | INTEGRATION, separate repository |
+| 98 | Streaming interoperability and proxy laboratory | TESTS |
+| 99 | Large-transfer and progress vertical slice | INTEGRATION, separate application |
 | 100 | Operations, protocol and migration documentation | DOCS |
 | 101 | Phase-7 freeze | FREEZE |
 
@@ -205,12 +205,9 @@ WP84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92
                               └────────→ 93 → 94
                     {92, 94} → 95 → 96
                                     └→ 97
-WP85 → 98
-{96, 97, 98} → 99 → 100 → 101
+{96, 97} → 98
+{94, 96, 97, 98} → 99 → 100 → 101
 ```
-
-WP98 may execute in parallel after WP85 because it adds no core symbol and does
-not depend on a wire implementation.
 
 ---
 
@@ -230,7 +227,7 @@ Create `planning/phase-7-spec.md`. Record:
   `form_file`, while the large-body path must answer ownership, cleanup, quotas,
   persistence transfer, disk-full, timeout and disconnect independently;
 - a new ADR for stream ownership, backpressure and stale identity;
-- core versus SSE/Live ownership under CE-E3;
+- core versus SSE ownership under CE-E3;
 - pre-registered thresholds and refusal rules.
 
 Inventory every public concept candidate under G-09. The target is the fewest
@@ -389,7 +386,7 @@ Implement byte and event caps selected in WP85. Tests cover:
 - many small versus one large event;
 - concurrent producers racing for the final slot;
 - refusal/disconnect metrics;
-- Live-layer coalescing without core semantic knowledge;
+- application-level coalescing without core semantic knowledge;
 - other streams continuing while one is slow.
 
 Default behaviour must be safe without tuning. Advanced policies are added
@@ -502,38 +499,40 @@ can support a real protocol without privileged access.
 
 **Rollback:** HIGH — separate package.
 
-### WP98 — Uruquim Live rendering shootout
+### WP98 — Streaming interoperability and proxy laboratory
 
-In the separate Live repository, render the same 50×6 table and one-cell
-mutation with:
+Exercise the accepted response stream and SSE Crystal through real clients and
+the supported reverse-proxy topology:
 
-- full region HTML + client morph;
-- generated static/dynamic split;
-- manual string building baseline.
+- `curl -N` and a browser receive events incrementally rather than at close;
+- proxy buffering is detected and the supported configuration disables it;
+- heartbeat and idle timeouts have declared outcomes;
+- `Last-Event-ID` crosses the proxy unchanged;
+- a slow client reaches the bounded policy without delaying a fast client;
+- client disconnect and process drain release every queued byte exactly once.
 
-Measure wire bytes, allocations, render time, generated/build complexity and
-the real code a user writes. Use a valid noise methodology and predeclared tie
-arm. No result can change core Phase-7 signatures.
+The lab distinguishes framework behaviour from proxy behaviour with direct and
+proxied control arms. It adds no product/session/rendering policy to core.
 
-**Rollback:** HIGH — disposable research.
+**Rollback:** HIGH — tests and disposable deployment fixtures.
 
-### WP99 — Uruquim Live vertical slice
+### WP99 — Large-transfer and progress vertical slice
 
-Build the smallest end-to-end separate application:
+Build a small separate application using only public contracts:
 
-- browser opens SSE stream;
-- ordinary POST carries an event;
-- server updates session state;
-- patch is enqueued to the owning lane;
-- two clients receive independent state;
-- reconnect restores current state;
-- slow client reaches a bounded policy;
-- deploy drain closes/reconnects cleanly.
+- upload a file larger than the buffered-body limit through the spool path;
+- validate quota, content metadata and persistence transfer explicitly;
+- report application-owned processing progress over SSE;
+- reconnect and obtain current progress without assuming event replay;
+- download the result through bounded response streaming;
+- prove two clients are isolated when one becomes slow;
+- interrupt upload, download and deploy, then verify cleanup and drain.
 
-This is not Live 1.0. It decides whether the primitive is sufficient without
-core escape hatches.
+The application may own a worker for its processing step; Phase 7 does not add
+a background-job system. The slice decides whether both streaming directions
+compose without internal imports or backend escape hatches.
 
-**Rollback:** HIGH — separate integration prototype.
+**Rollback:** HIGH — separate integration application.
 
 ### WP100 — Operations, protocol and migration documentation
 
@@ -562,7 +561,7 @@ Freeze only if:
 
 - all lifecycle, ownership, fault and scale gates pass;
 - SSE uses no internal/core escape hatch;
-- the Live vertical slice uses no backend type;
+- the interoperability lab and large-transfer slice use no backend type;
 - public ledger growth is justified symbol by symbol;
 - buffered endpoints remain byte-identical;
 - common-path binary/API cost is measured;
@@ -571,7 +570,8 @@ Freeze only if:
 - every non-delivered item and limitation is recorded.
 
 Close or retain open the stream ADRs based on evidence. A failed Phase 7 leaves
-Phase 6 usable and refuses Uruquim Live; it does not weaken the gates.
+Phase 6 usable and records streaming as not delivered; it does not weaken the
+gates.
 
 **Rollback:** HIGH — freeze records; implementation rollback varies by WP.
 
@@ -612,7 +612,8 @@ same lifecycle with exactly-once cleanup.
 
 ### G7-7 — Ecosystem proof
 
-SSE and the Live vertical slice work only through public accepted contracts.
+SSE, the proxy laboratory and the large-transfer slice work only through
+public accepted contracts.
 
 ### G7-8 — Pay only when used
 
@@ -638,7 +639,7 @@ distinct opt-in path, not a silent ownership change.
 
 - arbitrary full-duplex request/response protocols;
 - WebSocket or HTTP/2/3;
-- Live template/session framework in core;
+- template/session framework or client runtime in core;
 - automatic semantic patch coalescing in `web`;
 - background job system;
 - arbitrary user callbacks running on event-loop internals;
@@ -653,7 +654,8 @@ distinct opt-in path, not a silent ownership change.
 
 After Phase 7, Uruquim is still a microframework. Ordinary users still see
 app, route, extract, respond and serve; small bodies keep the Phase-5 path.
-Advanced server-driven applications gain bounded response streams, while
-large-body applications gain an explicit spool/consumer path without RAM
-proportional to upload size. Uruquim Live can then be built as a separate
-product rather than as privileged access to framework internals.
+Applications gain bounded long-lived responses, SSE and progressive output,
+while large-body applications gain an explicit spool/consumer path without RAM
+proportional to upload size. These remain optional HTTP capabilities; ordinary
+buffered applications do not learn their concepts or pay their executable-code
+cost.
