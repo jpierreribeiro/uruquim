@@ -226,8 +226,18 @@ _body_chunked :: proc(req: ^Request, max_length: int = -1, user_data: rawptr, cb
 			size_line = size_line[:semi]
 		}
 
+		// URUQUIM PATCH 14 (F3) — a chunk-size line is unsigned hex, but
+		// `strconv.parse_int` accepts a leading `-` and silently wraps values
+		// that overflow i64, both yielding a negative `size`. A negative size
+		// is stored as the scanner's `max_token_size`/`split_data` and reaches
+		// `scan_num_bytes`, where `int(uintptr(split_data))` is negative and
+		// `assert(n >= 0)` aborts the whole process (with asserts off it is an
+		// out-of-bounds slice). This is the same remote-DoS class the
+		// Content-Length path already guards with `_is_plain_decimal`; the
+		// chunked path was missed. Reject any non-positive parse the same way a
+		// malformed size line is rejected.
 		size, ok := strconv.parse_int(string(size_line), 16)
-		if !ok {
+		if !ok || size < 0 {
 			log.infof("Encountered an invalid chunk size when decoding a chunked body: %q", string(size_line))
 			s.cb(s.user_data, "", .Bad_Read_Count)
 			return
@@ -307,8 +317,20 @@ _body_chunked :: proc(req: ^Request, max_length: int = -1, user_data: rawptr, cb
 			return
 		}
 
+		// URUQUIM PATCH 15 (F2) — the server freezes the request headers
+		// (`headers.readonly = true`) before dispatch, but a chunked body's
+		// trailer section is parsed AFTER that freeze, and parsing a trailer
+		// field mutates the header map: `header_parse` reaches
+		// `assert(!h.readonly)` and aborts the whole process on the first
+		// non-empty trailer line — which is legal HTTP/1.1 any client may send.
+		// The empty-line branch above already clears `readonly` around its own
+		// mutation; do the same around trailer-field parsing, which is the
+		// decoder's own bookkeeping, not the handler mutation the freeze exists
+		// to forbid.
+		s.req.headers.readonly = false
 		key, ok := header_parse(&s.req.headers, string(line))
 		if !ok {
+			s.req.headers.readonly = true
 			log.infof("Invalid header when decoding chunked body: %q", string(line))
 			s.cb(s.user_data, "", .Unknown)
 			return
@@ -319,6 +341,7 @@ _body_chunked :: proc(req: ^Request, max_length: int = -1, user_data: rawptr, cb
 			log.infof("Invalid trailer header received, discarding it: %q", key)
 			headers_delete(&s.req.headers, key)
 		}
+		s.req.headers.readonly = true
 
 		scanner_scan(s.req._scanner, s, on_scan_trailer)
 	}

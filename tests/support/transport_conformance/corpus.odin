@@ -211,6 +211,29 @@ corpus_storage := []Wire_Case{
 			connection_must_close = true,
 		},
 		{
+			name = "negative chunk size is rejected",
+			bytes = "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" +
+			"-1\r\n{}\r\n0\r\n\r\n",
+			outcome = .Rejected,
+			connection_must_close = true,
+			notes = "Patch 14 (F3): `strconv.parse_int` accepts `-1`; an unguarded " +
+			"negative size tripped `scanner.odin`'s `n >= 0` assertion and killed " +
+			"the process. It must be refused like any malformed size.",
+		},
+		{
+			name = "chunked body with a trailer field is accepted",
+			bytes = "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n" +
+			"Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n" +
+			"10\r\n" + `{"name":"grace"}` + "\r\n0\r\nX-Trace: 1\r\n\r\n",
+			outcome = .Ok,
+			allowed_status = {201},
+			handler_must_run = true,
+			connection_must_close = true,
+			notes = "Patch 15 (F2): a trailer field is legal HTTP/1.1 but is parsed " +
+			"after the header map is frozen; the unpatched decoder tripped " +
+			"`assert(!h.readonly)` and killed the process on the first trailer line.",
+		},
+		{
 			name = "truncated chunk is rejected",
 			bytes = "POST /echo HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" +
 			"20\r\n{}\r\n",

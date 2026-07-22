@@ -16,6 +16,17 @@ import "core:strconv"
 @(private)
 JSON_FIELD_PATH_MAX :: ERROR_NAME_ESCAPED_MAX
 
+// JSON_NEST_DEPTH_MAX bounds structural nesting (arrays and objects) accepted
+// from a request body. The pinned `core:encoding/json` validator and parser are
+// both recursive-descent over this nesting and impose no depth limit of their
+// own, so a small body — under the `max_body` size cap — that is nothing but
+// deeply nested brackets can drive recursion until the worker thread's stack
+// overflows and the whole process aborts. Real request payloads nest a handful
+// of levels; this ceiling is far above any legitimate shape and only refuses
+// the pathological one.
+@(private)
+JSON_NEST_DEPTH_MAX :: 128
+
 @(private)
 Json_Decode_Issue_Kind :: enum {
 	None,
@@ -339,6 +350,45 @@ json_shape_check :: proc(value: json.Value, info: ^reflect.Type_Info, path: ^Jso
 // preflight tree and every failure path has one obvious cleanup point.
 @(private)
 body_json_preflight :: proc(raw: []u8, info: ^reflect.Type_Info) -> Json_Decode_Issue {
+	// Reject pathological structural nesting BEFORE the recursive-descent
+	// validator and parser ever see the input: neither bounds its own depth, so
+	// a body of nothing but `[` overflows the stack and aborts the process. This
+	// pre-scan is a single allocation-free pass that counts bracket/brace depth
+	// while skipping string contents, so a `[` inside a JSON string is never
+	// miscounted. A body deeper than the ceiling is a malformed request.
+	{
+		depth := 0
+		max_depth := 0
+		in_string := false
+		escaped := false
+		for b in raw {
+			if in_string {
+				if escaped {
+					escaped = false
+				} else if b == '\\' {
+					escaped = true
+				} else if b == '"' {
+					in_string = false
+				}
+				continue
+			}
+			switch b {
+			case '"':
+				in_string = true
+			case '[', '{':
+				depth += 1
+				if depth > max_depth {
+					max_depth = depth
+				}
+			case ']', '}':
+				depth -= 1
+			}
+		}
+		if max_depth > JSON_NEST_DEPTH_MAX {
+			return Json_Decode_Issue{kind = .Invalid_Json}
+		}
+	}
+
 	// The stdlib parser's partial-tree cleanup uses context.allocator on some
 	// syntax-error paths. Validate allocation-free first, so malformed input
 	// never creates a partial tree and cannot free through the wrong allocator.

@@ -174,6 +174,23 @@ wp68_wrong_root_aggregate_uses_the_root_path :: proc(t: ^testing.T) {
 }
 
 @(test)
+wp68_over_deep_nesting_is_refused_before_parsing :: proc(t: ^testing.T) {
+	// A body that is syntactically valid JSON but nested far past any legitimate
+	// shape must be refused by the bounded structural pre-scan as invalid_json,
+	// before the recursive-descent validator and parser (which impose no depth
+	// bound of their own) can overflow the worker stack and abort the process.
+	// The depth guard must win first: without it, this deep array would parse and
+	// be classified invalid_field "$" exactly like `[]` above.
+	opens := strings.repeat("[", 200)
+	defer delete(opens)
+	closes := strings.repeat("]", 200)
+	defer delete(closes)
+	deep := strings.concatenate({opens, closes})
+	defer delete(deep)
+	expect_error(t, "/input", deep, .Bad_Request, "invalid_json")
+}
+
+@(test)
 wp68_trailing_tokens_are_not_silently_ignored :: proc(t: ^testing.T) {
 	expect_error(t, "/input", `{"age":1} true`, .Bad_Request, "invalid_json")
 }
