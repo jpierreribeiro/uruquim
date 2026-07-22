@@ -27,6 +27,19 @@ for URUQUIM_FILE in \
 done
 
 URUQUIM_FLAT="$(tr '\n' ' ' < "$URUQUIM_SPEC" | tr -s ' ')"
+URUQUIM_ASYNC="$URUQUIM_ROOT/planning/sync-async-evaluation.md"
+URUQUIM_QUESTIONS="$URUQUIM_ROOT/planning/architecture-evidence-questions.md"
+
+test -s "$URUQUIM_ASYNC" || fail "the sync/async evidence program is missing"
+test -s "$URUQUIM_QUESTIONS" || fail "the architecture evidence backlog is missing"
+test "$(grep -cE '^### [A-D] —' "$URUQUIM_ASYNC")" -eq 4 ||
+  fail "the sync/async shootout does not retain exactly four arms"
+grep -q 'If async wins only long-lived streaming' "$URUQUIM_ASYNC" ||
+  fail "the specialised-async decision arm is missing"
+grep -q '## 5. Crystals architecture' "$URUQUIM_QUESTIONS" ||
+  fail "Crystals have no evidence-backed architecture section"
+grep -q 'Blank-machine setup' "$URUQUIM_QUESTIONS" ||
+  fail "the Crystal installation/usability control is missing"
 
 # Entry is history. Later phases may grow the live ledger; the spec must keep
 # saying what Phase 6 actually began from.

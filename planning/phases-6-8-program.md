@@ -214,7 +214,8 @@ A conventional production JSON application can have:
 - static files, CORS and bounded in-memory multipart uploads inherited from
   Phase 5;
 - PostgreSQL pool, typed errors, cancellation and transactions;
-- fail-closed migrations outside server startup;
+- fail-closed migrations through either the separate CLI or an explicit
+  application call before serving, never an implicit `web` startup hook;
 - optional SQL/schema checking;
 - a real CRUD reference application;
 - the same routing/handler API across the current and future transport.
