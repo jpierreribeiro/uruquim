@@ -25,6 +25,7 @@ Server :: struct {
 	release:     sync.Sema,
 	stopped:     sync.Sema,
 	listen_ok:   bool,
+	suspend_handlers: bool,
 }
 
 Call :: struct {
@@ -41,6 +42,16 @@ Call :: struct {
 handler :: proc(h: ^http.Handler, req: ^http.Request, res: ^http.Response) {
 	s := (^Server)(h.user_data)
 	path := req.url.path
+	entered_lane := false
+	if path == "/block" && s.suspend_handlers {
+		entered_lane = http.handler_lane_enter(res)
+		assert(entered_lane)
+	}
+	defer {
+		if entered_lane {
+			http.handler_lane_leave(res)
+		}
+	}
 	if path == "/block" {
 		sync.sema_post(&s.entered)
 		sync.sema_wait(&s.release)
@@ -91,12 +102,14 @@ server_thread :: proc(s: ^Server) {
 	nbio.release_thread_event_loop()
 }
 
-Start :: proc(s: ^Server, port, lanes: int) -> bool {
+@(private)
+start :: proc(s: ^Server, port, lanes: int, suspend_handlers: bool) -> bool {
 	// The lab intentionally starts several servers in one process. Odin's
 	// address reuse must not carry posted cleanup permits into the next arm.
 	s^ = {}
 	s.port = port
 	s.lanes = lanes
+	s.suspend_handlers = suspend_handlers
 	s.thread = thread.create_and_start_with_poly_data(s, server_thread)
 	if !sync.sema_wait_with_timeout(&s.ready, 2 * time.Second) {
 		return false
@@ -113,6 +126,29 @@ Start :: proc(s: ^Server, port, lanes: int) -> bool {
 	}
 	time.sleep(25 * time.Millisecond)
 	return true
+}
+
+Start :: proc(s: ^Server, port, lanes: int) -> bool {
+	return start(s, port, lanes, false)
+}
+
+// Start_Suspended brackets the blocking application call with Patch 13's
+// admission suspension. It is a white-box control instrument, not a second
+// server model: WP71 uses it to prove that a blocked lane has no accept posted.
+Start_Suspended :: proc(s: ^Server, port, lanes: int) -> bool {
+	return start(s, port, lanes, true)
+}
+
+Suspended_Lane_State :: proc(s: ^Server) -> (active, active_with_accept: int) {
+	for &lane in s.backend.threads {
+		if lane.handler_active {
+			active += 1
+			if lane.accept != nil {
+				active_with_accept += 1
+			}
+		}
+	}
+	return
 }
 
 Release :: proc(s: ^Server, count: int) {

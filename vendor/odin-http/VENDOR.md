@@ -54,9 +54,9 @@ README.md, odinfmt.json, .editorconfig, .gitignore — repo tooling
 
 ## Local patches
 
-**Twelve.** Five added by WP9 (transport conformance), one each by WP45, WP46
-(ADR-031) and WP47, three by WP59's drain repair, and one by WP70's multi-lane
-lifecycle repair. All are minimal and fix a security issue, an upstream defect,
+**Thirteen.** Five added by WP9 (transport conformance), one each by WP45, WP46
+(ADR-031) and WP47, three by WP59's drain repair, one by WP70's multi-lane
+lifecycle repair, and one by WP71's Handler-capacity mapping. All are minimal and fix a security issue, an upstream defect,
 a lifecycle defect or a capacity the server had no way to bound. Each is marked
 in source with `URUQUIM PATCH`, recorded below, and covered by executable
 evidence that failed before it. There are no opportunistic edits.
@@ -72,7 +72,7 @@ decides whether a re-vendor carries a policy or expects a fix to disappear.
 | 2 | `body.odin` (`_body_chunked`) | A chunk not terminated by CRLF is rejected instead of asserted. | **REMOTE DENIAL OF SERVICE.** `assert(len(token) == 0)` treated malformed *input* as a programming error, so a chunked body missing its trailing CRLF **killed the server process**. |
 | 3 | `request.odin` (`headers_validate`) | `Content-Length` + `Transfer-Encoding` is **rejected**, not repaired. | Upstream deleted the `Content-Length` and continued. That leaves the two ends of a proxy chain disagreeing about where the body ends — the request-smuggling vector RFC 9112 §6.1 calls an unrecoverable error. |
 | 4 | `http.odin` (`header_parse`) | **Any** repeated `Content-Length` is rejected, even when the values are identical. | Upstream let an exact duplicate through and then merged it via the comma rule into `2, 2`, an ambiguous framing. WP9 D2 chooses refusal over normalization: it is simpler and safer. |
-| 8 | `server.odin` (`Server_Opts`, `Server_Thread`, `on_accept`) | Bounded admission: `max_connections` and `reserved_connections`. A connection past `max - reserved` is closed at accept; refusals are counted and the TRANSITION is logged, not each event. | Without it, concurrent connections are bounded only by the OS descriptor limit, and reaching that limit is an `accept` failing for a reason the server did not choose. The reservation exists so a shutdown always has slots to work in (WP40). |
+| 8 | `server.odin` (`Server_Opts`, `Server`, `Server_Thread`, `on_accept`, `connection_close`) | Server-wide bounded admission: `max_connections` and `reserved_connections`. A connection past `max - reserved` is closed at accept; an atomic active count makes the budget exact across Handler lanes; refusals are counted and the TRANSITION is logged, not each event. | Without it, concurrent connections are bounded only by the OS descriptor limit. WP71 additionally proved that a lane-local count multiplies the promised limit by lane count. The reservation exists so shutdown always has slots to work in (WP40). |
 | 7 | `body.odin` (`_body_length`) | A request with NO `Content-Length` sets `_body_ok = true` on its success path, instead of leaving the `false` the procedure starts with. | **KEEP-ALIVE WAS BROKEN FOR EVERY GET.** `_body_ok = false` means "a body read failed" and `response_must_close` retires the connection on it — but a request with no body returned through the success path without setting it. Measured before the patch: two sequential requests on one socket, the first answered and the second met an orderly close, with **no `Connection: close` advertised**, so a client had no way to know it was paying a TCP handshake per request while HTTP/1.1 promised persistence. |
 | 6 | `server.odin` (`Server_Opts`, `Connection`, `server_deadline_sweep`, `server_date_start`, `conn_handle_req`) and `response.odin` (`clean_request_loop`) | A configurable REQUEST READ DEADLINE: `request_read_timeout`. A per-thread periodic sweep closes any connection whose current request has taken longer than that to arrive. Zero disables it, which is upstream's behaviour. | **REMOTE RESOURCE EXHAUSTION (slowloris).** The upstream read has no deadline — `scanner.odin` carries an unfinished-work comment at the recv site asking for exactly this — so a client that sends a valid prefix and stops, or trickles one byte at a time, holds a connection open indefinitely. Demonstrated against this server by `tests/wp41-fault` before the patch existed (WP41), closed by it (WP46/ADR-031). |
 | 5 | `http.odin` (`Method`, `Requestline`, `requestline_parse`) | A valid but unrecognized method becomes `.Unknown` and its original token is preserved in `Requestline.method_raw`, instead of the server answering `501`. | WP9 D7: method semantics are the framework's decision. `PROPFIND` must reach the dispatcher and follow the ratified 404/405 policy; the transport must not invent a status before the core sees the request. |
@@ -80,6 +80,7 @@ decides whether a re-vendor carries a policy or expects a fix to disappear.
 | 10 | `server.odin` (`connection_close`) | Cancel the scanner's outstanding receive before freeing connection-owned state. **BRIDGE.** | Without cancellation, a later completion dereferenced a freed `Connection`: WP58 reproduced an endless drain followed by `free(): invalid pointer`. This is an upstream use-after-free. |
 | 11 | `server.odin` (`Server_Opts`, shutdown loop) | Apply one absolute `max_drain_time` across shutdown waits and cancel remaining reads at expiry. **BRIDGE.** | A graceful-stop knob must bound the whole operation, not only one loop. The WP58 laboratory is the executable deadline evidence. |
 | 12 | `server.odin` (`Server`, `Server_Thread`, `server_shutdown`, Date cache, refusal count) | Elect one shutdown owner; make the Date cache lane-owned; atomically aggregate refusals. **BRIDGE.** | WP69 reproduced a multi-lane stop walking state another caller had begun freeing. WP70's contention corpus also owns the shared-counter and lane-cache races. |
+| 13 | `server.odin` (`Server_Thread`, `on_accept`, `handler_lane_enter`, `handler_lane_leave`) | Suspend a lane's accept before its synchronous application Handler begins, preserving a raced accept rather than losing it. **BRIDGE.** | Without it, the kernel can assign a new health connection to a lane blocked in PostgreSQL while another Handler lane is free. `nbio.remove` is asynchronous, so the patch also waits for cancellation completion and preserves a connection that won the race. |
 
 Patch 5 also adds a tenth entry to `_method_strings` and makes `method_parse`
 skip the new member, so the existing `for r in Method` lookup (which indexes
@@ -87,7 +88,7 @@ that array under `#no_bounds_check`) stays in bounds.
 
 Every other line is byte-for-byte upstream.
 
-To update to a newer upstream commit, re-apply the twelve patches above (they are
+To update to a newer upstream commit, re-apply the thirteen patches above (they are
 small and each is commented at its site) and re-run the WP9 raw-wire corpus,
 which is what proves they are still needed and still sufficient.
 
@@ -105,7 +106,7 @@ this cost is not.
 
 To move to a different upstream commit: re-copy the root `.odin` files, the
 `LICENSE` and `mod.pkg` from a fresh checkout at the new commit, re-apply the
-twelve patches listed above, update the provenance table, and re-run the full
+thirteen patches listed above, update the provenance table, and re-run the full
 gate — including the WP9 raw-wire corpus, which is what proves the patches are
 still necessary and still sufficient. Do not make unrelated edits to these
 files.

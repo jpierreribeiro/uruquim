@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# WP69 — deterministic blocking boundary. WP70 amended the drain obligation GREEN.
+# WP69 — deterministic blocking boundary. WP70 amended drain GREEN; WP71
+# promoted the measured candidate through the public, transport-neutral gate.
 set -euo pipefail
 
 URUQUIM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -59,10 +60,21 @@ if timeout 20 env ODIN_ROOT="$URUQUIM_ODIN_ROOT" "$URUQUIM_ODIN" test \
   fail "one-lane mutation unexpectedly preserved candidate liveness"
 fi
 
-grep -qF "opts.thread_count = 1" "$URUQUIM_ROOT/web/internal/transport/odin_http_adapter.odin" ||
-  fail "WP69 must not ship speculative public concurrency"
+if test -f "$URUQUIM_ROOT/planning/phase-6-concurrent-serving.md"; then
+  grep -qF "opts.thread_count = handler_concurrency" \
+    "$URUQUIM_ROOT/web/internal/transport/odin_http_adapter.odin" ||
+    fail "WP71 no longer maps the measured capacity through the adapter"
+  grep -qF "max_handlers:     int" \
+    "$URUQUIM_ROOT/web/internal/transport/boundary.odin" ||
+    fail "WP71 no longer carries Handler capacity through the neutral boundary"
+else
+  grep -qF "opts.thread_count = 1" \
+    "$URUQUIM_ROOT/web/internal/transport/odin_http_adapter.odin" ||
+    fail "before WP71, WP69 must not ship speculative public concurrency"
+fi
 
 echo "wp69: one lane loses health; four lanes retain it at three blocked handlers"
 echo "wp69: idle/partial/slow-write I/O and repeated lifecycle controls are green"
 echo "wp69: multi-lane drain is GREEN after WP70 made shutdown ownership exact-once"
+echo "wp69: WP71 promotes the measured arm through a neutral Handler-capacity field"
 echo "PASS: WP69 blocking-boundary controls"

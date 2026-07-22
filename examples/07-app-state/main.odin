@@ -40,6 +40,7 @@
 //	curl http://localhost:8080/stats           -> the counter, shared by both
 package main
 
+import "core:sync"
 import web "uruquim:web"
 
 // The one value every handler needs. An ordinary struct: the framework does not
@@ -88,18 +89,15 @@ show_greeting :: proc(ctx: ^web.Context) {
 // Writing. The pointer is the one `main` created, so this increments the
 // caller's own counter and every later request sees it.
 //
-// One honest caveat, stated because the capacity ledger requires costs to be
-// named rather than discovered: this is a plain `+= 1` with no lock. That is
-// correct under the framework's current model — one server per process, one
-// event loop — and it is the same assumption the request-ID counter is
-// documented under. Concurrency is Phase 4's, and it owns this line with it.
+// Handlers execute concurrently by default, so the shared counter is atomic.
+// Immutable application state needs no synchronization.
 record_visit :: proc(ctx: ^web.Context) {
 	s := web.state(ctx, App_State)
-	s.visits += 1
+	_ = sync.atomic_add(&s.visits, 1)
 	web.no_content(ctx)
 }
 
 show_stats :: proc(ctx: ^web.Context) {
 	s := web.state(ctx, App_State)
-	web.ok(ctx, Stats{visits = s.visits})
+	web.ok(ctx, Stats{visits = sync.atomic_load(&s.visits)})
 }

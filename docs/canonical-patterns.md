@@ -574,6 +574,7 @@ be worse than one that refuses to start.
 | `max_request_time` | 30 s (nanoseconds) | a periodic sweep on the serving loop — the connection is closed when one request takes longer than this to ARRIVE |
 | `max_connections` | 1024 | the accept path — a connection past the budget is closed, not queued |
 | `reserved_conns` | 16 | slots held back from admission so a shutdown always has room; admission stops **at or below** `max_connections - reserved_conns`, never at zero |
+| `max_handlers` | `0` = auto | maximum concurrent synchronous Handlers; auto is CPU count clamped to 4..32, `1` is compatibility mode, explicit values stop at 256 |
 
 - the budget belongs to the **App**, not to `web.serve`, so `web.test_request`
   enforces the same numbers as a socket. A 413 in a test is a 413 in production;
@@ -592,6 +593,9 @@ be worse than one that refuses to start.
   explicitly;
 - **there is still no WRITE deadline**, and no field for one. Do not write
   `web.Limits{write_timeout = ...}`.
+- Handlers run concurrently by default. Protect mutable `App_State` with a
+  lock/atomics or put it behind a thread-safe service. Set `max_handlers = 1`
+  only when intentional single-Handler compatibility is the desired contract.
 
 `Limits` bounds Uruquim's **own per-request working memory**. It does not bound
 connections, accept backlog, inbound header count or process memory — those are

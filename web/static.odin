@@ -37,7 +37,7 @@
 //	                         exactly the files a directory should not serve.
 //	not a regular file       rejected. A directory, a device, a socket or a
 //	                         FIFO is not a document, and opening a FIFO parks
-//	                         the single-threaded event loop forever.
+//	                         one synchronous Handler lane forever.
 //	a symlink                rejected, whatever it points at. The stat does not
 //	                         follow links, so a link reports its own type and is
 //	                         refused. Resolving it and checking where it landed
@@ -308,8 +308,8 @@ static_serve :: proc(ctx: ^Context, mounts: ^Static_Mounts) -> bool {
 		return true
 	}
 	// A directory, device, socket or FIFO is not a document — and opening a
-	// FIFO would park the single-threaded event loop for as long as the other
-	// end cared to wait.
+	// FIFO would park one synchronous Handler lane for as long as the other end
+	// cared to wait.
 	//
 	// THIS IS ALSO THE SYMLINK DEFENCE, and it is deliberately total: because
 	// the stat above does not follow links, a symlink reports `.Symlink` and is

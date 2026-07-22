@@ -54,6 +54,7 @@ budget := web.DEFAULT_LIMITS
 budget.max_body         = 1 * 1024 * 1024   // 4 MiB default
 budget.max_request_time = 10 * 1_000_000_000 // 30 s default, nanoseconds
 budget.max_connections  = 512                // 1024 default
+budget.max_handlers     = 8                  // 0 = bounded automatic policy
 web.limits(&app, budget)
 ```
 
@@ -65,6 +66,7 @@ web.limits(&app, budget)
 | `max_request_time` | 30 s | **the connection is closed** — this is the slowloris defence |
 | `max_connections` | 1024 | the connection is **closed at accept**, not queued |
 | `reserved_conns` | 16 | slots held back from admission so a shutdown always has room |
+| `max_handlers` | `0` = auto | synchronous Handler capacity; auto resolves from CPU count, bounded to 4..32 |
 
 **`max_request_time` is a REQUEST deadline, not an idle timeout.** An idle timer
 is reset by every byte, so a client trickling one byte per second resets it
@@ -73,6 +75,22 @@ may take to *arrive*.
 
 **It does not bound your handler.** A slow handler is your program's time, and
 killing its connection would turn a slow page into a broken one.
+
+### Handler concurrency
+
+Handlers may run concurrently. The default `max_handlers = 0` selects a
+bounded automatic capacity: processor count clamped to 4..32. Set it to `1`
+for deterministic compatibility with deliberately single-threaded application
+state, or to an explicit value up to 256 when capacity planning requires it.
+
+This is **Handler capacity**, not a promise about backend threads. Slow socket
+reads and writes remain asynchronous and do not consume a Handler unit. A
+blocking database call consumes one unit; health remains live while at least
+one unit is free. Full saturation is an explicit boundary, not hidden
+preemption.
+
+`App_State` is application-owned. Mutable values shared by Handlers need a
+lock, atomics or a thread-safe service; immutable configuration does not.
 
 ---
 
@@ -118,9 +136,9 @@ nothing could cancel. Cancelling it fixed both.
 
 **What it does not bound, and this has not changed:**
 
-> **⚠ A blocking handler blocks the drain.** The event loop is single-threaded
-> (ADR-030), so a handler that sleeps or makes a synchronous call holds the very
-> thread this deadline is enforced on. `max_drain_time` cannot interrupt it.
+> **⚠ A blocking handler can outlive the drain deadline.** A synchronous
+> Handler cannot be preempted; it holds its Handler lane until it returns.
+> `max_drain_time` cannot unwind arbitrary user or C code.
 
 **So the advice is narrower than it was, not absent:**
 
@@ -132,9 +150,9 @@ nothing could cancel. Cancelling it fixed both.
 * set `max_drain_time = 0` to get the old unbounded behaviour back, if you would
   rather wait than cut a request off.
 
-**And a blocking handler blocks the drain**, because the event loop is
-single-threaded (ADR-030). A handler that sleeps or makes a synchronous call
-holds the loop, and nothing — no deadline, no stop — runs until it returns.
+**A blocking handler still outlives the drain if it does not return.** Other
+lanes can continue and observe stop, but teardown cannot free state still used
+by arbitrary application code. The supervisor remains the outer bound.
 
 ---
 
@@ -144,11 +162,13 @@ holds the loop, and nothing — no deadline, no stop — runs until it returns.
 one process is not supported.** Scale horizontally: one process per server, many
 processes.
 
-The concurrency model is a **single-threaded event loop**, decided in ADR-030
-against a measured prototype. A threaded arm finished ~31% sooner, which sits far
-inside this machine's 138% noise floor, and adopting it would have falsified
-three shipped guarantees. **If your service is CPU-bound inside handlers, run
-more processes.**
+The server uses **bounded synchronous Handler concurrency**. Slow socket I/O
+remains asynchronous; application code occupies one Handler unit until it
+returns. `max_handlers = 0` derives a bounded 4..32 capacity from the processor
+count, while `1` preserves the former deterministic compatibility model.
+
+This is for ordinary blocking dependencies, not a CPU scheduler. If handlers
+are CPU-bound, size `max_handlers` deliberately and scale with more processes.
 
 ---
 
@@ -231,9 +251,10 @@ you set cookies, you set the headers, and you own their attributes.
 ## 10. Known limitations, in one place
 
 * **No TLS**, by decision. Use a proxy.
-* **A blocking handler is not bounded by anything.** `max_drain_time` bounds
-  shutdown, `max_request_time` bounds arrival; neither can interrupt a handler
-  that does not return, because the loop is single-threaded.
+* **A blocking Handler cannot be preempted.** `max_drain_time` bounds transport
+  shutdown and `max_request_time` bounds arrival; neither interrupts arbitrary
+  application or foreign code. Other Handler lanes retain progress until the
+  configured capacity is saturated.
 * **A faulting handler aborts the process.** By construction, not by defect.
 * **No write deadline.** The read side has one; the write side does not.
 * **No bound on the accept backlog or inbound header count.**

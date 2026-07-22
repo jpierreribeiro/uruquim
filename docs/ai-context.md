@@ -106,9 +106,10 @@ expires, connections still serving a request are closed rather than waited for.
 Set it to zero for the old unbounded behaviour. Keep the supervisor's kill as
 the outer bound — it should be longer than `max_drain_time`.
 
-**A blocking handler blocks the drain**, because the event loop is
-single-threaded (ADR-030). A handler that sleeps or makes a synchronous call
-holds the loop, and nothing — no deadline, no stop — runs until it returns.
+**A blocking Handler holds one Handler unit and cannot be preempted.** Other
+lanes continue while capacity remains, but teardown cannot free state the
+blocked Handler still uses. The supervisor's stop timeout remains the outer
+bound for permanently stuck application or foreign code.
 
 ### Observability
 
@@ -273,9 +274,9 @@ web.cors(&app, web.Cors_Options{
 
 ```text
 Limits{max_body, max_request_line, max_headers, max_request_time,
-       max_connections, reserved_conns, max_drain_time}
+       max_connections, reserved_conns, max_drain_time, max_handlers}
 DEFAULT_LIMITS   4 MiB, 8000, 8000, 30 s (ns), 1024 conns, 16 reserved,
-                 10 s drain (ns)
+                 10 s drain (ns), 0 = auto Handlers (4..32)
 limits(&app, l)                    set it; before the first request
 ```
 
@@ -313,6 +314,12 @@ fail-closed rather than run on a guess.
   a shutdown always has room to work in. Admission is refused **at or below**
   `max_connections - reserved_conns`, never at zero. A `reserved_conns` at least
   as large as `max_connections` is rejected at boot.
+- **`max_handlers` bounds concurrent synchronous Handlers.** `0` is the
+  bounded automatic policy (CPU count clamped to 4..32), `1` is explicit
+  single-Handler compatibility, and 256 is the largest accepted explicit
+  value. Full saturation stops Handler progress; it does not preempt user code.
+- Handlers may run concurrently. Mutable application state and observer/logger
+  sinks are application-owned and must synchronize themselves.
 
 `Limits` bounds Uruquim's own per-request working memory. It does **not** bound
 connections, accept backlog or process memory; those belong to the transport and

@@ -334,7 +334,7 @@ Evidence: `tests/wp9-semantic/http_factory_test.odin::wp9_semantic_matrix_on_the
 
 ## 7. Dependency inventory
 
-Snapshot: `build/phase1-direct-dependencies.txt` (21 direct imports, diffed on
+Snapshot: `build/phase1-direct-dependencies.txt` (23 direct imports, diffed on
 every gate run).
 
 | Package | Direct imports |
@@ -1935,3 +1935,44 @@ recorded explicitly rather than hidden in that feature's later measurement.
 **Rollback.** No public name or signature changed. Removing the private
 publication helpers, restoring the single-lane assumptions and dropping Patch
 12 removes both direct imports and returns the previous implementation.
+
+---
+
+## Amendment 25 — WP71: bounded Handler concurrency, no ledger growth
+
+**Date: 2026-07-22. Authority: `planning/phase-6-spec.md` §5.2 and
+`planning/phase-6-concurrent-serving.md`. Ledger effect: none; application
+remains 62 and test-support remains 2.**
+
+**Shape and compile evidence.** Existing `Limits` gains
+`max_handlers: int`; `DEFAULT_LIMITS.max_handlers` is `0`. The exact field and
+constant shapes are compiler-derived in `build/phase1-public-signatures.txt`.
+No new public name exists.
+
+**Behavior and negative evidence.** `build/check_wp71_controls.sh` owns the
+automatic, explicit-four, explicit-one, invalid-value and backend-suspension
+cases. Mutants collapsing auto to one, accepting 257, leaving accept posted and
+restoring lane-local admission are all rejected. The adapter-private resolver
+is tested in a throwaway copy of the real transport package.
+
+The first complete gate also found and repaired a pre-existing lane-local
+admission count: `max_connections` is now claimed and released through one
+server-wide atomic counter, and WP41's reservation corpus proves the limit is
+not multiplied by `max_handlers`.
+
+**Documentation and ownership.** `docs/operations.md`, `docs/ai-context.md`,
+`docs/canonical-patterns.md` and `planning/phase-6-concurrent-serving.md`
+document automatic 4..32, explicit 1..256, full saturation, application-owned
+shared state and non-preemptible Handler code. The setting names Handler
+capacity rather than backend threads, preserving adapter replaceability.
+
+**Dependencies and cost.** The private adapter gains `core:os` and
+`core:nbio`; neither appears publicly. Adjacent builds at WP70 main `19b9cb9`
+and WP71, using equal-length output paths to avoid Odin's path-dependent binary
+padding, measured `01-hello-world` at 970,312 and 975,784 bytes: **+5,472
+bytes**. This pays for automatic capacity and the admission/cancellation bridge
+even when the application leaves the field at its default.
+
+**Rollback.** Remove the field, the two private imports, Patch 13 and the
+adapter bracket. Restore the single-lane mapping. No route, Handler signature,
+in-memory behavior or Phase-5 feature changes.

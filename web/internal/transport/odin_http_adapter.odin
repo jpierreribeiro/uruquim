@@ -5,20 +5,39 @@
 // READING, drives the core through the `Dispatch_Proc` callback, and writes the
 // neutral `Outbound` back to the wire. It names no `web` type.
 //
-// EXECUTION (WP8 D6): a single catch-all handler feeds the Uruquim dispatcher —
-// the backend router is NOT used — with `thread_count = 1` and
-// `redirect_head_to_get = false`, so HEAD stays HEAD (the core maps it to an
-// unknown method) and the backend never rewrites a method. Concurrency,
-// timeouts and graceful-shutdown deadlines are later phases.
+// EXECUTION (WP8 D6, amended by WP71): a single catch-all handler feeds the
+// Uruquim dispatcher — the backend router is NOT used. Handler capacity is
+// resolved from the neutral Config below; `redirect_head_to_get = false`, so
+// HEAD stays HEAD and the backend never rewrites a method.
 package transport
 
 import http "uruquim:vendor/odin-http"
 import "core:mem"
 import "core:net"
+import "core:nbio"
+import "core:os"
 import "core:time"
 import "core:slice"
 import "core:strings"
 import "core:sync"
+
+@(private)
+AUTO_HANDLER_CONCURRENCY_MIN :: 4
+
+@(private)
+AUTO_HANDLER_CONCURRENCY_MAX :: 32
+
+@(private)
+resolve_handler_concurrency :: proc(requested: int) -> int {
+	if requested != 0 {
+		return requested
+	}
+	return clamp(
+		os.get_processor_core_count(),
+		AUTO_HANDLER_CONCURRENCY_MIN,
+		AUTO_HANDLER_CONCURRENCY_MAX,
+	)
+}
 
 // WP43 — PER-SERVER STATE. The config no longer lives in a package global.
 //
@@ -70,6 +89,7 @@ Exchange :: struct {
 	req:     ^http.Request,
 	res:     ^http.Response,
 	runtime: ^Server_Runtime,
+	inbound: Inbound,
 }
 
 // serve runs the backend event loop and blocks until the server is stopped.
@@ -87,7 +107,8 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	sync.unlock(&g_server.mutex)
 
 	opts := http.Default_Server_Opts
-	opts.thread_count = 1
+	handler_concurrency := resolve_handler_concurrency(cfg.max_handlers)
+	opts.thread_count = handler_concurrency
 	opts.redirect_head_to_get = false
 	// WP36: the caller's resolved text budgets replace the backend's own
 	// defaults. `Default_Server_Opts` is a mutable package VARIABLE in the
@@ -218,7 +239,7 @@ on_body :: proc(user_data: rawptr, body: http.Body, err: http.Body_Error) {
 
 	rline := req.line.(http.Requestline)
 
-	inbound := Inbound {
+	exchange.inbound = Inbound {
 		// WP9 D7 — the ORIGINAL token. A valid but non-Phase-1 method
 		// (PROPFIND) reaches the core, which maps it to its own `.UNKNOWN` and
 		// applies the ratified 404/405 policy. The backend no longer answers
@@ -233,8 +254,24 @@ on_body :: proc(user_data: rawptr, body: http.Body, err: http.Body_Error) {
 		peer       = net.address_to_string(req.client.address, context.temp_allocator),
 		over_limit = err == .Too_Long,
 	}
-	if !inbound.over_limit {
-		inbound.body = transmute([]u8)string(body)
+	if !exchange.inbound.over_limit {
+		exchange.inbound.body = transmute([]u8)string(body)
+	}
+	dispatch_exchange(exchange)
+}
+
+@(private)
+dispatch_exchange :: proc(exchange: ^Exchange) {
+	res := exchange.res
+
+	// A cancellation must finish before application code blocks this event loop.
+	// If another ready connection reaches this point while the lane is entering
+	// a Handler, retain its exchange and retry on a later tick.
+	if !http.handler_lane_enter(res) {
+		nbio.next_tick_poly(exchange, proc(_: ^nbio.Operation, exchange: ^Exchange) {
+			dispatch_exchange(exchange)
+		})
+		return
 	}
 
 	// The core builds its context, dispatches, copies the response into the
@@ -242,7 +279,8 @@ on_body :: proc(user_data: rawptr, body: http.Body, err: http.Body_Error) {
 	// returning (WP8 D2/D4).
 	out: Outbound
 	cfg := exchange.runtime.config
-	cfg.dispatch(cfg.user, inbound, &out, context.temp_allocator)
+	cfg.dispatch(cfg.user, exchange.inbound, &out, context.temp_allocator)
+	http.handler_lane_leave(res)
 
 	write_response(res, out)
 	http.respond(res)

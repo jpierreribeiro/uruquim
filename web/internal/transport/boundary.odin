@@ -96,6 +96,9 @@ Config :: struct {
 	// neutral boundary carries a plain integer and the adapter converts on the
 	// side of the line where a clock is already linked. Zero disables it.
 	max_drain_time:   i64,
+	// WP71 — maximum concurrent synchronous Handler execution. Zero asks the
+	// adapter for its documented bounded automatic policy; one is compatibility.
+	max_handlers:     int,
 	dispatch:         Dispatch_Proc,
 	user:             rawptr,
 	on_ready:         proc(user: rawptr),
