@@ -1,8 +1,8 @@
 # Phase 6 thread-safety boundary (WP70)
 
-**Status:** implementation evidence, 2026-07-22. **Public concurrency remains
-disabled until WP71 exposes a transport-neutral capacity and WP72 passes the
-combined fault gate.** Ledger effect: none.
+**Status:** ACCEPTED FOUNDATION, 2026-07-22. WP71 exposed a transport-neutral
+capacity and WP72 passed the combined fault gate; ADR-030 Amendment 1 now
+permits concurrent synchronous Handlers. Ledger effect: none.
 
 ## The ownership model
 

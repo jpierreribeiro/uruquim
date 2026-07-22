@@ -76,6 +76,7 @@ bash -n "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp71_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp72_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_vendor_policy.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp38_controls.sh"
 bash -n "$URUQUIM_ROOT/build/install-hooks.sh"
@@ -1174,6 +1175,10 @@ bash "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 
 echo "--- WP71 bounded synchronous Handler concurrency ---"
 bash "$URUQUIM_ROOT/build/check_wp71_controls.sh"
+
+echo "--- WP72 combined concurrency, shutdown and Phase-5 feature verdict ---"
+env URUQUIM_WP72_PREREQS_ALREADY_GREEN=1 URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_wp72_controls.sh"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"

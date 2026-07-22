@@ -1541,6 +1541,40 @@ none; the requirement it keeps is the one nobody disputes.
   without saying so adds to the amendment list — which is why this ADR asks each
   of them to say so.
 
+### ADR-030 — Amendment 1: accept bounded multi-lane synchronous serving
+
+- **Status. ACCEPTED, 2026-07-22, WP72.** Normative evidence:
+  `planning/phase-6-concurrency.md`, `build/check_wp72_controls.sh`.
+
+- **Why this is not a reversal by taste.** Phase 4 asked whether threads made a
+  noisy synthetic throughput workload faster and correctly answered
+  “inconclusive means one lane”. Phase 6 asked a different binary liveness
+  question: can health finish while a synchronous dependency blocks? One lane
+  failed the control; four lanes retained progress with one through three
+  blockers; four blockers exposed and recovered from the declared boundary.
+
+- **The original safety objections are discharged.** WP70 made request IDs,
+  publication, stop ownership, Date state and refusal totals safe. WP71 added a
+  transport-neutral capacity and repaired accept-cancellation and global
+  admission races. WP72 then combined the historical fault/drain corpus with
+  Phase-5 features and 3,000 idle keep-alives.
+
+- **Decision.** Handlers remain synchronous and may execute concurrently.
+  `max_handlers = 0` is automatic 4..32, `1` is explicit compatibility and
+  2..256 is exact. Application-owned mutable state, observer sinks and logger
+  sinks must synchronize themselves.
+
+- **Bound.** Full Handler saturation can delay all new Handler progress.
+  Arbitrary stuck code is not preempted and the supervisor remains the outer
+  shutdown bound. The framework claims bounded capacity, not magic.
+
+- **Transport consequence.** The official future adapter inherits the semantic
+  and fault corpus, not odin-http's thread or io_uring mechanism.
+
+- **Reversibility. MEDIUM/LOW.** Explicit one-unit mode restores the former
+  runtime behavior, but the public field and concurrent default are now a
+  documented application contract.
+
 ---
 
 ## ADR-033 — Amendment 1: `core:net/http` has a date, and it removes arm C
