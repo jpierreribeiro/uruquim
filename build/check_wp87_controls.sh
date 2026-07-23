@@ -67,33 +67,21 @@ run_green "$URUQUIM_ROOT/tests/wp87-buffered-oracle" oracle-green
 # check_wp88_controls.sh, next to the generation-check mutation control.
 run_green "$URUQUIM_ROOT/tests/wp87-stream-lifecycle" stream-green
 
-# The inbound-body corpus: same discipline.
-run_expected_red \
-  "$URUQUIM_ROOT/tests/wp87-body-lifecycle" body-red \
-  "All tests failed." \
-  "Unimplemented" \
-  "wp87_admission_refuses_before_reading_any_byte" \
-  "wp87_spool_file_is_generated_private_and_inside_the_designated_dir" \
-  "wp87_large_body_bytes_never_coexist_in_memory" \
-  "wp87_per_upload_quota_breach_is_typed_and_cleans" \
-  "wp87_disconnect_cancel_is_exactly_once" \
-  "wp87_ready_hands_exactly_one_owned_body" \
-  "wp87_persist_is_the_only_path_that_leaves_a_file"
+# The inbound-body corpus — STAGE ADVANCED BY WP94 (2026-07-23): the spool
+# substrate is implemented, so the body corpus is now required GREEN,
+# unedited — the RED-under-control promise kept. Its case completeness moves
+# to check_wp94_controls.sh, alongside the multipart fragmentation proof.
+run_green "$URUQUIM_ROOT/tests/wp87-body-lifecycle" body-green
 
-# STAGED: WP90b wired the STREAM package into the transport adapter — that
-# was the guard's stated lifetime. What remains guarded: the INGEST sentinel
-# stays unlinked until WP94, and `package web` itself (the public core) still
-# imports neither — only the transport boundary may.
-if grep -rn 'internal/ingest' "$URUQUIM_ROOT/web" \
-  --include='*.odin' -l | grep -v 'web/internal/ingest' >/dev/null; then
-  fail "web imports the WP87 ingest sentinel before WP94 implements it (G7-8)"
-fi
+# `package web` itself (the public core) still imports NEITHER private
+# lifecycle package — only the transport boundary may (ADR-009). The stream
+# package is wired there (WP90b); ingest is wired there by WP94's adapter step.
 if grep -n 'internal/stream\|internal/ingest' "$URUQUIM_ROOT/web"/*.odin >/dev/null 2>&1; then
   fail "package web imports a private lifecycle package directly; only the transport boundary may (ADR-009)"
 fi
 
 echo "wp87: buffered oracle green — G7-10 byte pins exist before streaming code"
 echo "wp87: stream corpus GREEN unedited (WP88/WP89 implemented the sentinel)"
-echo "wp87: body corpus RED, complete, for the sentinel's reason (7 cases)"
-echo "wp87: ingest sentinel unlinked until WP94; package web imports no private lifecycle package"
+echo "wp87: body corpus GREEN unedited (WP94 implemented the spool substrate)"
+echo "wp87: package web imports no private lifecycle package directly"
 echo "PASS: WP87 lifecycle corpus controls"
