@@ -243,6 +243,18 @@ _refused_connections :: proc() -> int {
 request_stop :: proc() {
 	sync.lock(&g_server.mutex)
 	defer sync.unlock(&g_server.mutex)
+	// WP95 — signal the detached-stream registry BEFORE the backend drain, so
+	// admission stops and every live stream's owner lane is woken to flush
+	// its bounded queue and write the terminator. The backend's own
+	// `max_drain_time` then force-closes anything still open, and the
+	// per-connection teardown hook (WP92) releases those slots — so the
+	// stream lifecycle rides the ONE process drain deadline (spec §2), never
+	// a second clock. Admission of new large-body spools stops the same way:
+	// a drained registry refuses `open`, and a Handler that would start a
+	// spool sees the server closing.
+	if g_server.streams != nil {
+		stream.drain_begin(g_server.streams)
+	}
 	server := g_server.server
 	if server != nil {
 		http.server_shutdown(server)
