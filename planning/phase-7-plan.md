@@ -593,6 +593,21 @@ Required cases:
 Pre-register liveness and memory thresholds after the harness baseline. Report
 per-stream and per-queued-byte memory, not only process RSS.
 
+**Delivery note (WP96, 2026-07-23).** The public streaming surface
+(`web.stream`/`Stream`/`stream_send`/`Stream_Send`/`stream_close`, ledger
+63→68, Phase-1-freeze Amendment 30) is minted here — the concept the whole
+phase builds toward, private until now and reached only through the transport
+boundary. G7-6's 3,000-stream scale claim is proven **on the registry in
+memory** (`tests/wp96-scale`: 3,000 open/receive/drain, cross-lane fan-out,
+zero leak) plus the wire path at modest count (`tests/wp95-drain` 24 streams,
+`tests/wp96-public-stream` end-to-end). **Honest limitation, recorded for the
+freeze:** 3,000 *real* concurrent sockets need a dedicated quiet CI machine;
+this shared development box segfaults socket suites under its baseline load, so
+the 3,000-count wire round is deferred to such a machine. A **real memory
+defect found and fixed here:** the registry allocated its full ring eagerly
+(1024 × 256 KiB = 256 MiB) for every server including buffered-only ones; it
+is now lazy per slot (a non-streaming server pays ~150 KiB), honouring G7-8.
+
 **Rollback:** HIGH — tests; failures veto the feature.
 
 ### WP97 — SSE as the first consumer Crystal

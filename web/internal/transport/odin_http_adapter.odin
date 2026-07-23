@@ -620,3 +620,60 @@ stream_registry_current :: proc() -> ^stream.Registry {
 	defer sync.unlock(&g_server.mutex)
 	return g_server.streams
 }
+
+// --- WP96: the public streaming boundary (plain integers, no stream type) ---
+//
+// `package web` may not name `internal/stream` (its own ADR-009 boundary), so
+// the public API reaches streaming through these three procs that speak only
+// in `(slot, generation)` value pairs and a boundary-owned result enum. The
+// core wraps them as `web.stream`/`web.stream_send`/`web.stream_close`.
+
+// Push_Result is the boundary's closed send outcome. `web` maps its own
+// `Stream_Send` from this; neither exposes a stream or backend type.
+Push_Result :: enum {
+	Sent,
+	Full,
+	Closed,
+}
+
+// stream_begin opens a detached stream bound to the dispatching request's
+// connection and returns its stale-safe identity as plain integers. Called on
+// the connection-owning lane, during dispatch.
+stream_begin :: proc(exchange: rawptr) -> (slot: i32, generation: u64, ok: bool) {
+	tok, opened := stream_open(exchange)
+	return tok.slot, tok.generation, opened
+}
+
+// stream_push enqueues bounded output from any thread. The registry is reached
+// through the one-server-per-process global under its mutex, so a concurrent
+// shutdown cannot free it mid-send (serve clears the pointer under the same
+// mutex before destroying the registry).
+stream_push :: proc(slot: i32, generation: u64, data: []u8) -> Push_Result {
+	sync.lock(&g_server.mutex)
+	defer sync.unlock(&g_server.mutex)
+	reg := g_server.streams
+	if reg == nil {
+		return .Closed
+	}
+	switch stream.try_send(reg, stream.Token{slot = slot, generation = generation}, data) {
+	case .Sent:
+		return .Sent
+	case .Full:
+		return .Full
+	case .Closed, .Stale, .Unimplemented:
+		return .Closed
+	}
+	return .Closed
+}
+
+// stream_end closes a detached stream. Idempotent; a stale identity is a
+// safe no-op.
+stream_end :: proc(slot: i32, generation: u64) {
+	sync.lock(&g_server.mutex)
+	defer sync.unlock(&g_server.mutex)
+	reg := g_server.streams
+	if reg == nil {
+		return
+	}
+	_ = stream.close(reg, stream.Token{slot = slot, generation = generation})
+}

@@ -90,6 +90,23 @@ serve_dispatch :: proc(
 	ctx: Context
 	driver_run(a, &ctx, inbound)
 
+	// WP96: a Handler that opened a detached stream committed to a different
+	// wire discipline. Hand the adapter the status/headers with `detached`
+	// set; it commits them chunked and the owner-lane pump takes the wire.
+	// The body view is deliberately empty — a stream has no buffered body.
+	if ctx.private.stream_detached {
+		out.detached = true
+		transport.copy_response(
+			out,
+			int(ctx.private.response.status),
+			response_headers_neutral_transport(ctx.private.response.headers, allocator),
+			nil,
+			allocator,
+		)
+		driver_cleanup(&ctx)
+		return
+	}
+
 	// Copy the committed response into transport-owned storage BEFORE tearing
 	// down the request, so the adapter never holds a view into freed memory.
 	transport.copy_response(
@@ -125,6 +142,11 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 	// what makes "observed identically on both transports" structural rather
 	// than a claim (R-10).
 	ctx.private.observer = a.private.observer
+
+	// WP96: the transport's per-request handle travels the same way, so
+	// `web.stream` can detach a response bound to this connection. Nil on the
+	// in-memory transport, which has no connection to detach.
+	ctx.private.stream_exchange = inbound.exchange
 
 	// WP37: the typed state travels the same way, and for the same reason —
 	// one copy on the shared pipeline, so both transports behave identically

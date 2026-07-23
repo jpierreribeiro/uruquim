@@ -73,7 +73,8 @@ env ODIN_ROOT="$URUQUIM_ODIN_ROOT" "$URUQUIM_ODIN" test \
 if grep -nE '"uruquim:(web|vendor)' "$URUQUIM_ROOT/web/internal/ingest"/*.odin; then
   fail "the ingest package imports web or the backend; it must stay executor-agnostic"
 fi
-if grep -rn '"uruquim:web/internal/ingest"' "$URUQUIM_ROOT/web" --include='*.odin' -l |
+if grep -rnE '^[[:space:]]*import[[:space:]].*"uruquim:web/internal/ingest"' \
+  "$URUQUIM_ROOT/web" --include='*.odin' -l |
   grep -v 'web/internal/transport/' >/dev/null; then
   fail "the ingest package is imported outside the transport boundary (ADR-009)"
 fi

@@ -76,7 +76,9 @@ run_green "$URUQUIM_ROOT/tests/wp87-body-lifecycle" body-green
 # `package web` itself (the public core) still imports NEITHER private
 # lifecycle package — only the transport boundary may (ADR-009). The stream
 # package is wired there (WP90b); ingest is wired there by WP94's adapter step.
-if grep -n 'internal/stream\|internal/ingest' "$URUQUIM_ROOT/web"/*.odin >/dev/null 2>&1; then
+# Match IMPORT lines, not prose: a doc comment may name the package it wraps.
+if grep -nE '^[[:space:]]*import[[:space:]].*"uruquim:web/internal/(stream|ingest)"' \
+  "$URUQUIM_ROOT/web"/*.odin >/dev/null 2>&1; then
   fail "package web imports a private lifecycle package directly; only the transport boundary may (ADR-009)"
 fi
 

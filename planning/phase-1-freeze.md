@@ -2087,3 +2087,42 @@ nothing of web or the backend, and the transport still never imports
 
 **Rollback.** Internal wiring: removable with the WP90b adapter code and the
 vendored bridge patch 22, leaving WP88/WP89 as unlinked machinery.
+
+## Amendment 30 — WP96: the public streaming surface
+
+**Date: 2026-07-23. Authority: the Phase-7 spec §5 concept inventory, ADR-044,
+and the ADR-029 delegation. Freezes at WP101.** **Ledger effect: application
+63 → 68.** 68 application + 2 test-support = 70. The five symbols are the
+fewest that express open, bounded send and close (spec §5's budget was ≤8):
+
+```
+application	type	Stream :: struct {private: Stream_Handle}
+application	type	Stream_Send :: enum {Sent, Full, Closed}
+application	proc	stream :: proc(ctx: ^Context) -> (s: Stream, ok: bool)
+application	proc	stream_send :: proc(s: Stream, data: []u8) -> Stream_Send
+application	proc	stream_close :: proc(s: Stream)
+```
+
+**WHAT THEY DO.** `stream` detaches a long-lived response from the Handler's
+Context (the mechanism is WP86's candidate C, private in
+`web/internal/stream`, reached only through the transport boundary — the core
+still names no backend or stream type). `Stream` is a stale-safe value token:
+a copy held past the stream's life targets nothing and its send/close refuse.
+`stream_send` enqueues bounded output from any thread, copy-on-enqueue, never
+blocking (`.Full` is a refusal, not a wait). `stream_close` is idempotent.
+
+**PAY ONLY WHEN USED (G7-8).** A Handler that never calls `stream` links none
+of the pump or registry; the buffered path is byte-identical (G7-10). SSE is a
+Crystal over this surface (WP97), not a core concept.
+
+| Symbol | Ledger | WP | Signature evidence | Behaviour evidence | Doc | Notes |
+|---|---|---|---|---|---|---|
+| `Stream` | A | WP96 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp96-public-stream/public_stream_test.odin::wp96_a_handler_streams_from_a_worker_and_close_terminates` | `docs/ai-context.md::Response streaming` | an opaque stale-safe value token; a copy held past the stream's life targets nothing |
+| `Stream_Send` | A | WP96 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp96-public-stream/public_stream_test.odin::wp96_a_handler_streams_from_a_worker_and_close_terminates` | `docs/ai-context.md::Response streaming` | closed enum {Sent, Full, Closed}; a stale token collapses to Closed |
+| `stream` | A | WP96 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp96-public-stream/public_stream_test.odin::wp96_the_in_memory_transport_reports_no_connection` | `docs/ai-context.md::Response streaming` | detaches a response bound to the connection; ok=false where there is no connection |
+| `stream_send` | A | WP96 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp96-public-stream/public_stream_test.odin::wp96_a_handler_streams_from_a_worker_and_close_terminates` | `docs/ai-context.md::Response streaming` | copy-on-enqueue from any thread; never blocks, Full is a refusal |
+| `stream_close` | A | WP96 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp96-public-stream/public_stream_test.odin::wp96_a_handler_streams_from_a_worker_and_close_terminates` | `docs/ai-context.md::Response streaming` | idempotent; writes the terminating chunk and retires the connection |
+
+**Rollback.** These are frozen ledger once shipped; the mechanism they cover
+is removable with the WP90 adapter code, but the names are a public contract
+from the Phase-7 freeze onward.
