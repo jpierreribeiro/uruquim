@@ -157,7 +157,8 @@ trust_proxies(&app, prefixes)   which peers may speak for their clients
 
 **`web.client_ip(ctx)` returns the CONNECTED PEER** — never a header — unless
 that peer matches a prefix registered with `web.trust_proxies`, in which case
-the leftmost `X-Forwarded-For` entry is returned instead.
+`X-Forwarded-For` is walked from the right, trusted hops are discarded, and the
+first untrusted address is returned (the peer if every hop is trusted).
 
 **Never read `X-Forwarded-For` yourself.** It is a request header, so any client
 can send one, and rate limits, audit logs and allow-lists built on a forged

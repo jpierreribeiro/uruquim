@@ -1100,6 +1100,23 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp48-public-surface" \
   "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp48-public-surface"
 
+# WP48 / ADR-037 — the RIGHT-TO-LEFT walk, internal because it needs a peer and
+# `test_request` has none. A throwaway package (web sources + the internal
+# test), driven through `driver_run` with an explicit `Inbound.peer`, proves a
+# spoofed leftmost entry is ignored behind a trusted proxy.
+echo "--- WP48 client_ip walks X-Forwarded-For from the right (throwaway package) ---"
+URUQUIM_WP48_TMP="$(mktemp -d -t uruquim-wp48-internal-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_WP48_TMP"' EXIT
+cp "$URUQUIM_ROOT"/web/*.odin "$URUQUIM_WP48_TMP/"
+cp "$URUQUIM_ROOT"/tests/wp48-internal/*.odin "$URUQUIM_WP48_TMP/"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_WP48_TMP" \
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp48-internal"
+rm -rf "$URUQUIM_WP48_TMP"
+trap - EXIT
+test ! -d "$URUQUIM_WP48_TMP" || fail "the throwaway WP48 internal-test package was not removed"
+echo "PASS: WP48 right-walk ran against the real sources; throwaway package removed"
+
 # WP49 — secure headers, and the D-14.3 decision that made them testable from a
 # public suite at all: `Recorded_Response.headers`.
 echo "--- WP49 secure headers: opt-in, on every response (odin test) ---"

@@ -1849,9 +1849,11 @@ none; the requirement it keeps is the one nobody disputes.
 
 ## ADR-037 — client IP resolution walks X-Forwarded-For from the right
 
-- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit
-  (finding F4). Ratify before the Phase-6.5 corrective. Changes public
-  behaviour of `client_ip`, so it is a deliberate compatibility break.
+- **Status.** ACCEPTED, 2026-07-23 (Phase-6.5 corrective, WP-6.5.1). From the
+  production-readiness audit (finding F4). Changes public behaviour of
+  `client_ip`, so it is a deliberate compatibility break; ratified before the
+  code moved. `client_ip` now walks `X-Forwarded-For` right-to-left and `wp48`
+  proves a spoofed leftmost entry is ignored behind a trusted proxy.
 
 - **Context.** `client_ip` (`web/client_address.odin:150`) returns the
   **leftmost** `X-Forwarded-For` entry when the connected peer is a trusted

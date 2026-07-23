@@ -116,16 +116,25 @@ trust_poison :: proc(a: ^App, loc := #caller_location) {
 // client_ip returns the address this request should be attributed to.
 //
 // **The connected peer**, unless that peer matches a prefix registered with
-// `trust_proxies` — in which case the leftmost address of `X-Forwarded-For` is
-// returned instead, and `""` if that header is absent or empty.
+// `trust_proxies` — in which case `X-Forwarded-For` is walked FROM THE RIGHT,
+// trusted hops are discarded, and the first untrusted address is returned. If
+// every entry is trusted (or the header is absent or empty) the peer is
+// returned, and `""` is never manufactured.
 //
-// LEFTMOST, and this is the part that is easy to get wrong in the unsafe
-// direction. `X-Forwarded-For` grows left to right, so the leftmost entry is the
-// original client — and it is also the entry a client can forge freely, since a
-// client controls what it sends before any proxy appends to it. That is precisely
-// why it is only read at all when the PEER is trusted: the trust decision is
-// made on administered network identity, and the header is believed only
-// downstream of it.
+// RIGHT-TO-LEFT, and this is the correction ADR-037 records. `X-Forwarded-For`
+// grows left to right: each proxy APPENDS the address it saw. The rightmost
+// entries are therefore the ones written by infrastructure closest to the
+// server, and the leftmost entry is exactly the value a client forges before
+// any proxy touches it. Reading leftmost hands an attacker a free choice of
+// identity the moment a single proxy is trusted. So resolution walks from the
+// right — the same direction the header was written — skipping every hop whose
+// address matches a `trust_proxies` prefix (a trusted proxy speaking for the
+// hop before it), and stops at the first address that is NOT a trusted proxy.
+// That address is the nearest one the trusted chain did not vouch away, which
+// is the honest client for a correctly-configured topology.
+//
+// The trust decision is made on administered network identity (the peer, and
+// each hop's rendered address), never on the one field the client owns.
 //
 // **Returns a VIEW.** Over the peer string or over the request header, both
 // request-scoped: copy it to keep it (G-05).
@@ -145,20 +154,62 @@ client_ip :: proc(ctx: ^Context) -> string {
 		return peer
 	}
 
-	// The leftmost entry, trimmed. A single-hop chain has no comma at all.
-	comma := strings.index_byte(forwarded, ',')
-	first := forwarded if comma < 0 else forwarded[:comma]
-	return strings.trim_space(first)
+	// Walk the chain from the RIGHT. Each iteration peels the last
+	// comma-separated entry, trims it, and asks whether it is a trusted proxy.
+	// A trusted entry is a hop the chain vouches for, so we skip it and keep
+	// walking left. The first UNTRUSTED entry is the answer: it is the nearest
+	// address no trusted proxy claimed to be speaking for. If we exhaust the
+	// chain — every entry trusted — the peer is the honest fallback.
+	rest := forwarded
+	for len(rest) > 0 {
+		comma := strings.last_index_byte(rest, ',')
+		entry: string
+		if comma < 0 {
+			entry = rest
+			rest = ""
+		} else {
+			entry = rest[comma + 1:]
+			rest = rest[:comma]
+		}
+		entry = strings.trim_space(entry)
+		if len(entry) == 0 {
+			// An empty entry (a stray comma, a `", ,"`) carries no address to
+			// trust or return. Skip it and keep walking rather than returning
+			// the empty string as if it were an identity.
+			continue
+		}
+		if !trusted_prefix_match(ctx, entry) {
+			return entry
+		}
+	}
+
+	// Every hop was a trusted proxy. The peer is the truthful answer.
+	return peer
 }
 
-// trusted_peer is the membership test. Textual, bounded, and allocation-free.
+// trusted_peer is the membership test for the CONNECTED PEER. Textual, bounded,
+// and allocation-free.
 @(private)
 trusted_peer :: proc(ctx: ^Context, peer: string) -> bool {
-	if ctx.private.trusted.count == 0 || len(peer) == 0 {
+	if len(peer) == 0 {
+		return false
+	}
+	return trusted_prefix_match(ctx, peer)
+}
+
+// trusted_prefix_match asks whether an address — the peer, or a hop rendered
+// into an `X-Forwarded-For` entry — matches any registered trusted-proxy
+// prefix. It is the shared membership test behind both the peer check and the
+// right-to-left chain walk (ADR-037): the SAME textual-prefix rule decides
+// trust everywhere, so a proxy trusted as the peer is also trusted as a hop.
+// Textual, bounded, and allocation-free.
+@(private)
+trusted_prefix_match :: proc(ctx: ^Context, address: string) -> bool {
+	if ctx.private.trusted.count == 0 || len(address) == 0 {
 		return false
 	}
 	for i in 0 ..< ctx.private.trusted.count {
-		if strings.has_prefix(peer, ctx.private.trusted.prefix[i]) {
+		if strings.has_prefix(address, ctx.private.trusted.prefix[i]) {
 			return true
 		}
 	}
