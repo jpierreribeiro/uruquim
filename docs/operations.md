@@ -274,6 +274,63 @@ you set cookies, you set the headers, and you own their attributes.
 
 ---
 
+## 8b. Response streaming and SSE (Phase 7)
+
+Streaming is **opt-in** and adds no concept to ordinary buffered endpoints. A
+Handler that never calls `web.stream` links none of the machinery.
+
+**Lifetime and ownership.** `web.stream(ctx, content_type)` detaches a
+long-lived response from the request; the Handler then RETURNS. Everything the
+detached stream touches must OUTLIVE the Handler — so **stream-lifetime state
+lives in `App_State` or an application-owned allocation, never in the request
+arena**, which is destroyed the moment the Handler returns (that destruction is
+the whole point of detachment). The `web.Stream` token is a stale-safe value: a
+copy held past the stream's life targets nothing and its send/close refuse.
+
+```text
+Handler: s, ok := web.stream(ctx, "text/event-stream"); store s in App_State; RETURN
+worker : web.stream_send(s, bytes)   // from any thread; copies; never blocks
+worker : web.stream_close(s)         // graceful: flushes queued output, then ends
+```
+
+**Queue sizing and the slow-client policy.** Each stream has a bounded queue
+(64 events / 256 KiB by default) and the process a 16 MiB total. `stream_send`
+returns `Full` when the queue is full — it never blocks; the application chooses
+to retry, drop or coalesce. A client that never reads is disconnected at
+`max_write_time` (a detached stream defaults it to 30 s even when the global
+setting is off, because an infinite response must not be unbounded). Refusals
+and slow-aborts are counted, not logged per event.
+
+**Graceful close.** `web.stream_close` delivers the events already queued before
+it, then the terminating chunk — so an application may send a final message and
+close immediately without losing it.
+
+**Behind a proxy.** The framework produces chunked output a non-buffering proxy
+forwards frame by frame. A BUFFERING proxy is the failure mode to configure
+away, not a framework behaviour: on nginx set `proxy_buffering off;` (or send
+`X-Accel-Buffering: no`) for the SSE location, disable response buffering, and
+raise `proxy_read_timeout` past your heartbeat interval. `Last-Event-ID` crosses
+an ordinary proxy unchanged. Send a heartbeat comment (`: ping`) periodically so
+idle-timeout proxies keep the connection open.
+
+**SSE and reconnection.** SSE is a Crystal (`crystals:web/sse`) over this
+surface, not a core concept. A reconnecting client replays its cursor in
+`Last-Event-ID`; the application decides what to resend from it — the core
+carries the header, it does not replay events.
+
+**Large uploads.** The buffered path (`web.body`, `form_file`, up to
+`max_body`) is unchanged and canonical. A bounded spool substrate for bodies
+larger than memory exists internally (fragmentation-correct multipart, generated
+`uruquim-spool-` files at `0600`, per-upload/process quotas, exactly-once
+cleanup) but has **no public upload API yet** — see §10. When it ships, temp
+files are deleted on every non-persisted path; the operator's only concern is
+crash remnants, which carry the `uruquim-spool-` prefix.
+
+**After first-byte commit**, framework 4xx/5xx responders cannot append a second
+envelope, and the adapter that carries this must be replaceable: every streaming
+hook in the vendored backend is a numbered `BRIDGE` patch, deletable when
+`core:net/http` lands.
+
 ## 9. A deployment checklist
 
 1. Reverse proxy in front, terminating TLS, with its own timeouts and body caps.
@@ -301,6 +358,18 @@ you set cookies, you set the headers, and you own their attributes.
   application or foreign code. Other Handler lanes retain progress until the
   configured capacity is saturated.
 * **A faulting handler aborts the process.** By construction, not by defect.
+* **No WebSocket or arbitrary full-duplex.** Response streaming and SSE cover
+  server push; a bidirectional product that cannot fit SSE is out of core by
+  decision (evidence-gated, not yet built).
+* **Large-body upload has a substrate but no public API yet.** The spool +
+  streaming multipart parser are implemented and tested internally (Phase-7
+  WP93/WP94), but the public upload contract that wires them into the request
+  path is deferred — large uploads remain buffered under `max_body` until it
+  ships. The response-streaming direction is fully public (`web.stream`).
+* **The 3,000-concurrent-stream drain is proven on the registry in memory**,
+  and on the wire at modest count; a 3,000 *real-socket* round awaits a
+  dedicated quiet CI machine and is recorded as the one scale claim not yet
+  demonstrated end to end on hardware.
 * **The write deadline and idle timeout default OFF.** `max_write_time` and
   `max_idle_time` exist (WP90 / ADR-039) but ship disabled: a default generous
   enough for every legitimate slow link is a judgement the application must
@@ -329,11 +398,11 @@ you set cookies, you set the headers, and you own their attributes.
   credentials are all refused by `web.cors`, and the application will not
   start.
 * **The HTTP server underneath is a vendored snapshot of `laytan/odin-http`,
-  which describes itself as beta.** Eleven local patches are carried, five of
+  which describes itself as beta.** A set of local patches is carried (see planning/vendor-policy.md), several of
   them fixing upstream defects — including one that broke keep-alive for every
   GET, and one use-after-free on the shutdown path.
   `planning/vendor-policy.md` governs them. **This is scheduled to end:** Odin's
   standard library gains an official `core:net/http` in January 2027, and
   ADR-033 now points at swapping to it rather than owning a connection layer.
-  The three drain patches are marked `BRIDGE` and are expected to be deleted
-  rather than ported.
+  The streaming and drain patches are marked `BRIDGE` and are expected to be
+  deleted rather than ported.

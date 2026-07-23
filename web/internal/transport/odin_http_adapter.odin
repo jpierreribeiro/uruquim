@@ -488,7 +488,10 @@ stream_pump_run :: proc(link: ^Stream_Link) {
 		return
 	}
 	reg := &link.runtime.streams
-	if data, has := stream.next_event(reg, link.tok); has {
+	// SLOT-based drain: after a graceful close bumps the generation, the
+	// token path would refuse, but the owner must still flush the events that
+	// were queued before close — so the pump reads by slot.
+	if data, has := stream.owner_next_event(reg, link.tok.slot); has {
 		n := len(strconv.write_int(link.prefix[:16], i64(len(data)), 16))
 		link.prefix[n] = '\r'
 		link.prefix[n + 1] = '\n'
@@ -501,9 +504,12 @@ stream_pump_run :: proc(link: ^Stream_Link) {
 		)
 		return
 	}
-	// Queue empty: terminate when the stream is closed (stale to us) or the
-	// process is draining; otherwise wait for the next wake.
-	if stream.queued_events(reg, link.tok) == -1 || stream.draining(reg) {
+	// Queue empty. Terminate only when the stream has been closed (its final
+	// events now flushed) or the process is draining; otherwise wait for the
+	// next wake. This is what makes close GRACEFUL — the terminator follows
+	// the last queued event rather than discarding it.
+	_, close_requested, live := stream.owner_state(reg, link.tok.slot)
+	if !live || close_requested || stream.draining(reg) {
 		link.terminated = true
 		conn.send_started = time.now()
 		conn.pending_send = nbio.send_poly(conn.socket, {STREAM_TERMINATOR}, link, on_stream_terminator_sent)
@@ -532,7 +538,8 @@ on_stream_chunk_sent :: proc(op: ^nbio.Operation, link: ^Stream_Link) {
 		return
 	}
 	// The write is on the wire: NOW the event's ring bytes may be released.
-	_ = stream.complete_event(&link.runtime.streams, link.tok)
+	// Slot-based, so it works after a graceful close bumped the generation.
+	_ = stream.owner_complete_event(&link.runtime.streams, link.tok.slot)
 	stream_pump_run(link)
 }
 
