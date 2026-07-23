@@ -67,6 +67,14 @@ App_Internal :: struct {
 	miss_len:   int,
 	miss_built: bool,
 
+	// WP91 (F5/F6) — the static chain: global middleware ending in the static
+	// terminal, built lazily like the miss chain. A static response now runs
+	// the SAME middleware every route runs, so `secure_headers` and auth
+	// cover files exactly as they cover handlers.
+	static_start: int,
+	static_len:   int,
+	static_built: bool,
+
 	// WP17 fail-closed state (ADR-019). `poisoned` is the private predicate a
 	// test observes (`use()` returns void and cannot signal by return);
 	// `dispatched` records that a first dispatch happened, which is what closes

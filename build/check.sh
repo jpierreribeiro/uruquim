@@ -1115,9 +1115,14 @@ bash "$URUQUIM_ROOT/build/check_vendor_policy.sh"
 # disconnected. When a read deadline ships those assertions must be amended in
 # the same change, and a suite nobody runs is a suite nobody amends.
 echo "--- WP41 fault laboratory: seeded faults over real sockets (odin test) ---"
-env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+# WP91 hardening: this was the ONE socket suite running without the external
+# timeout the 11f rule requires of every socket suite — and a failing run was
+# observed to hang the whole gate (2026-07-23, a replay-determinism failure
+# left a server thread alive). The timeout turns a hang into a failure.
+timeout 300 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp41-fault" \
-  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp41-fault"
+  "-collection:uruquim=$URUQUIM_ROOT" -out:"$URUQUIM_BIN_TMP/wp41-fault" ||
+  fail "the WP41 fault laboratory did not pass within the timeout"
 
 # WP48 — trusted proxies. The suite runs over `test_request`, which has no peer,
 # and that is the sharpest test of the default: with nothing trusted, a forged
@@ -1239,6 +1244,27 @@ timeout 180 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
 # a body, incremental frames from the owner-lane pump, terminator on close,
 # disconnect teardown with observable slot release. Serial: fixed ports and
 # the one-server-per-process transport global.
+# WP91 — F5/F6 dead: static responses run the ordinary middleware chain
+# (secure_headers and auth cover files), with the refusal/routing boundaries
+# pinned unchanged. Serial: the suite shares one fixture directory.
+echo "--- WP91 static responses through the middleware chain (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp91-commit-security" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp91-static" ||
+  fail "the WP91 static-through-middleware contract did not pass within the timeout"
+rm -rf "$URUQUIM_ROOT/tests/wp91-commit-security/fixture"
+
+# WP91 — stream commit security on the raw wire: exactly one envelope even
+# for a confused dispatch, CR/LF header values cannot split the commit, and a
+# slow consumer under forced short writes receives every byte exactly once.
+echo "--- WP91 stream commit/partial-write security (odin test) ---"
+timeout 180 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp91-stream-security" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp91-stream" ||
+  fail "the WP91 stream commit-security contract did not pass within the timeout"
+
 echo "--- WP90b detached-stream adapter on the raw wire (odin test) ---"
 timeout 180 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp90-streaming" \
