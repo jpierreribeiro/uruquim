@@ -300,6 +300,31 @@ static_serve :: proc(ctx: ^Context, mounts: ^Static_Mounts) -> bool {
 
 	full := strings.concatenate({mount.dir, "/", relative}, context.temp_allocator)
 
+	// `lstat(full)` below only leaves the FINAL path component unfollowed; every
+	// INTERMEDIATE directory component is still traversed through any symlink,
+	// so a link like `mount/shared -> /etc` would serve `mount/shared/passwd`
+	// while the final-component check saw only a regular file. Walk the
+	// intermediate components and refuse a symlink at any of them — the same
+	// per-component refusal the final check makes, extended to the whole path,
+	// with no resolved-path string comparison to get wrong.
+	{
+		walk := mount.dir
+		rel := relative
+		for {
+			slash := strings.index_byte(rel, '/')
+			if slash < 0 {
+				break
+			}
+			walk = strings.concatenate({walk, "/", rel[:slash]}, context.temp_allocator)
+			seg_info, seg_err := os.lstat(walk, context.temp_allocator)
+			if seg_err != nil || seg_info.type == .Symlink {
+				static_not_found(ctx)
+				return true
+			}
+			rel = rel[slash + 1:]
+		}
+	}
+
 	// `lstat`, NOT `stat`: it does not follow symlinks, so a link reports
 	// `.Symlink` below and is refused. See the comment on that check.
 	info, stat_err := os.lstat(full, context.temp_allocator)
