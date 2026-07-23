@@ -260,3 +260,37 @@ wp90b_disconnect_mid_stream_refuses_the_producer_and_frees_the_slot :: proc(t: ^
 	testing.expect(t, reopened, "the slot must be reusable after the disconnect teardown, with a new generation")
 	_ = stream.close(reg, lab.tok)
 }
+
+@(test)
+wp90b_a_final_event_survives_an_immediate_close :: proc(t: ^testing.T) {
+	// The graceful-close guarantee: an application may send its LAST event and
+	// close immediately; the owner-lane pump flushes the queued event BEFORE
+	// the terminating chunk, rather than discarding it. This is what makes
+	// web.stream_close usable for a bounded stream that ends with a final
+	// message (a job result, a done marker).
+	lab: Lab
+	testing.expect(t, start_lab(&lab, 51925), "transport must start")
+	defer stop_lab(&lab)
+
+	sock, ok := dial(51925)
+	testing.expect(t, ok)
+	defer net.close(sock)
+	_, _ = net.send_tcp(sock, transmute([]u8)string("GET /stream HTTP/1.1\r\nHost: localhost\r\n\r\n"))
+	testing.expect(t, sync.sema_wait_with_timeout(&lab.opened, 3 * time.Second))
+	testing.expect(t, lab.open_ok)
+
+	reg := transport.stream_registry_current()
+	// Enqueue the final event, then close in the very next statement.
+	testing.expect_value(t, stream.try_send(reg, lab.tok, transmute([]u8)string("FINAL-EVENT")), stream.Send_Result.Sent)
+	_ = stream.close(reg, lab.tok)
+
+	wire: strings.Builder
+	defer strings.builder_destroy(&wire)
+	// The final event must appear, AND before the terminator.
+	testing.expect(t, recv_until(sock, &wire, "FINAL-EVENT", 3 * time.Second), "the final queued event is flushed, not discarded")
+	testing.expect(t, recv_until(sock, &wire, "0\r\n\r\n", 3 * time.Second), "the terminator follows the final event")
+	view := strings.to_string(wire)
+	fin := strings.index(view, "FINAL-EVENT")
+	term := strings.index(view, "0\r\n\r\n")
+	testing.expect(t, fin >= 0 && term > fin, "the terminator comes AFTER the final event on the wire")
+}

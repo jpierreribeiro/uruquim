@@ -74,6 +74,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp41_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase7_spec.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase7_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp87_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp88_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp94_controls.sh"
@@ -1086,6 +1087,12 @@ bash "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 echo "--- WP85 Phase-7 spec and governance gate ---"
 bash "$URUQUIM_ROOT/build/check_phase7_spec.sh"
 
+# WP101 — the Phase-7 freeze. Pins the ledger diff (63 -> 68), the ten exit
+# gates with G7-6/G7-9's honest deferrals, the non-deliveries and the design
+# decisions a refactor would reverse.
+echo "--- WP101 Phase-7 freeze gate ---"
+bash "$URUQUIM_ROOT/build/check_phase7_freeze.sh"
+
 # WP87 — the streaming lifecycle corpus is committed RED under control: the
 # buffered oracle green, both corpora failing completely for the sentinel's
 # reason, and no sentinel package linked into the product.
@@ -1313,6 +1320,29 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
   "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
   -out:"$URUQUIM_BIN_TMP/wp96-scale" ||
   fail "the WP96 3,000-stream scale contract failed"
+
+# WP98 — streaming interop: events arrive incrementally through a transparent
+# forwarding proxy (the proxied arm) and directly (the control), Last-Event-ID
+# crosses the proxy unchanged. A buffering proxy is a config concern documented
+# in operations; this proves the framework's bytes are incrementally flushable.
+echo "--- WP98 streaming interop and proxy laboratory (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp98-interop" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp98-interop" ||
+  fail "the WP98 interop/proxy contract did not pass within the timeout"
+
+# WP99 — the large-transfer/progress vertical slice: an application composes the
+# two streaming directions over PUBLIC contracts only (web.stream + workers +
+# App_State-owned stream state). Proves progress reconnection reads current
+# state, the download streams, a graceful close delivers the FINAL event, and a
+# slow client does not stall a fast one.
+echo "--- WP99 large-transfer/progress vertical slice (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp99-slice" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp99-slice" ||
+  fail "the WP99 integration slice did not pass within the timeout"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"

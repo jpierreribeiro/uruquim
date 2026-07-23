@@ -363,19 +363,26 @@ close :: proc(r: ^Registry, tok: Token) -> bool {
 		sync.mutex_unlock(&s.mu)
 		return true
 	}
-	s.generation += 1 // stale-safety first…
+	s.generation += 1 // stale-safety first: no NEW producer can reach this slot…
 	s.close_requested = true
 	s.state = .Closing
-	released := release_queued(r, s) // …then release, exactly once
-	_ = released
 	owned := s.wake != nil
 	slot_wake := s.wake
 	slot_user := s.wake_user
 	if !owned {
-		// No owner: the corpus/unit contract — the slot is free immediately.
+		// No owner (the corpus/unit contract): nothing drains the queue, so
+		// release it here and free the slot immediately.
+		release_queued(r, s)
 		s.state = .Free
 		s.close_requested = false
 	}
+	// OWNED (the adapter): the queue is NOT discarded. The owner-lane pump
+	// drains the already-queued events through the slot-based owner path
+	// (which ignores the now-bumped generation, since the owner is trusted),
+	// writes the terminator, and calls `retire`. This is what lets an
+	// application deliver a FINAL event and then close without losing it —
+	// close is graceful for queued output while staying stale-safe against
+	// new producers.
 	sync.mutex_unlock(&s.mu)
 
 	if !owned {
@@ -540,6 +547,68 @@ complete_event :: proc(r: ^Registry, tok: Token) -> bool {
 	s.events_count -= 1
 	sync.atomic_sub(&r.total_bytes, consumed)
 	return true
+}
+
+// --- owner-lane SLOT-based drain (graceful close) ---------------------------
+//
+// After `close` bumps the generation, the token-based `next_event`/
+// `complete_event` refuse — correct for a stale PRODUCER, wrong for the OWNER,
+// which must still flush the events queued before close. These slot-based
+// twins ignore the generation because only the owning lane calls them, and
+// they exist precisely so a graceful close delivers the final queued events
+// before the terminator.
+
+owner_next_event :: proc(r: ^Registry, slot: i32) -> (data: []u8, ok: bool) {
+	if !r.initialized || slot < 0 || int(slot) >= len(r.slots) {
+		return nil, false
+	}
+	s := &r.slots[slot]
+	sync.mutex_lock(&s.mu)
+	defer sync.mutex_unlock(&s.mu)
+	if s.state == .Free || s.events_count == 0 {
+		return nil, false
+	}
+	e := s.events[s.events_head]
+	return s.store[e.offset:e.offset + e.len], true
+}
+
+owner_complete_event :: proc(r: ^Registry, slot: i32) -> bool {
+	if !r.initialized || slot < 0 || int(slot) >= len(r.slots) {
+		return false
+	}
+	s := &r.slots[slot]
+	sync.mutex_lock(&s.mu)
+	defer sync.mutex_unlock(&s.mu)
+	if s.events_count == 0 {
+		return false
+	}
+	e := s.events[s.events_head]
+	consumed := e.len
+	if e.offset == 0 && s.store_head != 0 {
+		consumed += len(s.store) - s.store_head
+	}
+	s.store_head = (e.offset + e.len) % len(s.store)
+	s.store_used -= consumed
+	if s.store_used == 0 {
+		s.store_head = 0
+	}
+	s.events_head = (s.events_head + 1) % len(s.events)
+	s.events_count -= 1
+	sync.atomic_sub(&r.total_bytes, consumed)
+	return true
+}
+
+// owner_state reports (queued events, close_requested) for the owning lane, so
+// the pump knows when a closed stream has flushed everything and may write the
+// terminator. Slot-based, generation-independent.
+owner_state :: proc(r: ^Registry, slot: i32) -> (queued: int, close_requested: bool, live: bool) {
+	if !r.initialized || slot < 0 || int(slot) >= len(r.slots) {
+		return 0, false, false
+	}
+	s := &r.slots[slot]
+	sync.mutex_lock(&s.mu)
+	defer sync.mutex_unlock(&s.mu)
+	return s.events_count, s.close_requested, s.state != .Free
 }
 
 // --- corpus-observable state ------------------------------------------------

@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+# WP101 — Phase-7 freeze gate.
+#
+# Same shape and lesson as its predecessors: a frozen total is HISTORY. This
+# pins Phase 7's ledger diff as written, checks the document's arithmetic,
+# requires the live ledger not to have shrunk, and holds the things this freeze
+# would lose first if someone tidied it:
+#
+#   * the record of what was NOT delivered — the public large-body upload API
+#     and the 3,000 real-socket round — because a freeze that drops those rows
+#     reads as a phase that delivered everything;
+#   * the five public symbols by name, so a ledger row cannot become a number
+#     nobody can check;
+#   * the graceful-close and safe-without-tuning decisions, which are the ones a
+#     later refactor would quietly reverse;
+#   * G7-8 (pay only when used) and the lazy-allocation fix behind it.
+set -euo pipefail
+
+URUQUIM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+URUQUIM_P7="$URUQUIM_ROOT/planning/phase-7-freeze.md"
+
+fail() {
+  echo "PHASE7-FREEZE-FAIL: $*" >&2
+  exit 1
+}
+
+test -f "$URUQUIM_P7" || fail "planning/phase-7-freeze.md is missing"
+
+URUQUIM_FLAT="$(tr '\n' ' ' < "$URUQUIM_P7" | tr -s ' ')"
+
+# --- 1. The ledger: history, arithmetic, and a floor ------------------------
+grep -qE '\| application \| 63 \| \+5 \| \*\*68\*\* \|' "$URUQUIM_P7" ||
+  fail "the application ledger diff row (63 -> 68) is missing or edited"
+grep -qE '\| union \| 65 \| \+5 \| \*\*70\*\* \|' "$URUQUIM_P7" ||
+  fail "the union row (65 -> 70) is missing or edited"
+
+# The live ledger must not have shrunk below what this phase froze. The
+# canonical count lives in check_public_api.sh (application = 68).
+grep -q 'exactly 68 symbols' "$URUQUIM_ROOT/build/check_public_api.sh" ||
+  fail "the live application ledger is not the 68 Phase 7 froze; a symbol was removed or the count drifted"
+
+# Every one of the five new public symbols must be named in the freeze.
+for URUQUIM_SYM in Stream Stream_Send stream stream_send stream_close; do
+  grep -q "$URUQUIM_SYM" "$URUQUIM_P7" ||
+    fail "the freeze does not name '$URUQUIM_SYM'; a ledger row without its symbol is a number nobody can check"
+done
+
+# --- 2. The gates verdict table names all ten, with G7-6/G7-9 honest --------
+for URUQUIM_G in G7-1 G7-2 G7-3 G7-4 G7-5 G7-6 G7-7 G7-8 G7-9 G7-10; do
+  grep -q "\*\*$URUQUIM_G\*\*" "$URUQUIM_P7" ||
+    fail "the exit-gate table is missing $URUQUIM_G"
+done
+case "$URUQUIM_FLAT" in
+  *"PASS (in memory) / DEFERRED (real sockets)"*) ;;
+  *) fail "G7-6 no longer records the real-socket deferral honestly" ;;
+esac
+case "$URUQUIM_FLAT" in
+  *"PASS (substrate)"*) ;;
+  *) fail "G7-9 no longer records that the large-body path is substrate-only" ;;
+esac
+
+# --- 3. The non-deliveries must remain named --------------------------------
+grep -q 'public large-body upload API is deferred' "$URUQUIM_P7" ||
+  fail "the deferred public upload API is no longer recorded — a freeze that hides it lies by tidiness"
+grep -q '3,000 real-socket round is deferred' "$URUQUIM_P7" ||
+  fail "the deferred 3,000 real-socket scale round is no longer recorded"
+case "$URUQUIM_FLAT" in
+  *"WebSocket and arbitrary full-duplex"*) ;;
+  *) fail "the WebSocket refusal is no longer recorded" ;;
+esac
+
+# --- 4. The decisions a refactor would reverse ------------------------------
+grep -q 'Graceful close' "$URUQUIM_P7" ||
+  fail "the graceful-close decision is not recorded"
+case "$URUQUIM_FLAT" in
+  *"safe without tuning for a stream"*) ;;
+  *) fail "the safe-without-tuning stream write deadline is not recorded" ;;
+esac
+grep -q 'lazily on first open' "$URUQUIM_P7" ||
+  fail "the lazy-allocation fix behind G7-8 is not recorded"
+
+# --- 5. The vendored patch count and the BRIDGE exit ------------------------
+grep -q 'Twenty-two local patches' "$URUQUIM_P7" ||
+  fail "the vendored patch count (22) is not recorded"
+test "$(grep -cE '^\| [0-9]+ \|' "$URUQUIM_ROOT/vendor/odin-http/VENDOR.md")" -eq 22 ||
+  fail "VENDOR.md does not list exactly 22 patch rows; the freeze and the ledger disagree"
+case "$URUQUIM_FLAT" in
+  *"BRIDGE"*"core:net/http"*) ;;
+  *) fail "the BRIDGE exit to core:net/http is not recorded" ;;
+esac
+
+# --- 6. The Crystals half's SSE freeze is named -----------------------------
+grep -q 'crystals:web/sse' "$URUQUIM_P7" ||
+  fail "the SSE Crystal (G7-7 ecosystem proof) is not recorded"
+
+echo "phase-7 freeze: ledger 63 -> 68 (union 70), five symbols named"
+echo "phase-7 freeze: G7-1..G7-10 recorded; G7-6/G7-9 deferrals honest"
+echo "phase-7 freeze: graceful close, safe-without-tuning, lazy alloc kept"
+echo "phase-7 freeze: 22 vendored patches, BRIDGE exit to core:net/http"
+echo "PASS: WP101 Phase-7 freeze gate"
