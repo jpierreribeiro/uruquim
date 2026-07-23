@@ -80,15 +80,20 @@ run_expected_red \
   "wp87_ready_hands_exactly_one_owned_body" \
   "wp87_persist_is_the_only_path_that_leaves_a_file"
 
-# The sentinels must stay out of the linked product: `web` may not import
-# either package until the implementing WP replaces the sentinel bodies.
-if grep -rn 'internal/stream\|internal/ingest' "$URUQUIM_ROOT/web" \
-  --include='*.odin' -l | grep -v 'web/internal/stream' | grep -v 'web/internal/ingest' >/dev/null; then
-  fail "web imports a WP87 sentinel package before its implementation exists (G7-8)"
+# STAGED: WP90b wired the STREAM package into the transport adapter — that
+# was the guard's stated lifetime. What remains guarded: the INGEST sentinel
+# stays unlinked until WP94, and `package web` itself (the public core) still
+# imports neither — only the transport boundary may.
+if grep -rn 'internal/ingest' "$URUQUIM_ROOT/web" \
+  --include='*.odin' -l | grep -v 'web/internal/ingest' >/dev/null; then
+  fail "web imports the WP87 ingest sentinel before WP94 implements it (G7-8)"
+fi
+if grep -n 'internal/stream\|internal/ingest' "$URUQUIM_ROOT/web"/*.odin >/dev/null 2>&1; then
+  fail "package web imports a private lifecycle package directly; only the transport boundary may (ADR-009)"
 fi
 
 echo "wp87: buffered oracle green — G7-10 byte pins exist before streaming code"
 echo "wp87: stream corpus GREEN unedited (WP88/WP89 implemented the sentinel)"
 echo "wp87: body corpus RED, complete, for the sentinel's reason (7 cases)"
-echo "wp87: no sentinel package is imported by web"
+echo "wp87: ingest sentinel unlinked until WP94; package web imports no private lifecycle package"
 echo "PASS: WP87 lifecycle corpus controls"

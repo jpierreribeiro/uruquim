@@ -445,6 +445,17 @@ cannot be removed with the adapter, or cannot prove lifecycle safety.
 If official `core:net/http` exists at execution time, a compile/behaviour spike
 is added here. Its absence does not block the phase.
 
+**Delivery record (2026-07-23).** The inherited half (ADR-039 write/idle
+deadlines, the send-cancellation memory-safety fix, F9) landed first; the
+response-direction streaming adapter (chunked commit, owner-lane pump over
+the WP88/89 registry, close/disconnect/drain teardown, vendored BRIDGE
+patch 22) landed second. **The inbound bullets — bounded inbound chunks,
+pause/resume of socket reads, early-refusal retirement — are delivered with
+WP94**, whose spool is their only consumer: the mechanism and its consumer
+land together, so no dead unexercised hook sits in the transport meanwhile.
+This is a delivery-order note, not a scope change; WP94 cannot freeze
+without them.
+
 **Inherited into this WP (WP85 refresh, 2026-07-23):**
 
 - **ADR-039 write + idle timeouts.** Phase 6.5's WP-6.5.2 was implemented but

@@ -27,10 +27,9 @@ Server :: struct {
 
 @(private)
 big_handler :: proc(ctx: ^web.Context) {
+	// Content is irrelevant to a deadline test; zeroed bytes keep the handler
+	// cheap so a loaded machine cannot turn allocation time into a flake.
 	body := make([]u8, BIG_BYTES, context.temp_allocator)
-	for &b, i in body {
-		b = u8('a' + i % 26)
-	}
 	web.text(ctx, .OK, string(body))
 }
 
@@ -135,9 +134,10 @@ stalled_read :: proc(
 	if _, err := net.send_tcp(sock, transmute([]u8)string(request)); err != nil {
 		return false, 0, 0
 	}
-	// Read one small chunk so the response demonstrably started…
+	// Read one small chunk so the response demonstrably started… (generous
+	// timeout: this wait races nothing — it only absorbs machine load)
 	buffer: [512]u8
-	net.set_option(sock, .Receive_Timeout, 3 * time.Second)
+	net.set_option(sock, .Receive_Timeout, 10 * time.Second)
 	n, first_err := net.recv_tcp(sock, buffer[:])
 	if first_err != nil || n == 0 {return false, 0, 0}
 	total += n

@@ -277,6 +277,12 @@ cp "$URUQUIM_ROOT"/web/testing/*.odin "$URUQUIM_WP3_CYCLE/web/testing/"
 # the throwaway tree must carry both or the probe fails to resolve an import
 # instead of reporting the cycle it exists to prove.
 cp "$URUQUIM_ROOT"/web/internal/transport/*.odin "$URUQUIM_WP3_CYCLE/web/internal/transport/"
+# WP90b: the transport now also imports the stream and (via WP94) ingest
+# lifecycle packages; the throwaway tree carries them for the same reason it
+# carries the backend.
+mkdir -p "$URUQUIM_WP3_CYCLE/web/internal/stream" "$URUQUIM_WP3_CYCLE/web/internal/ingest"
+cp "$URUQUIM_ROOT"/web/internal/stream/*.odin "$URUQUIM_WP3_CYCLE/web/internal/stream/"
+cp "$URUQUIM_ROOT"/web/internal/ingest/*.odin "$URUQUIM_WP3_CYCLE/web/internal/ingest/"
 cp "$URUQUIM_ROOT"/vendor/odin-http/*.odin "$URUQUIM_WP3_CYCLE/vendor/odin-http/"
 cp "$URUQUIM_ROOT"/tests/wp3-probes/back_edge_import.odin "$URUQUIM_WP3_CYCLE/web/testing/"
 if URUQUIM_WP3_CYCLE_OUT="$(env ODIN_ROOT="$URUQUIM_COMPILER_DIR" \
@@ -1228,6 +1234,17 @@ timeout 180 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
   "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
   -out:"$URUQUIM_BIN_TMP/wp90-deadlines" ||
   fail "the WP90 write/idle deadline contract did not pass within the timeout"
+
+# WP90b — the detached-stream adapter on the raw wire: chunked commit without
+# a body, incremental frames from the owner-lane pump, terminator on close,
+# disconnect teardown with observable slot release. Serial: fixed ports and
+# the one-server-per-process transport global.
+echo "--- WP90b detached-stream adapter on the raw wire (odin test) ---"
+timeout 180 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp90-streaming" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp90-streaming" ||
+  fail "the WP90b detached-stream adapter contract did not pass within the timeout"
 
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"

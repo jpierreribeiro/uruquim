@@ -90,6 +90,15 @@ Slot :: struct {
 	state:           Slot_State,
 	connection_id:   u64,
 	close_requested: bool,
+	// WP90 — the per-stream owner wake, installed at open by the adapter.
+	// When set, the OWNER (not the registry) frees the slot via `retire`,
+	// because the owner may hold zero-copy views into the slot's ring store
+	// while a send is in flight; reusing the slot before the owner is done
+	// would let a new stream overwrite bytes mid-send. When nil (the unit /
+	// corpus configuration), close frees immediately, which is the WP87
+	// contract unchanged.
+	wake:            Wake_Proc,
+	wake_user:       rawptr,
 	// Bounded FIFO of events over a circular byte store, both allocated once
 	// at init. `bytes_head` is where the oldest event's bytes begin.
 	events:          []Event,
@@ -190,7 +199,15 @@ registry_destroy :: proc(r: ^Registry) {
 }
 
 // open runs on the connection-owning lane, during dispatch (WP90 wires it).
-open :: proc(r: ^Registry, connection_id: u64) -> (Token, Open_Result) {
+// The optional per-stream wake transfers slot-release ownership to the
+// caller: when set, close leaves the slot in `Closing` and the owner must
+// call `retire` after its own teardown (see the Slot.wake comment).
+open :: proc(
+	r: ^Registry,
+	connection_id: u64,
+	wake: Wake_Proc = nil,
+	wake_user: rawptr = nil,
+) -> (Token, Open_Result) {
 	if !r.initialized {
 		return Token{slot = -1}, .At_Capacity
 	}
@@ -212,6 +229,8 @@ open :: proc(r: ^Registry, connection_id: u64) -> (Token, Open_Result) {
 	s.state = .Open
 	s.connection_id = connection_id
 	s.close_requested = false
+	s.wake = wake
+	s.wake_user = wake_user
 	s.events_head = 0
 	s.events_count = 0
 	s.store_head = 0
@@ -266,9 +285,15 @@ try_send :: proc(r: ^Registry, tok: Token, data: []u8) -> Send_Result {
 	e.len = len(data)
 	s.events_count += 1
 	s.store_used += needed
+	// The slot's own wake is captured under the lock so a concurrent close
+	// (which clears ownership at retire) cannot race the read.
+	slot_wake := s.wake
+	slot_user := s.wake_user
 	sync.mutex_unlock(&s.mu)
 	// 5. wake the owner (outside the lock).
-	if r.wake != nil {
+	if slot_wake != nil {
+		slot_wake(slot_user)
+	} else if r.wake != nil {
 		r.wake(r.wake_user)
 	}
 	// 6. a closed typed result.
@@ -322,20 +347,79 @@ close :: proc(r: ^Registry, tok: Token) -> bool {
 	s.close_requested = true
 	s.state = .Closing
 	released := release_queued(r, s) // …then release, exactly once
+	_ = released
+	owned := s.wake != nil
+	slot_wake := s.wake
+	slot_user := s.wake_user
+	if !owned {
+		// No owner: the corpus/unit contract — the slot is free immediately.
+		s.state = .Free
+		s.close_requested = false
+	}
+	sync.mutex_unlock(&s.mu)
+
+	if !owned {
+		sync.mutex_lock(&r.free_mu)
+		r.free_list[r.free_top] = tok.slot
+		r.free_top += 1
+		r.live -= 1
+		sync.mutex_unlock(&r.free_mu)
+	}
+
+	if slot_wake != nil {
+		// The owner terminates on its own lane (terminator frame, connection
+		// retirement) and then calls `retire` to free the slot.
+		slot_wake(slot_user)
+	} else if r.wake != nil {
+		r.wake(r.wake_user)
+	}
+	return true
+}
+
+// rebind_wake replaces an open slot's wake registration. It exists for the
+// adapter's open sequence: the link address is only known after `open`
+// hands out the slot index, and no producer can hold the token before the
+// opener returns it, so the window is single-threaded by construction.
+rebind_wake :: proc(r: ^Registry, tok: Token, wake: Wake_Proc, wake_user: rawptr) -> bool {
+	if !r.initialized || tok.slot < 0 || int(tok.slot) >= len(r.slots) {
+		return false
+	}
+	s := &r.slots[tok.slot]
+	sync.mutex_lock(&s.mu)
+	defer sync.mutex_unlock(&s.mu)
+	if s.generation != tok.generation || s.state != .Open {
+		return false
+	}
+	s.wake = wake
+	s.wake_user = wake_user
+	return true
+}
+
+// retire frees an OWNED slot after the owner's teardown is complete: the
+// terminator is on the wire (or the connection aborted) and no zero-copy view
+// into the slot's ring store can be in flight any more. Owner lane only.
+retire :: proc(r: ^Registry, slot: i32) -> bool {
+	if !r.initialized || slot < 0 || int(slot) >= len(r.slots) {
+		return false
+	}
+	s := &r.slots[slot]
+	sync.mutex_lock(&s.mu)
+	if s.state == .Free || s.wake == nil {
+		sync.mutex_unlock(&s.mu)
+		return false
+	}
 	s.state = .Free
 	s.close_requested = false
+	s.wake = nil
+	s.wake_user = nil
+	release_queued(r, s) // idempotent: zero when close already released
 	sync.mutex_unlock(&s.mu)
 
 	sync.mutex_lock(&r.free_mu)
-	r.free_list[r.free_top] = tok.slot
+	r.free_list[r.free_top] = slot
 	r.free_top += 1
 	r.live -= 1
 	sync.mutex_unlock(&r.free_mu)
-
-	_ = released
-	if r.wake != nil {
-		r.wake(r.wake_user)
-	}
 	return true
 }
 
@@ -357,15 +441,36 @@ release_queued :: proc(r: ^Registry, s: ^Slot) -> int {
 }
 
 // drain_begin stops admission and refuses further output; WP95 wires it into
-// the process lifecycle so `max_drain_time` stays the only deadline.
+// the process lifecycle so `max_drain_time` stays the only deadline. Every
+// owned stream is woken so its owner lane can flush what is queued and
+// terminate.
 drain_begin :: proc(r: ^Registry) {
 	if !r.initialized {
 		return
 	}
 	sync.atomic_store(&r.draining, true)
+	for &s in r.slots {
+		sync.mutex_lock(&s.mu)
+		w := s.wake
+		u := s.wake_user
+		live := s.state == .Open
+		sync.mutex_unlock(&s.mu)
+		if live && w != nil {
+			w(u)
+		}
+	}
 	if r.wake != nil {
 		r.wake(r.wake_user)
 	}
+}
+
+// draining reports whether admission has stopped — the owner pump reads it to
+// terminate a stream whose queue has emptied under drain.
+draining :: proc(r: ^Registry) -> bool {
+	if !r.initialized {
+		return false
+	}
+	return sync.atomic_load(&r.draining)
 }
 
 // --- owner-lane consumption (WP90 wires the real writer to these) ----------
