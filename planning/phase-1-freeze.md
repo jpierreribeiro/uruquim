@@ -2069,3 +2069,21 @@ backend's deadline sweep as BRIDGE patches 19/20 with the raw-wire proof in
 **Rollback.** Fields on a frozen record are permanent once shipped; the safe
 retreat recorded by ADR-039 is defaulting to `0` (off), never removal. The
 bridge enforcement is deletable with the adapter (ADR-033 obligations).
+
+## Amendment 29 — WP90b: the transport boundary gains the stream lifecycle
+
+**Date: 2026-07-23. Authority: ADR-009 Amendment 1 (the private boundary may
+gain a long-lived capability) and ADR-044.** **Ledger effect: none** — no
+public symbol; the public stream surface waits for its evidence and freezes
+at WP101.
+
+**Dependency-manifest change, deliberate:** `web/internal/transport` now
+imports `uruquim:web/internal/stream` (the WP88/WP89 registry — first-party,
+same license, same owner) and `core:strconv` (hex chunk-size framing in the
+detached-stream pump). The snapshot and this manifest were updated together.
+`package web` itself imports neither; the one-way rules hold: stream imports
+nothing of web or the backend, and the transport still never imports
+`uruquim:web`.
+
+**Rollback.** Internal wiring: removable with the WP90b adapter code and the
+vendored bridge patch 22, leaving WP88/WP89 as unlinked machinery.

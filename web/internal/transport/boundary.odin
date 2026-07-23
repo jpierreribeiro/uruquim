@@ -15,6 +15,9 @@
 package transport
 
 import "core:mem"
+// WP90b — the detached-stream capacity record crosses the boundary so tests
+// and (later) the core can bound the registry. One-way: stream imports nothing.
+import stream "uruquim:web/internal/stream"
 
 // Header is a neutral name/value pair. Both are views over storage owned by the
 // caller for the duration of one exchange.
@@ -45,6 +48,10 @@ Inbound :: struct {
 	headers:    []Header,
 	body:       []u8,
 	over_limit: bool,
+	// WP90b — the adapter's opaque per-request handle, so dispatch-side code
+	// can open a detached stream bound to THIS connection via `stream_open`.
+	// Valid only for the duration of the dispatch call, on the owner lane.
+	exchange:   rawptr,
 }
 
 // Outbound is the neutral response the core's callback fills. The adapter copies
@@ -57,6 +64,11 @@ Outbound :: struct {
 	status:  int,
 	headers: []Header,
 	body:    []u8,
+	// WP90b — set by a dispatch that opened a detached stream via
+	// `stream_open`: the adapter commits status/headers with chunked framing
+	// and hands the wire to the owner-lane pump instead of writing a body.
+	// The private boundary is free to carry this (ADR-009 Amendment 1).
+	detached: bool,
 }
 
 // Dispatch_Proc is how the adapter drives the core. The core builds its context
@@ -104,6 +116,9 @@ Config :: struct {
 	// WP71 — maximum concurrent synchronous Handler execution. Zero asks the
 	// adapter for its documented bounded automatic policy; one is compatibility.
 	max_handlers:     int,
+	// WP90b — detached-stream capacities. Zero fields select the
+	// phase-7-spec.md §4.1 registered defaults; tests force tiny queues here.
+	stream_capacity:  stream.Capacity,
 	dispatch:         Dispatch_Proc,
 	user:             rawptr,
 	on_ready:         proc(user: rawptr),

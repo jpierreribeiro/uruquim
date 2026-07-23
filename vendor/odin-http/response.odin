@@ -398,6 +398,43 @@ clean_request_loop :: proc(conn: ^Connection, close: Maybe(bool) = nil) {
 	}
 }
 
+// URUQUIM PATCH 22 (WP90b) — BRIDGE: the three hooks a detached response
+// stream needs from the backend, and nothing more. The adapter owns the pump
+// (chunk framing, owner-lane sends, registry interplay); the backend
+// contributes exactly what is private to it: the heading writer, the request
+// cycle's clean end, and the abort path. All three are deletable with the
+// adapter when `core:net/http` lands (ADR-033).
+//
+// stream_prepare commits the response START for a detached stream: marks the
+// connection closing after the stream (keep-alive across a detached stream is
+// deliberately not offered by the bridge), sets chunked framing, writes the
+// status/header block into the response buffer and returns those bytes for
+// the ADAPTER to send on the owner lane. The request-read deadline stamp is
+// cleared: the request has fully arrived, and a long-lived response is not a
+// slow request. The write deadline still applies per send (Patch 19 stamps).
+stream_prepare :: proc(r: ^Response) -> []u8 {
+	headers_set_close(&r.headers)
+	headers_set_unsafe(&r.headers, "transfer-encoding", "chunked")
+	_response_write_heading(r, -1)
+	r.sent = true // the adapter owns the wire from here; `respond` must never run
+	conn := r._conn
+	conn.request_started = {}
+	return bytes.buffer_to_bytes(&r._buf)
+}
+
+// stream_finish ends the request cycle after the terminating chunk is on the
+// wire. `close = true` always: see stream_prepare.
+stream_finish :: proc(conn: ^Connection) {
+	clean_request_loop(conn, close = true)
+}
+
+// stream_abort tears the connection down without flushing (SO_LINGER 0 →
+// RST): the enforcement for a mid-stream write error or deadline, where
+// buffered bytes no longer represent a response anyone can parse to the end.
+stream_abort :: proc(conn: ^Connection) {
+	connection_abort(conn)
+}
+
 // A server MUST NOT send a Content-Length header field in any response
 // with a status code of 1xx (Informational) or 204 (No Content).  A
 // server MUST NOT send a Content-Length header field in any 2xx

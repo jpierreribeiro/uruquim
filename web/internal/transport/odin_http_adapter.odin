@@ -12,10 +12,12 @@
 package transport
 
 import http "uruquim:vendor/odin-http"
+import stream "uruquim:web/internal/stream"
 import "core:mem"
 import "core:net"
 import "core:nbio"
 import "core:os"
+import "core:strconv"
 import "core:time"
 import "core:slice"
 import "core:strings"
@@ -62,6 +64,10 @@ resolve_handler_concurrency :: proc(requested: int) -> int {
 Server_Global :: struct {
 	mutex:  sync.Mutex,
 	server: ^http.Server,
+	// WP90b — the running server's stream registry, for the same reason the
+	// server pointer is here (one server per process; readable without a
+	// request in hand). Tests reach it through `stream_registry_current`.
+	streams: ^stream.Registry,
 }
 
 // The one ratified process-global server lifetime (WP43), now one protected
@@ -76,6 +82,33 @@ g_server: Server_Global
 @(private)
 Server_Runtime :: struct {
 	config: Config,
+	// WP90b — the detached-stream registry (WP88/WP89 machinery) and the
+	// per-slot owner links. Links are indexed by registry slot, allocated
+	// once at serve and freed after it: slot reuse is link reuse, and the
+	// pump is idempotent over its (registry, token) pair, so a delayed wake
+	// against a reused link runs a spurious-but-correct pump instead of
+	// dereferencing freed memory.
+	streams: stream.Registry,
+	links:   []Stream_Link,
+}
+
+// Stream_Link binds one registry slot to its connection and owner lane.
+Stream_Link :: struct {
+	runtime:    ^Server_Runtime,
+	conn:       ^http.Connection,
+	loop:       ^nbio.Event_Loop,
+	tok:        stream.Token,
+	// exactly one pump may be scheduled at a time (CAS-armed by wakes from
+	// any thread, cleared by the pump on the owner lane).
+	pump_armed: bool,
+	// the committed heading bytes, sent before the first chunk. They live in
+	// the connection's request cycle, which for a detached stream ends only
+	// at stream_finish/abort — after the heading send completed.
+	heading:    []u8,
+	committed:  bool,
+	terminated: bool,
+	// owner-lane scratch for the chunk-size prefix ("%x\r\n").
+	prefix:     [18]u8,
 }
 
 // Exchange is the per-request state threaded through the async body read. It
@@ -86,10 +119,12 @@ Server_Runtime :: struct {
 // with no other way to reach it.
 @(private)
 Exchange :: struct {
-	req:     ^http.Request,
-	res:     ^http.Response,
-	runtime: ^Server_Runtime,
-	inbound: Inbound,
+	req:         ^http.Request,
+	res:         ^http.Response,
+	runtime:     ^Server_Runtime,
+	inbound:     Inbound,
+	// WP90b — set by `stream_open` when this exchange detached its response.
+	stream_link: ^Stream_Link,
 }
 
 // serve runs the backend event loop and blocks until the server is stopped.
@@ -101,9 +136,28 @@ serve :: proc(cfg: Config) -> Serve_Error {
 		config = cfg,
 	}
 
+	// WP90b — the detached-stream registry, alive exactly as long as the
+	// server. Capacities are the phase-7-spec.md §4.1 registered defaults
+	// unless the Config narrows them (tests force tiny queues through this).
+	if !stream.registry_init(&runtime.streams, cfg.stream_capacity) {
+		return .Listen_Failed
+	}
+	stream_cap := stream.resolve(cfg.stream_capacity)
+	links_backing, links_err := make([]Stream_Link, stream_cap.max_streams)
+	if links_err != nil {
+		stream.registry_destroy(&runtime.streams)
+		return .Listen_Failed
+	}
+	runtime.links = links_backing
+	defer {
+		stream.registry_destroy(&runtime.streams)
+		delete(runtime.links)
+	}
+
 	s: http.Server
 	sync.lock(&g_server.mutex)
 	g_server.server = &s
+	g_server.streams = &runtime.streams
 	sync.unlock(&g_server.mutex)
 
 	opts := http.Default_Server_Opts
@@ -144,6 +198,7 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	if err := http.listen(&s, endpoint, opts); err != nil {
 		sync.lock(&g_server.mutex)
 		g_server.server = nil
+		g_server.streams = nil
 		sync.unlock(&g_server.mutex)
 		return .Listen_Failed
 	}
@@ -161,6 +216,7 @@ serve :: proc(cfg: Config) -> Serve_Error {
 
 	sync.lock(&g_server.mutex)
 	g_server.server = nil
+	g_server.streams = nil
 	sync.unlock(&g_server.mutex)
 	return .None
 }
@@ -227,6 +283,7 @@ catch_all :: proc(runtime: ^Server_Runtime, req: ^http.Request, res: ^http.Respo
 	exchange.req = req
 	exchange.res = res
 	exchange.runtime = runtime
+	exchange.inbound.exchange = rawptr(exchange)
 
 	// The backend enforces the cap as it reads: an over-length body never gets
 	// buffered, and `on_body` is told with `.Too_Long`.
@@ -243,7 +300,9 @@ on_body :: proc(user_data: rawptr, body: http.Body, err: http.Body_Error) {
 
 	rline := req.line.(http.Requestline)
 
+	preserved_exchange := exchange.inbound.exchange
 	exchange.inbound = Inbound {
+		exchange   = preserved_exchange,
 		// WP9 D7 — the ORIGINAL token. A valid but non-Phase-1 method
 		// (PROPFIND) reaches the core, which maps it to its own `.UNKNOWN` and
 		// applies the ratified 404/405 policy. The backend no longer answers
@@ -286,8 +345,179 @@ dispatch_exchange :: proc(exchange: ^Exchange) {
 	cfg.dispatch(cfg.user, exchange.inbound, &out, context.temp_allocator)
 	http.handler_lane_leave(res)
 
+	// WP90b — a dispatch that opened a detached stream committed to a
+	// different wire discipline: status/headers with chunked framing now, body
+	// chunks from the owner-lane pump for as long as the stream lives, and no
+	// `respond` ever.
+	if out.detached && exchange.stream_link != nil {
+		link := exchange.stream_link
+		res.status = http.Status(out.status)
+		for header in out.headers {
+			http.headers_set(&res.headers, header.name, header.value)
+		}
+		link.heading = http.stream_prepare(res)
+		stream_pump_run(link)
+		return
+	}
+
 	write_response(res, out)
 	http.respond(res)
+}
+
+// --- WP90b: the detached-stream pump ----------------------------------------
+
+// stream_open is called BY DISPATCH-SIDE CODE, during the dispatch call, on
+// the connection-owning lane. It binds a registry slot to this exchange's
+// connection; the dispatch must then set `out.detached = true` and return
+// without a body. Everything after that belongs to the pump.
+stream_open :: proc(exchange_handle: rawptr) -> (stream.Token, bool) {
+	exchange := (^Exchange)(exchange_handle)
+	if exchange == nil || exchange.stream_link != nil {
+		return stream.Token{slot = -1}, false
+	}
+	runtime := exchange.runtime
+	conn := exchange.res._conn
+	tok, opened := stream.open(
+		&runtime.streams,
+		u64(uintptr(rawptr(conn))),
+		stream_pump_arm,
+		nil, // patched below once the link is known
+	)
+	if opened != .Opened {
+		return stream.Token{slot = -1}, false
+	}
+	link := &runtime.links[tok.slot]
+	link^ = Stream_Link {
+		runtime = runtime,
+		conn    = conn,
+		loop    = nbio.current_thread_event_loop(),
+		tok     = tok,
+	}
+	// Re-register the wake with its user pointer now that the link exists.
+	// Safe: no producer can hold the token before stream_open returns it.
+	stream.rebind_wake(&runtime.streams, tok, stream_pump_arm, rawptr(link))
+	exchange.stream_link = link
+	return tok, true
+}
+
+// stream_pump_arm may run on ANY thread (it is the registry's per-slot wake).
+// CAS guarantees at most one scheduled pump per link; `nbio` queues the
+// operation to the owner lane's loop and wakes it (cross-thread `exec`).
+@(private)
+stream_pump_arm :: proc(user: rawptr) {
+	link := (^Stream_Link)(user)
+	if link == nil {
+		return
+	}
+	if _, armed := sync.atomic_compare_exchange_strong(&link.pump_armed, false, true); armed {
+		nbio.next_tick_poly(link, stream_pump, link.loop)
+	}
+}
+
+@(private)
+stream_pump :: proc(_: ^nbio.Operation, link: ^Stream_Link) {
+	sync.atomic_store(&link.pump_armed, false)
+	stream_pump_run(link)
+}
+
+@(private)
+STREAM_CRLF := []u8{'\r', '\n'}
+@(private)
+STREAM_TERMINATOR := []u8{'0', '\r', '\n', '\r', '\n'}
+
+// stream_pump_run drives one link on its OWNER LANE: heading first, then one
+// in-flight chunk at a time (zero-copy out of the slot ring; the event is
+// completed — and its bytes released — only after the socket write reports
+// done), then the terminator once the stream is closed or the process drains.
+@(private)
+stream_pump_run :: proc(link: ^Stream_Link) {
+	conn := link.conn
+	if link.terminated || conn.state >= .Closing {
+		return
+	}
+	if conn.pending_send != nil {
+		return // a send is in flight; its completion re-runs the pump
+	}
+	if !link.committed {
+		link.committed = true
+		conn.send_started = time.now()
+		conn.pending_send = nbio.send_poly(conn.socket, {link.heading}, link, on_stream_heading_sent)
+		return
+	}
+	reg := &link.runtime.streams
+	if data, has := stream.next_event(reg, link.tok); has {
+		n := len(strconv.write_int(link.prefix[:16], i64(len(data)), 16))
+		link.prefix[n] = '\r'
+		link.prefix[n + 1] = '\n'
+		conn.send_started = time.now()
+		conn.pending_send = nbio.send_poly(
+			conn.socket,
+			{link.prefix[:n + 2], data, STREAM_CRLF},
+			link,
+			on_stream_chunk_sent,
+		)
+		return
+	}
+	// Queue empty: terminate when the stream is closed (stale to us) or the
+	// process is draining; otherwise wait for the next wake.
+	if stream.queued_events(reg, link.tok) == -1 || stream.draining(reg) {
+		link.terminated = true
+		conn.send_started = time.now()
+		conn.pending_send = nbio.send_poly(conn.socket, {STREAM_TERMINATOR}, link, on_stream_terminator_sent)
+	}
+}
+
+@(private)
+on_stream_heading_sent :: proc(op: ^nbio.Operation, link: ^Stream_Link) {
+	conn := link.conn
+	conn.pending_send = nil
+	conn.send_started = {}
+	if op.send.err != nil {
+		stream_teardown_error(link)
+		return
+	}
+	stream_pump_run(link)
+}
+
+@(private)
+on_stream_chunk_sent :: proc(op: ^nbio.Operation, link: ^Stream_Link) {
+	conn := link.conn
+	conn.pending_send = nil
+	conn.send_started = {}
+	if op.send.err != nil {
+		stream_teardown_error(link)
+		return
+	}
+	// The write is on the wire: NOW the event's ring bytes may be released.
+	_ = stream.complete_event(&link.runtime.streams, link.tok)
+	stream_pump_run(link)
+}
+
+@(private)
+on_stream_terminator_sent :: proc(op: ^nbio.Operation, link: ^Stream_Link) {
+	conn := link.conn
+	conn.pending_send = nil
+	conn.send_started = {}
+	// Success or failure, the request cycle ends here; a failed terminator
+	// still retires the connection (close = true either way).
+	_ = stream.close(&link.runtime.streams, link.tok) // idempotent; refuses stragglers
+	_ = stream.retire(&link.runtime.streams, link.tok.slot)
+	if op.send.err != nil {
+		http.stream_abort(conn)
+		return
+	}
+	http.stream_finish(conn)
+}
+
+// stream_teardown_error: the client disconnected or the write failed
+// mid-stream. Refuse producers, release the slot, reset the connection —
+// a half-sent chunked body is not something anyone can parse to an end.
+@(private)
+stream_teardown_error :: proc(link: ^Stream_Link) {
+	link.terminated = true
+	_ = stream.close(&link.runtime.streams, link.tok)
+	_ = stream.retire(&link.runtime.streams, link.tok.slot)
+	http.stream_abort(link.conn)
 }
 
 // neutral_headers copies the backend request headers into neutral pairs. The
@@ -343,4 +573,15 @@ copy_response :: proc(out: ^Outbound, status: int, headers: []Header, body: []u8
 	} else {
 		out.body = nil
 	}
+}
+
+// stream_registry_current exposes the running server's stream registry, the
+// way `_refused_connections` exposes its admission total: through the one
+// ratified global, for callers with no request in hand. Today its only
+// consumers are the WP90 tests; the WP91 core wiring reaches the registry
+// through the exchange instead.
+stream_registry_current :: proc() -> ^stream.Registry {
+	sync.lock(&g_server.mutex)
+	defer sync.unlock(&g_server.mutex)
+	return g_server.streams
 }

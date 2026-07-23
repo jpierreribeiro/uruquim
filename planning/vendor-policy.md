@@ -14,7 +14,7 @@ and WP46 is the first work package held to them.
 
 `vendor/odin-http/` is a snapshot of the root server package of
 `laytan/odin-http` at commit `112c49b` (2026-04-11), vendored 2026-07-19, MIT.
-Twenty-one local patches, all security-, lifecycle- or ownership-motivated, all
+Twenty-two local patches, all security-, lifecycle- or ownership-motivated, all
 marked `URUQUIM PATCH` at their site and all covered by an executable case that
 failed before the patch.
 
@@ -42,7 +42,7 @@ forever is a fork with extra steps.
 queue is not a schedule, and re-vendoring across an API its author says moves is
 work regardless of who wrote the fix.
 
-### 2.1 The twenty-one patches, each with its upstream disposition
+### 2.1 The twenty-two patches, each with its upstream disposition
 
 | # | Patch | Is it upstream's bug? | Disposition |
 |---|---|---|---|
@@ -67,8 +67,9 @@ work regardless of who wrote the fix.
 | 19 | The response write deadline: send-path stamps, a write branch in the sweep, cancellation of the outstanding send on every close, and an RST abort as the enforcement (WP90 / ADR-039) | **Mixed** — the missing send cancellation is upstream's use-after-free (Patch 10's twin on the write side); the deadline itself and the RST-not-graceful enforcement are Uruquim policy | **CARRY AS BRIDGE; offer the send-cancel upstream.** Delete with the adapter when `core:net/http` lands; the official adapter must expose an equivalent write deadline before it can replace this one |
 | 20 | The idle keep-alive timeout: `idle_since` stamped between requests, cleared on the next request's first bytes, graceful close in the sweep (WP90 / ADR-039) | **No** — upstream simply has no idle policy; keep-alive economy is Uruquim's own operational contract | **CARRY AS BRIDGE.** Same replacement obligation as Patch 19 |
 | 21 | Transient accept errors are tolerated (log, delayed re-arm, per-lane consecutive-failure limit) instead of panicking the process (WP90 / F9) | **Yes** — an unauthenticated remote crash: `ECONNABORTED` at accept is peer-triggerable weather, and upstream panics on it | **OFFER UPSTREAM.** The persistence limit is the honest part: a listener that can never accept again stays fatal rather than a silent outage |
+| 22 | Detached-stream hooks: chunked heading commit, request-cycle finish after the terminator, unflushed abort (WP90b) | **No** — streaming is Uruquim's Phase-7 capability; upstream's own `Response_Writer` covers the handler-synchronous case only | **CARRY AS BRIDGE.** Deletable with the adapter; the ADR-033 replacement must pass the same wire corpus |
 
-**Twelve of twenty-one are or contain upstream bugs; the rest are deliberate divergences.** WP70's
+**Twelve of twenty-two are or contain upstream bugs; the rest are deliberate divergences.** WP70's
 multi-lane lifecycle correction joins the upstream group; WP59's absolute drain
 deadline joins the policy group. The bridge label changes expected lifetime,
 not the evidence or upstream-offer obligation.

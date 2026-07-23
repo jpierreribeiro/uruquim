@@ -84,10 +84,13 @@ if env ODIN_ROOT="$URUQUIM_ODIN_ROOT" "$URUQUIM_ODIN" test \
   fail "the corpus survives without the generation check — stale safety is not being tested (G7-3)"
 fi
 
-# Claim 3 — boundaries. `web` may not import the stream package before WP90,
-# and the stream package stays free of the backend and of `uruquim:web`.
-if grep -rn '"uruquim:web/internal/stream"' "$URUQUIM_ROOT/web" --include='*.odin' >/dev/null; then
-  fail "web imports the stream package before WP90 wires the adapter"
+# Claim 3 — boundaries, staged by WP90b: the stream package is now wired,
+# but ONLY through the transport boundary. `package web` (the public core)
+# still imports it nowhere, and the stream package itself remains
+# executor-agnostic: no backend, no `uruquim:web`, no transport.
+if grep -rn '"uruquim:web/internal/stream"' "$URUQUIM_ROOT/web" --include='*.odin' -l |
+  grep -v 'web/internal/transport/' >/dev/null; then
+  fail "the stream package is imported outside the transport boundary (ADR-009)"
 fi
 if grep -nE '"uruquim:(web|vendor)' "$URUQUIM_ROOT/web/internal/stream"/*.odin; then
   fail "the stream package imports web or the backend; it must stay executor-agnostic"
@@ -96,5 +99,5 @@ fi
 echo "wp88: the WP87 stream corpus is green unedited, all 12 cases present"
 echo "wp88: ring wraparound, process budget, wake hook and 2000-event concurrency hold"
 echo "wp88: removing the generation check makes the corpus fail (G7-3 control)"
-echo "wp88: stream package linked nowhere; imports neither web nor backend"
+echo "wp88: stream package wired only through the transport boundary; imports neither web nor backend"
 echo "PASS: WP88/WP89 registry and delivery controls"
