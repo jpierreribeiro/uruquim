@@ -2050,3 +2050,77 @@ none; the requirement it keeps is the one nobody disputes.
 
 - **Reversibility. HIGH.** Documenting a cast commits nothing; a later member
   addition is additive.
+
+## ADR-008 — Amendment 1: reopened strictly for the long-lived path (WP85)
+
+- **Recorded 2026-07-23, Phase-7 entry.** The exactly-one-commit guarantee for
+  **buffered** responses is reaffirmed intact and is not reopened. What opens
+  is a second, disjoint commit discipline for the opt-in detached stream: a
+  stream commits status/headers exactly once (`Headers_Committed`), then body
+  bytes incrementally; after first-byte commit, framework errors close the
+  stream and report out of band — they never append a second HTTP envelope.
+  Onion-after middleware unwinds after stream establishment, not after the
+  stream's lifetime; post-`next` mutation of a committed response remains
+  forbidden. Normative machine: `phase-7-spec.md` §3.1; security corpus: WP91.
+- **Scope guard.** An ordinary endpoint gains no new commit state; the WP2
+  scope note (the guard is not a security boundary against deliberate internal
+  tampering) carries over unchanged.
+
+## ADR-009 — Amendment 1: the private boundary gains a long-lived capability (WP85)
+
+- **Recorded 2026-07-23, Phase-7 entry.** The transport boundary stays
+  private and unfrozen; the conceptual contract grows from
+  accept → dispatch → commit → stop to also admit: reserve → incremental
+  commit → bounded enqueue/write on the owner lane → close/cancel, plus
+  pause/resume of socket reads for the inbound spool path. No backend type
+  becomes public; a stream token is a value that cannot expose registry memory
+  or adapter handles. The vendored implementation of these hooks is BRIDGE
+  work under the ADR-033 obligations, deletable with the adapter.
+
+## ADR-012 — Amendment 1: one buffered consumer stays canonical; spool is a distinct opt-in (WP85)
+
+- **Recorded 2026-07-23, Phase-7 entry.** Ordinary body binding remains
+  single-consumer, buffered and byte-identical (`web.body`, `form_field`,
+  `form_file`); nothing about the Phase-5 answer changes and it remains the
+  compatibility oracle (G7-10). A distinct opt-in body-source/spool path may
+  consume incrementally under the pre-registered ownership, quota and cleanup
+  contract of `phase-7-spec.md` §4.2 (OQ-20 Amendment 1). Enabling the opt-in
+  path is never a silent ownership change to the buffered one.
+
+## ADR-044 — stream ownership, bounded backpressure and stale-safe identity
+
+- **Status.** PROPOSED, 2026-07-23 (WP85). Remains PROPOSED until WP101 closes
+  it on evidence; WP86/WP87 may amend it with dated entries before code ships.
+
+- **Context.** Phase 7 detaches response lifetime from Handler lifetime. That
+  creates three problems the buffered model never had: who owns a response
+  that outlives its `Context`; how a producer on another thread sends without
+  touching the socket; and how a delayed producer is prevented from writing
+  into a recycled connection.
+
+- **Decision.**
+  1. **Ownership.** A detached stream is owned by the framework registry, and
+     its connection by the lane that owns it. The Handler's arena and every
+     request view die when the Handler returns (G7-1); the stream token is a
+     value, not a pointer into either.
+  2. **Backpressure.** Every queue is bounded by the pre-registered caps of
+     `phase-7-spec.md` §4.1. Enqueue is non-blocking with a closed typed
+     result; the canonical full result is refusal; the slow-consumer terminal
+     policy is disconnect. Close/stop travels on reserved control capacity
+     that user sends can never consume. No mutex is held during a socket
+     write; no unbounded MPSC queue ships.
+  3. **Stale-safe identity.** Registry slots carry a generation; closing
+     invalidates the generation before queued items are released, and reuse
+     under forced tiny capacity is a required corpus case. A stale token
+     refuses and cannot affect the slot's new occupant (G7-3).
+  4. **Executor-agnostic substrate.** Registry, queue and wakeup do not assume
+     the producer is a Handler lane (spec §6.3), so the future sync/async
+     arm B reuses rather than duplicates them.
+
+- **Options considered.** Pointer-like handles (rejected: use-after-free by
+  construction across detach); per-connection application pointer bags
+  (rejected non-goal); blocking send-until-space (rejected non-goal);
+  transport-enforced commit (rejected in ADR-008 and unchanged).
+
+- **Reversibility. MEDIUM.** Private machinery until names freeze in WP101;
+  the public token/send/close surface, once shipped, is frozen ledger.
