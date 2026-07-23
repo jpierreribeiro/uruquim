@@ -1920,9 +1920,22 @@ none; the requirement it keeps is the one nobody disputes.
 
 ## ADR-039 — write and idle timeouts
 
-- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit. Adds
-  fields to `Limits` (additive ledger growth — pays the gate-amendment
-  checklist) and a bridge patch to the vendored backend.
+- **Status.** **ACCEPTED, 2026-07-23, implemented by Phase 7's WP90** (both
+  fields in one `Limits` amendment, vendored BRIDGE patches 19/20, raw-wire
+  proof for the stalled write and the idle keep-alive). Originally PROPOSED
+  the same day from the production-readiness audit.
+
+- **Implementation note, recorded because the first attempt failed.** The
+  Phase-6.5 attempt (WP-6.5.2) "did not fire" and was not merged. Root cause,
+  established by WP90: the send path genuinely lacked deadline stamps, AND the
+  graceful close used for enforcement flushes kernel-buffered response bytes
+  to the slow reader before FIN — so the close was invisible to a client-side
+  EOF watch for as long as megabytes take at the client's own pace. The
+  shipped enforcement ABORTS at the write deadline (SO_LINGER 0 → RST),
+  discarding the undelivered tail, which makes the deadline observable the
+  moment it fires. The idle timeout closes gracefully — an idle connection
+  has nothing buffered. A latent upstream use-after-free (outstanding send
+  never cancelled at teardown — Patch 10's twin) was fixed on the same path.
 
 - **Context.** `Limits.max_request_time` bounds request *arrival* only (a
   resettable-free slowloris defense). There is **no write deadline** (a

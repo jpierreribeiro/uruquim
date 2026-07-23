@@ -54,6 +54,8 @@ serve :: proc(a: ^App, port: int) {
 		max_request_line = a.private.limits.max_request_line,
 		max_headers      = a.private.limits.max_headers,
 		max_request_time = a.private.limits.max_request_time,
+		max_write_time   = a.private.limits.max_write_time,
+		max_idle_time    = a.private.limits.max_idle_time,
 		max_connections  = a.private.limits.max_connections,
 		reserved_conns   = a.private.limits.reserved_conns,
 		max_drain_time   = a.private.limits.max_drain_time,

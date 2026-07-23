@@ -54,12 +54,15 @@ README.md, odinfmt.json, .editorconfig, .gitignore — repo tooling
 
 ## Local patches
 
-**Eighteen.** Five added by WP9 (transport conformance), one each by WP45, WP46
-(ADR-031) and WP47, three by WP59's drain repair, one by WP70's multi-lane
-lifecycle repair, one by WP71's Handler-capacity mapping, and five security
+**Twenty-one.** Five added by WP9 (transport conformance), one each by WP45,
+WP46 (ADR-031) and WP47, three by WP59's drain repair, one by WP70's multi-lane
+lifecycle repair, one by WP71's Handler-capacity mapping, five security
 hardening fixes from the Phase-6-freeze scan: two chunked-body process crashes
 (a negative chunk size and a trailer field), a Content-Length overflow, a
-bare-CR header-injection sink and an obs-fold tab that could desync a proxy.
+bare-CR header-injection sink and an obs-fold tab that could desync a proxy —
+and three by WP90 (ADR-039/F9): the response write deadline with its
+send-cancellation and RST abort, the idle keep-alive timeout, and
+accept-error tolerance.
 All are minimal and fix a security issue, an upstream defect,
 a lifecycle defect or a capacity the server had no way to bound. Each is marked
 in source with `URUQUIM PATCH`, recorded below, and covered by executable
@@ -90,6 +93,9 @@ decides whether a re-vendor carries a policy or expects a fix to disappear.
 | 16 | `body.odin` (`_body_length`) | A `Content-Length` with more than 19 significant digits is rejected. | **REQUEST SMUGGLING (desync).** `_is_plain_decimal` permits an arbitrarily long digit string and `strconv.parse_int` wraps overflow, so a value `>= 2^64` wrapped to a small positive: the server read fewer bytes than declared and parsed the remainder as a second request. Patch 1's negative/non-decimal guard on the same field did not bound magnitude. |
 | 17 | `http.odin` (`write_escaped_newlines`) | Escape a bare carriage return as `\r`, not only the line feed. | **HEADER INJECTION.** This is the only sanitization point before header values and cookie fields reach the socket; escaping only `\n` let a lone `\r` through, and a CR-tolerant downstream parser can treat it as a line terminator to confuse or split headers. |
 | 18 | `http.odin` (`header_parse`) | Reject a header line beginning with a horizontal tab, like one beginning with a space. | **REQUEST SMUGGLING.** RFC 7230 obs-fold is CRLF then a space **or** a tab; the guard caught only the space, so a tab-prefixed continuation parsed as its own header here while an obs-fold-normalizing proxy merged it into the previous value — the two ends disagree on the header set. |
+| 19 | `server.odin`, `response.odin` | The response write deadline (`Server_Opts.response_write_timeout`): `Connection.send_started`/`pending_send` stamped on the send path, a write branch in the deadline sweep, cancellation of the outstanding send on every close, and `connection_abort` (SO_LINGER 0 → RST) as the enforcement. | **RESOURCE EXHAUSTION + MEMORY SAFETY.** A client that stops reading parks the response, the connection and its buffers indefinitely — the write-side slowloris. The abort is RST because a graceful close flushes kernel buffers to the slow reader first, hiding the close (the measured Phase-6.5 failure). The send cancel is Patch 10's memory-safety argument on the write side: teardown frees the `Connection` an outstanding send completion still points at. |
+| 20 | `server.odin`, `response.odin` | The idle keep-alive timeout (`Server_Opts.idle_timeout`): `Connection.idle_since` stamped when a keep-alive goes idle, cleared when the next request's bytes arrive, an idle branch in the sweep closing gracefully. | **RESOURCE ECONOMY.** An idle connection holds a slot until `max_connections` or the OS reclaims it; `request_started` (Patch 6) keeps its request-arrival meaning untouched, so the two clocks bound different things. |
+| 21 | `server.odin` (`on_accept`) | Tolerate transient accept errors: log, re-arm accept after a short delay, count CONSECUTIVE failures per lane and panic only past a persistence limit. | **UNAUTHENTICATED REMOTE CRASH (F9).** Upstream panics the whole process on any accept error, and `ECONNABORTED`/`EINTR` are ordinary events a peer can cause at will. The failure limit keeps a permanently dead listener fatal rather than a silent outage. |
 
 Patch 5 also adds a tenth entry to `_method_strings` and makes `method_parse`
 skip the new member, so the existing `for r in Method` lookup (which indexes
@@ -97,7 +103,7 @@ that array under `#no_bounds_check`) stays in bounds.
 
 Every other line is byte-for-byte upstream.
 
-To update to a newer upstream commit, re-apply the eighteen patches above (they are
+To update to a newer upstream commit, re-apply the twenty-one patches above (they are
 small and each is commented at its site) and re-run the WP9 raw-wire corpus,
 which is what proves they are still needed and still sufficient.
 
@@ -115,7 +121,7 @@ this cost is not.
 
 To move to a different upstream commit: re-copy the root `.odin` files, the
 `LICENSE` and `mod.pkg` from a fresh checkout at the new commit, re-apply the
-eighteen patches listed above, update the provenance table, and re-run the full
+twenty-one patches listed above, update the provenance table, and re-run the full
 gate — including the WP9 raw-wire corpus, which is what proves the patches are
 still necessary and still sufficient. Do not make unrelated edits to these
 files.

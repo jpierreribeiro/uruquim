@@ -121,6 +121,10 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	// `time.Duration` happens HERE because this is the side of the boundary
 	// where a clock is already linked — `package web` may not import one.
 	opts.request_read_timeout = time.Duration(cfg.max_request_time)
+	// WP90 / ADR-039 — the write deadline and idle timeout cross the boundary
+	// as nanoseconds and become Durations here, where a clock is linked.
+	opts.response_write_timeout = time.Duration(cfg.max_write_time)
+	opts.idle_timeout = time.Duration(cfg.max_idle_time)
 	opts.max_connections = cfg.max_connections
 	opts.reserved_connections = cfg.reserved_conns
 	// WP59 — the drain deadline crosses as nanoseconds and becomes a Duration

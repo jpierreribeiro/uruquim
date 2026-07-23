@@ -1218,6 +1218,17 @@ echo "--- WP72 combined concurrency, shutdown and Phase-5 feature verdict ---"
 env URUQUIM_WP72_PREREQS_ALREADY_GREEN=1 URUQUIM_COMPILER="$URUQUIM_COMPILER" \
   bash "$URUQUIM_ROOT/build/check_wp72_controls.sh"
 
+# WP90 — ADR-039 on the raw wire: a stalled write is ABORTED (RST) at
+# `max_write_time`, an idle keep-alive closes at `max_idle_time`, zero keeps
+# the shipped behaviour for both, and the WP46 read deadline still fires.
+# Serial (-define:ODIN_TEST_THREADS=1): seven servers on fixed ports.
+echo "--- WP90 write/idle deadlines on the raw wire (odin test) ---"
+timeout 180 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp90-deadlines" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp90-deadlines" ||
+  fail "the WP90 write/idle deadline contract did not pass within the timeout"
+
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
 if find "$URUQUIM_ROOT" -maxdepth 1 -type f -name 'uruquim-*' -print -quit | grep -q .; then

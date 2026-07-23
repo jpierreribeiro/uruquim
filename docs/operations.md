@@ -64,6 +64,8 @@ web.limits(&app, budget)
 | `max_request_line` | 8000 | the backend refuses the request |
 | `max_headers` | 8000 | the backend refuses the request |
 | `max_request_time` | 30 s | **the connection is closed** — this is the slowloris defence |
+| `max_write_time` | `0` = off | **the connection is reset (RST)** — a graceful close would flush kernel buffers to the slow reader first and hide the deadline; the reset is the observable, honest end (WP90 / ADR-039) |
+| `max_idle_time` | `0` = off | the idle keep-alive connection is **closed gracefully**; the clock stops the moment the next request's bytes arrive |
 | `max_connections` | 1024 | the connection is **closed at accept**, not queued |
 | `reserved_conns` | 16 | slots held back from admission so a shutdown always has room |
 | `max_handlers` | `0` = auto | synchronous Handler capacity; auto resolves from CPU count, bounded to 4..32 |
@@ -299,7 +301,11 @@ you set cookies, you set the headers, and you own their attributes.
   application or foreign code. Other Handler lanes retain progress until the
   configured capacity is saturated.
 * **A faulting handler aborts the process.** By construction, not by defect.
-* **No write deadline.** The read side has one; the write side does not.
+* **The write deadline and idle timeout default OFF.** `max_write_time` and
+  `max_idle_time` exist (WP90 / ADR-039) but ship disabled: a default generous
+  enough for every legitimate slow link is a judgement the application must
+  make, and a framework-chosen number would reset real clients on upgrade.
+  Enable both in production, sized to your slowest legitimate client.
 * **No bound on the accept backlog or inbound header count.**
 * **One server per process.**
 * **No WebSocket or streaming.** Out of core by decision, and both need a

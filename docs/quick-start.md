@@ -187,11 +187,12 @@ does **not** do today — verified against the current build, not a past phase.
   recoverable panic (ADR-020). Run under a supervisor with `Restart=always`.
   What Uruquim *does* guarantee is the other half: a handler that returns
   without responding gets the standardized 500. See `docs/errors.md`.
-- **No write timeout and no idle/keep-alive timeout.** `Limits.max_request_time`
-  bounds request *arrival* (a slowloris defense), but a slow-reading client can
-  stall a response write, and an idle keep-alive connection holds its slot until
-  the connection limit or the OS reclaims it. Put a reverse proxy with its own
-  timeouts in front.
+- **The write and idle timeouts are OFF by default.** `Limits.max_request_time`
+  bounds request *arrival* (a slowloris defense); `Limits.max_write_time`
+  bounds a slow-reading client stalling a response write (the connection is
+  reset at the deadline), and `Limits.max_idle_time` reclaims idle keep-alive
+  slots. Both default to `0` = off — enable them in production, sized to your
+  slowest legitimate client, or keep a reverse proxy's timeouts in front.
 - **A blocked handler is not cancellable.** A handler stuck in blocking foreign
   code (a C library, a synchronous call) holds its lane past the drain deadline;
   the supervisor's kill timeout is the outer bound. Multiple lanes bound the
