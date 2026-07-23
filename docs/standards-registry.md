@@ -22,7 +22,7 @@ the exact ceremony this project refuses.
 | **IEEE 754-2019** | numbers crossing the JSON/DB boundary | Selected boundary profile | `planning/numeric-contract.md` (NUM-001…005) |
 | **IEEE 1003.1-2024** (POSIX) | signals, monotonic clocks, sockets, files | Selected profile | `docs/platform-contract.md` + the platform gate (Linux x86-64) |
 | **ISO/IEC/IEEE 29148-2018** (requirements) | requirement quality & traceability | Process (light) | the traceability method below + the claim ledger + ADRs |
-| **W3C Trace Context** | `traceparent`/`tracestate` propagation | Future (Crystal/Drusa) | ADR-042; enabled by `web.header`, forwarded by the `http_client` Crystal |
+| **W3C Trace Context** | `traceparent`/`tracestate` propagation | Future (Crystal) | ADR-042; enabled by `web.header`, forwarded by the `http_client` Crystal |
 | **RFC 9457** (Problem Details) | error interop | Future (optional Crystal adapter) | ADR-041 |
 | ISO/IEC/IEEE 1012-2024 (V&V) | integrity levels | Before-release (process) | deferred — see below |
 | ISO/IEC/IEEE 29119 (testing) | uniform test-evidence format | Before-release (process) | deferred — see below |

@@ -1878,38 +1878,43 @@ none; the requirement it keeps is the one nobody disputes.
   audit on the corrected value; reverting re-opens the spoof. This is why it is
   ratified as an ADR before the code moves, not patched silently.
 
-## ADR-038 — the ecosystem has three tiers: Core, Crystal, Drusa
+## ADR-038 — the ecosystem has two tiers: Core and Crystal
 
-- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit. The
-  project today names only two tiers (Core + Crystal); the third is the owner's
-  model, not yet formalized.
+- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit; amended
+  2026-07-23 (owner) to drop the speculative third tier. The project names two
+  tiers — Core + Crystal — and this ADR formalizes that boundary and its
+  dependency direction.
 
 - **Context.** `production-service-bom.md` classifies every capability as CORE,
   CRYSTAL, DELEGADO, RECUSADO or ABERTO. A **Crystal** is a first-party optional
-  package that **depends on Uruquim**. But several genuinely useful pieces —
+  package that **depends on Uruquim**. Several genuinely useful pieces —
   a `traceparent`/`tracestate` parser, a 12-factor env/flag config loader, a
   generic HTTP client engine over `core:net` — do **not** need to know Uruquim
-  at all. If they are born as Crystals they couple to the framework for no
-  reason, violating the standing principle "não transforme conveniência em
-  dependência implícita do core."
+  at all. An earlier draft proposed naming such independent libraries as a
+  distinct third tier. The owner rejects that: an independent library that does
+  not know Uruquim is simply an ordinary Odin library, and giving it a
+  project-specific tier name is ceremony without payload — exactly the kind the
+  project refuses.
+  Those libraries are consumed like any other dependency; the standing principle
+  "não transforme conveniência em dependência implícita do core" is honored by
+  the dependency direction below, not by minting a name.
 
-- **Decision.** Formalize three tiers:
+- **Decision.** Formalize two tiers:
   - **Core (`uruquim:web`)** — the mandatory HTTP core; fundamental mechanisms
     and invariants only.
-  - **Crystal** — first-party optional package that **may** depend on Uruquim
-    (and on Drusas); ships in `uruquim-crystals`; one-way dependency into the
-    core's frozen public surface (CE-E3). Examples: `http_client`, `metrics`,
-    the PostgreSQL stack, SSE.
-  - **Drusa** — an independent library that **does not know Uruquim**; a Crystal
-    or an application may embrace it. Examples: a `traceparent` parser, a config
-    loader, a generic transport client engine that `http_client` wraps.
-  Dependency direction is strict: `application → Crystal → web`, and
-  `Crystal → Drusa`, and `application → Drusa`; **never** `web → Crystal/Drusa`,
-  **never** `Drusa → web`.
+  - **Crystal** — first-party optional package that **may** depend on Uruquim;
+    ships in `uruquim-crystals`; one-way dependency into the core's frozen public
+    surface (CE-E3). Examples: `http_client`, `metrics`, the PostgreSQL stack,
+    SSE. A Crystal (or the application) is free to use ordinary Odin libraries
+    that know nothing of Uruquim — a `traceparent` parser, a config loader, a
+    generic transport client engine — the same way any Odin program depends on a
+    library; those are not a tier, they are just dependencies.
+  Dependency direction is strict: `application → Crystal → web`; **never**
+  `web → Crystal`, **never** does an independent library depend on `web`.
 
 - **Reversibility. HIGH.** It is a naming and placement discipline, not a code
-  contract; it can be refined as the first Drusas appear. Its value is
-  preventing accidental coupling before the Crystals ecosystem grows.
+  contract; it can be refined as the Crystals ecosystem grows. Its value is
+  preventing accidental coupling of the core to optional packages.
 
 ## ADR-039 — write and idle timeouts
 
@@ -2001,13 +2006,13 @@ none; the requirement it keeps is the one nobody disputes.
 
 - **Decision.** The core **enables** propagation and does not implement a tracer:
   reading is already possible via `web.header`; the `http_client` Crystal accepts
-  caller-supplied headers so an application (or a Drusa `traceparent` parser) can
-  forward the context. Distributed tracing SDKs remain out of the core (RECUSADO
-  stands). Document the propagation pattern; do not add a tracing type to the
-  public surface.
+  caller-supplied headers so an application (or an ordinary Odin `traceparent`
+  parser library) can forward the context. Distributed tracing SDKs remain out
+  of the core (RECUSADO stands). Document the propagation pattern; do not add a
+  tracing type to the public surface.
 
-- **Reversibility. HIGH.** Documentation + Crystal/Drusa capability; no core
-  contract change.
+- **Reversibility. HIGH.** Documentation + a Crystal (or ordinary-library)
+  capability; no core contract change.
 
 ## ADR-043 — status codes: document the cast, expand the enum only on evidence
 

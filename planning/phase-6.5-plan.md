@@ -52,7 +52,8 @@ readiness handler reports not-ready during drain. Document the pattern in
 
 ### WP-6.5.4 — env-config and health/readiness examples — **P2**
 Ship `examples/10-config-and-health`: load host/port/limits/timeouts from
-environment (12-factor; app-owned, or a Drusa per ADR-038), pass them to
+environment (12-factor; app-owned, or an ordinary Odin config library per
+ADR-038), pass them to
 `web.limits`/`web.serve`; register `/health` (liveness) and `/ready` (readiness,
 consulting `web.is_draining`). No core change beyond WP-6.5.3's accessor.
 **Rollback: HIGH.**
