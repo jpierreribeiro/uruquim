@@ -43,7 +43,7 @@ application	proc	serve :: proc(a: ^App, port: int)
 application	proc	state :: proc(ctx: ^Context, $T: typeid) -> ^T
 application	proc	static :: proc(a: ^App, prefix: string, dir: string, o: Static_Options = {...})
 application	proc	stop :: proc(a: ^App)
-application	proc	stream :: proc(ctx: ^Context) -> (s: Stream, ok: bool)
+application	proc	stream :: proc(ctx: ^Context, content_type := "") -> (s: Stream, ok: bool)
 application	proc	stream_close :: proc(s: Stream)
 application	proc	stream_send :: proc(s: Stream, data: []u8) -> Stream_Send
 application	proc	text :: proc(ctx: ^Context, status: Status, s: string)

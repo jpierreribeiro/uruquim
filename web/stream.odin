@@ -55,7 +55,7 @@ Stream_Send :: enum {
 // to the connection-owning lane. `ok` is false when there is no connection to
 // detach (the in-memory test transport) or the stream cap is reached; the
 // Handler then falls back to an ordinary buffered response.
-stream :: proc(ctx: ^Context) -> (s: Stream, ok: bool) {
+stream :: proc(ctx: ^Context, content_type := "") -> (s: Stream, ok: bool) {
 	if ctx.private.stream_detached || ctx.private.stream_exchange == nil {
 		return Stream{}, false
 	}
@@ -67,7 +67,12 @@ stream :: proc(ctx: ^Context) -> (s: Stream, ok: bool) {
 	// body. `serve_dispatch` reads `stream_detached` and tells the adapter to
 	// frame it chunked; the ADR-008 single-commit guard still applies, so a
 	// Handler that also calls a responder cannot append a second envelope.
-	response_commit(&ctx.private.response, .OK, response_stream_headers(ctx), nil)
+	//
+	// `content_type` is the ONE header a stream's protocol must set itself and
+	// the chain cannot know — `text/event-stream` for SSE, `application/json`
+	// for a chunked JSON feed. Empty (the default) sets none, so an existing
+	// caller is unchanged and a proxy-only stream carries no media type.
+	response_commit(&ctx.private.response, .OK, response_stream_headers(ctx, content_type), nil)
 	ctx.private.stream_detached = true
 	return Stream{private = Stream_Handle{slot = slot, generation = generation, live = true}}, true
 }
@@ -103,10 +108,17 @@ stream_close :: proc(s: Stream) {
 
 // response_stream_headers finishes the framework-owned trailing headers for a
 // stream's committed head, exactly as the buffered responders do (so a stream
-// carries `secure_headers`, the request id and any chain contribution). It sets
-// no Content-Type and no Content-Length: the adapter frames the body chunked,
-// and a media type is the application's to add via the chain if it wants one.
+// carries `secure_headers`, the request id and any chain contribution). It adds
+// `content_type` when the caller gave one, and never a Content-Length: the
+// adapter frames the body chunked.
 @(private)
-response_stream_headers :: proc(ctx: ^Context) -> []Header_Pair {
+response_stream_headers :: proc(ctx: ^Context, content_type: string) -> []Header_Pair {
+	if len(content_type) > 0 {
+		ctx.private.response_headers[0] = Header_Pair {
+			name  = CONTENT_TYPE_HEADER_NAME,
+			value = content_type,
+		}
+		return response_headers_finish(ctx, 1)
+	}
 	return response_headers_finish(ctx, 0)
 }

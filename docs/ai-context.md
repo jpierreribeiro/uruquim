@@ -119,7 +119,7 @@ an atomic; safe from any thread. See `examples/09-graceful-shutdown`.
 ### Response streaming (opt-in, Phase 7)
 
 ```text
-stream(ctx) -> (Stream, bool)     open a detached response; then RETURN
+stream(ctx, content_type="") -> (Stream, bool)   open a detached response; then RETURN
 Stream                            an opaque, stale-safe value token (copyable)
 stream_send(s, data) -> Stream_Send   enqueue bounded output from any thread
 Stream_Send                       enum {Sent, Full, Closed}
@@ -129,7 +129,9 @@ stream_close(s)                   end the stream; idempotent
 `web.stream(ctx)` opens a long-lived response bound to the request's
 connection and commits its status/headers (200 plus whatever the chain —
 `secure_headers`, `cors`, the request id — added), then the **Handler
-returns**. Later code sends on the token from any thread: `web.stream_send`
+returns**. The optional `content_type` sets the one header a stream's protocol
+must declare itself — `text/event-stream` for SSE, `application/json` for a
+chunked JSON feed; empty (the default) adds none. Later code sends on the token from any thread: `web.stream_send`
 copies the bytes into stream-owned storage and never blocks — a full bounded
 queue returns `.Full`, and the application decides whether to retry, drop or
 coalesce. `web.stream_close` writes the terminating chunk. `ok` is `false`
