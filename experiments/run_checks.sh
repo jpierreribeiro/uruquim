@@ -79,6 +79,11 @@ else
   FAIL=$((FAIL+1))
 fi
 
+check 16-stream-topology/candidate-b test "stream topology candidate B (lane-polled producer)"
+check 16-stream-topology/candidate-c test "stream topology candidate C (detached token stream)"
+check 16-stream-topology/candidate-d test "stream topology candidate D (SSE-specific API)"
+check 17-ingest-arms                 test "large-body ingest arms E/F/G/H"
+
 echo "============================================"
 echo "PASS=$PASS FAIL=$FAIL SKIP=$SKIP"
 [ $FAIL -eq 0 ] || exit 1
