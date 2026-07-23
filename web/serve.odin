@@ -147,7 +147,7 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 	if inbound.over_limit {
 		// The adapter rejected the body for length BEFORE the handler. The core
 		// authors the WP7 413 envelope; the handler never runs (WP8 D3).
-		error_commit_static(ctx, STATUS_BODY_TOO_LARGE, ERROR_BODY_TOO_LARGE)
+		error_commit_body_too_large(ctx, ctx.private.limits.max_body)
 		return
 	}
 

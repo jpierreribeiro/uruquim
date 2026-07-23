@@ -74,7 +74,18 @@ json :: proc(ctx: ^Context, status: Status, value: $T) {
 	}
 
 	data, err := encoding_json.marshal(value, {}, context.allocator)
-	if err != nil {
+
+	// NUM-001 (IEEE 754 boundary; RFC 8259 §6). The pinned marshaller writes a
+	// non-finite float — `NaN`, `+Inf`, `-Inf` — as a BARE token, which is not
+	// valid JSON: a strict client parser rejects it. The framework promises
+	// strict JSON on the wire, so it must not emit a body it would itself
+	// refuse. Validate the marshaller's own output with the same strict
+	// validator the decode path trusts; an invalid body (a non-finite float is
+	// the only way finite-input marshalling produces one) is treated exactly
+	// like a marshal failure — a logged 500 — rather than put on the wire. The
+	// cost is one allocation-free pass over the output, and it is the framework
+	// verifying its own contract, not an optional nicety.
+	if err != nil || !encoding_json.is_valid(data, .JSON) {
 		// The encoder may hand back a partially-filled buffer alongside the
 		// error. It has no owner, so it is released here.
 		if data != nil {

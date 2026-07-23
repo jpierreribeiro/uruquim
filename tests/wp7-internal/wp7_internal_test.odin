@@ -349,10 +349,12 @@ wp7_one_over_the_limit_is_too_large_before_parse_and_arena :: proc(t: ^testing.T
 	testing.expect(t, !ok)
 	// 413 is carried by a private status value; no public Status member exists.
 	testing.expect_value(t, int(ctx.private.response.status), 413)
+	// The 413 now reports the ACTUAL configured limit in bytes (WP-6.5.5), not a
+	// constant "4 MiB". This request runs under the default cap of 4 MiB.
 	testing.expect_value(
 		t,
 		string(ctx.private.response.body),
-		`{"error":{"code":"body_too_large","message":"Request body exceeds the 4 MiB limit"}}`,
+		`{"error":{"code":"body_too_large","message":"Request body exceeds the limit of 4194304 bytes"}}`,
 	)
 
 	// The cap is checked BEFORE the arena and BEFORE the parser: no arena, and
