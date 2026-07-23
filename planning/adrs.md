@@ -1846,3 +1846,187 @@ none; the requirement it keeps is the one nobody disputes.
   builders and ORM-like packages possible outside the canonical path if later
   evidence justifies them; it does not force their concepts into applications
   that prefer SQL.
+
+## ADR-037 — client IP resolution walks X-Forwarded-For from the right
+
+- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit
+  (finding F4). Ratify before the Phase-6.5 corrective. Changes public
+  behaviour of `client_ip`, so it is a deliberate compatibility break.
+
+- **Context.** `client_ip` (`web/client_address.odin:150`) returns the
+  **leftmost** `X-Forwarded-For` entry when the connected peer is a trusted
+  proxy. But standard proxies (nginx `$proxy_add_x_forwarded_for`, AWS ELB,
+  HAProxy) *append* the real peer, so the leftmost entry is exactly the value a
+  client forges before any proxy touches it. With even one trusted proxy, the
+  returned IP is attacker-chosen, defeating every control keyed on it — rate
+  limits, allow-lists, geo rules, abuse counters, audit logs. The file's own
+  comment argues for leftmost and calls it "the original client"; that reasoning
+  is the bug. A security scan of the Phase-6 freeze rated this HIGH.
+
+- **Options.** (A) keep leftmost (status quo — vulnerable). (B) walk XFF from
+  the right, discarding entries whose source matches a trusted prefix, return
+  the first untrusted address (or the peer if all are trusted). (C) require the
+  operator to declare a trusted hop count.
+
+- **Decision. B.** The trust decision is already on administered network
+  identity (`trust_proxies`); resolution must follow that identity from the
+  right, not read the one field the client owns. The peer is the fallback when
+  every hop is trusted. `wp48` is updated in the same change; its current
+  assertions encode the buggy leftmost behaviour and must move.
+
+- **Reversibility. LOW once shipped.** Applications will build rate limits and
+  audit on the corrected value; reverting re-opens the spoof. This is why it is
+  ratified as an ADR before the code moves, not patched silently.
+
+## ADR-038 — the ecosystem has three tiers: Core, Crystal, Drusa
+
+- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit. The
+  project today names only two tiers (Core + Crystal); the third is the owner's
+  model, not yet formalized.
+
+- **Context.** `production-service-bom.md` classifies every capability as CORE,
+  CRYSTAL, DELEGADO, RECUSADO or ABERTO. A **Crystal** is a first-party optional
+  package that **depends on Uruquim**. But several genuinely useful pieces —
+  a `traceparent`/`tracestate` parser, a 12-factor env/flag config loader, a
+  generic HTTP client engine over `core:net` — do **not** need to know Uruquim
+  at all. If they are born as Crystals they couple to the framework for no
+  reason, violating the standing principle "não transforme conveniência em
+  dependência implícita do core."
+
+- **Decision.** Formalize three tiers:
+  - **Core (`uruquim:web`)** — the mandatory HTTP core; fundamental mechanisms
+    and invariants only.
+  - **Crystal** — first-party optional package that **may** depend on Uruquim
+    (and on Drusas); ships in `uruquim-crystals`; one-way dependency into the
+    core's frozen public surface (CE-E3). Examples: `http_client`, `metrics`,
+    the PostgreSQL stack, SSE.
+  - **Drusa** — an independent library that **does not know Uruquim**; a Crystal
+    or an application may embrace it. Examples: a `traceparent` parser, a config
+    loader, a generic transport client engine that `http_client` wraps.
+  Dependency direction is strict: `application → Crystal → web`, and
+  `Crystal → Drusa`, and `application → Drusa`; **never** `web → Crystal/Drusa`,
+  **never** `Drusa → web`.
+
+- **Reversibility. HIGH.** It is a naming and placement discipline, not a code
+  contract; it can be refined as the first Drusas appear. Its value is
+  preventing accidental coupling before the Crystals ecosystem grows.
+
+## ADR-039 — write and idle timeouts
+
+- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit. Adds
+  fields to `Limits` (additive ledger growth — pays the gate-amendment
+  checklist) and a bridge patch to the vendored backend.
+
+- **Context.** `Limits.max_request_time` bounds request *arrival* only (a
+  resettable-free slowloris defense). There is **no write deadline** (a
+  slow-reading client stalls a response write unbounded) and **no idle/keep-alive
+  timeout** (an idle connection holds a slot until `max_connections` or the OS
+  reclaims it). Both are resource-exhaustion vectors a production server must
+  bound, and both are twelve-factor/operations expectations.
+
+- **Decision.** Add `max_write_time` and `max_idle_time` to `Limits` (0 =
+  disabled, matching `max_request_time`/`max_drain_time` convention), enforced in
+  the vendored backend's deadline sweep as **BRIDGE** patches (deletable when the
+  official `core:net/http` adapter lands, ADR-033). Raw-wire corpus cases prove
+  a stalled write and an idle keep-alive are closed at their deadline. Defaults
+  are conservative and safe-without-tuning.
+
+- **Reversibility. MEDIUM.** New public `Limits` fields are frozen once shipped;
+  the bridge enforcement is disposable with the adapter. If the timeouts prove
+  to belong at the proxy only, the fields can default to 0 (off) rather than be
+  removed.
+
+## ADR-040 — graceful shutdown stays app-owned, with a canonical example and a drain signal
+
+- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit.
+
+- **Context.** The core installs no `SIGTERM`/`SIGINT` handler; `web.stop` is
+  thread- and signal-safe but the application must call it. No example
+  demonstrates this, so a first real deployment drops in-flight requests on every
+  rolling update. Separately, there is no public way to observe that the server
+  is draining, so a Kubernetes readiness probe cannot flip to not-ready when
+  shutdown begins.
+
+- **Options.** (A) core installs a `SIGTERM` handler automatically. (B) keep
+  signals app-owned; ship a canonical example + doc, plus a public read-only
+  drain-state accessor.
+
+- **Decision. B.** A framework that seizes process signals fights the
+  application and the twelve-factor model (the process manager owns signals).
+  Instead: ship `examples/09-graceful-shutdown` (install a `SIGTERM`/`SIGINT`
+  handler → `web.stop`), document the pattern in `operations.md`, and add a
+  minimal public accessor (e.g. `web.is_draining(&app) -> bool`) so a readiness
+  handler can report not-ready during drain. The accessor is additive public API
+  (pays the ledger amendment).
+
+- **Reversibility. HIGH for the example/doc; MEDIUM for the accessor** (public
+  once shipped).
+
+## ADR-041 — the error envelope stays closed; RFC 9457 is an optional Crystal adapter
+
+- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit.
+
+- **Context.** The error wire shape is `{"error":{"code","message","field?"}}`
+  with `Content-Type: application/json`, no exported envelope type, no public
+  error-code enum, no constructor. It does not leak stack traces or internal
+  type names — a real strength. But it is **not** RFC 9457 Problem Details
+  (`application/problem+json`, `type/title/status/detail/instance`), and an
+  application cannot add fields or custom codes without forking the core.
+
+- **Options.** (A) keep the envelope closed and unextendable. (B) open the core
+  envelope to custom codes/fields via a public constructor. (C) keep the core
+  contract exactly as-is and offer `problem+json` as an **optional adapter
+  (Crystal)** that maps the closed envelope onto RFC 9457 for services that need
+  interop.
+
+- **Decision. C.** The closed, non-leaking envelope is a deliberate safety
+  property that should not be diluted with app-supplied fields in the core. A
+  Crystal adapter serves the RFC-9457 need without changing the core contract or
+  its ledger. The core envelope remains canonical; the adapter is opt-in.
+
+- **Reversibility. HIGH.** The Crystal can evolve or be dropped independently;
+  the core contract is untouched.
+
+## ADR-042 — trace-context propagation is enabled, not implemented, by the core
+
+- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit.
+
+- **Context.** `production-service-bom.md` refuses an OpenTelemetry *backend* in
+  the core (RECUSADO), correctly. But **propagation** of W3C Trace Context —
+  reading `traceparent`/`tracestate` on the inbound request and forwarding them
+  on outbound calls — is a different, lighter obligation that a microservice
+  mesh needs, and it is currently neither present nor planned. The core already
+  exposes inbound headers via `web.header(ctx, ...)`, so reading `traceparent` is
+  possible; forwarding it requires the outbound `http_client`.
+
+- **Decision.** The core **enables** propagation and does not implement a tracer:
+  reading is already possible via `web.header`; the `http_client` Crystal accepts
+  caller-supplied headers so an application (or a Drusa `traceparent` parser) can
+  forward the context. Distributed tracing SDKs remain out of the core (RECUSADO
+  stands). Document the propagation pattern; do not add a tracing type to the
+  public surface.
+
+- **Reversibility. HIGH.** Documentation + Crystal/Drusa capability; no core
+  contract change.
+
+## ADR-043 — status codes: document the cast, expand the enum only on evidence
+
+- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit.
+
+- **Context.** `web.Status` exposes 200/201/202/204/400/401/403/404/405/500. It
+  has **no 409, 422, 304, or 413** as public members; a handler needing one must
+  cast `web.Status(409)`. The framework itself uses a private `Status(413)`. The
+  cast is legal but undocumented, and 409/422 are common in real REST APIs.
+
+- **Options.** (A) leave the enum as-is, document the cast as the official path.
+  (B) expand the enum with the common missing codes (409, 422, 304), paying the
+  ledger cost.
+
+- **Decision. A for now.** Document `web.Status(n)` as the supported way to emit
+  any valid status; do not grow the frozen enum speculatively. Revisit expansion
+  only if the validation microservice (or real use) shows a specific code is
+  needed on the hot path often enough to justify a named member. This keeps the
+  public surface minimal per G-09.
+
+- **Reversibility. HIGH.** Documenting a cast commits nothing; a later member
+  addition is additive.

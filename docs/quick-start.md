@@ -176,26 +176,41 @@ deny :: proc(ctx: ^web.Context) {
 The full set is `bad_request`, `unauthorized`, `forbidden`, `not_found` and
 `internal_error`.
 
-## What Phase 1 does not do yet
+## Current limitations
 
-Honest limits, so nothing surprises you later:
+Honest limits, so nothing surprises you later. These are what the shipped core
+does **not** do today — verified against the current build, not a past phase.
 
-- **No middleware, groups, or shared application state.** Handlers are
-  standalone procedures. (Phase 2 and Phase 3.)
 - **A fault in a handler aborts the process.** A panic, a failed assertion or
   an out-of-bounds index takes the server down; the client sees an empty reply.
   There is no recovery middleware and there never will be — Odin has no
-  recoverable panic (ADR-020). Run under a supervisor. What Uruquim *does*
-  guarantee is the other half: a handler that returns without responding gets
-  the standardized 500. See `docs/errors.md`.
-- **No configurable limits or timeouts.** The 4 MiB body cap is fixed, and
-  there are no read/write timeouts. (Phase 3.)
-- **No graceful-shutdown deadline.** Stopping is clean, but there is no
-  drain-with-timeout. (Phase 4.)
-- **No request header lookup.** (Phase 2.)
+  recoverable panic (ADR-020). Run under a supervisor with `Restart=always`.
+  What Uruquim *does* guarantee is the other half: a handler that returns
+  without responding gets the standardized 500. See `docs/errors.md`.
+- **No write timeout and no idle/keep-alive timeout.** `Limits.max_request_time`
+  bounds request *arrival* (a slowloris defense), but a slow-reading client can
+  stall a response write, and an idle keep-alive connection holds its slot until
+  the connection limit or the OS reclaims it. Put a reverse proxy with its own
+  timeouts in front.
+- **A blocked handler is not cancellable.** A handler stuck in blocking foreign
+  code (a C library, a synchronous call) holds its lane past the drain deadline;
+  the supervisor's kill timeout is the outer bound. Multiple lanes bound the
+  blast radius, not the individual stuck call.
+- **No outbound HTTP client, no metrics/tracing backend, no TLS in the core.**
+  Calling other services, exporting Prometheus metrics, propagating trace
+  context and terminating TLS are the application's, a Crystal's, or the reverse
+  proxy's job — not the core's. See `docs/operations.md`.
+- **Uploads are buffered whole, bounded by `Limits.max_body`.** There is no
+  disk spool; a body over the limit is refused with 413. Large-file ingestion is
+  planned (streaming/spool) but not shipped.
+- **Graceful shutdown is not wired to a signal for you.** `web.stop(&app)` is
+  thread- and signal-safe and drains within `Limits.max_drain_time`, but the
+  core installs no `SIGTERM`/`SIGINT` handler — your `main` must install one and
+  call `web.stop`. See `docs/operations.md` for the pattern.
 
-Uruquim is usable for building and testing a JSON API today. It is not yet
-hardened for unattended production exposure.
+Uruquim is usable for building and testing a JSON API today, and for a
+controlled pilot behind a reverse proxy under a supervisor. Read
+`docs/operations.md` before exposing it to real traffic.
 
 ## Next
 
