@@ -513,9 +513,9 @@ ERROR_BODY_NOT_FOUND_GENERIC ::
 ERROR_BODY_INVALID_JSON ::
 	`{"error":{"code":"invalid_json","message":"Request body must be valid JSON"}}`
 
-@(private)
-ERROR_BODY_TOO_LARGE ::
-	`{"error":{"code":"body_too_large","message":"Request body exceeds the 4 MiB limit"}}`
+// The 413 envelope is built dynamically by `error_commit_body_too_large`, so it
+// can report the ACTUAL configured limit rather than a constant "4 MiB" that
+// lied whenever `max_body` was changed.
 
 // STATUS_BODY_TOO_LARGE carries HTTP 413 WITHOUT adding a public `Status`
 // member. `Status` is a public enum and its member list is frozen (WP7 D3), but
@@ -548,6 +548,67 @@ Error_Envelope_Body :: struct {
 // It allocates nothing and cannot fail. The `Content-Type` pair lives in
 // request-local storage on the Context, so the committed header is not a view
 // into a dead frame.
+// error_commit_body_too_large commits the 413 envelope reporting the ACTUAL
+// configured byte limit, not a hardcoded "4 MiB". The message was a static
+// constant that lied whenever `max_body` was set to anything but the default;
+// this builds it into the request-local error buffer with the effective limit
+// formatted as an exact decimal byte count — no `core:fmt` (WP6's 37 KiB rule),
+// just a digit loop. The body is BORROWED from the fixed buffer, like every
+// other dynamic envelope.
+@(private)
+error_commit_body_too_large :: proc(ctx: ^Context, limit: int) {
+	if ctx.private.response.committed {
+		return
+	}
+
+	effective := limit
+	if effective <= 0 {
+		effective = BODY_LIMIT
+	}
+
+	buffer := ctx.private.error_buffer[:]
+	n := 0
+	n += copy(buffer[n:], `{"error":{"code":"body_too_large","message":"Request body exceeds the limit of `)
+	n = error_write_decimal(buffer, n, effective)
+	n += copy(buffer[n:], ` bytes"}}`)
+
+	response_commit(
+		&ctx.private.response,
+		STATUS_BODY_TOO_LARGE,
+		response_json_headers(ctx),
+		buffer[:n],
+	)
+}
+
+// error_write_decimal writes a non-negative int as ASCII decimal into `buffer`
+// at offset `n`, returning the new offset. Allocation-free, no `core:fmt`.
+@(private)
+error_write_decimal :: proc(buffer: []u8, n: int, value: int) -> int {
+	if value == 0 {
+		if n < len(buffer) {
+			buffer[n] = '0'
+			return n + 1
+		}
+		return n
+	}
+	// Extract digits least-significant first into a small scratch, then emit
+	// them in order. An int is at most 20 decimal digits.
+	digits: [20]u8
+	count := 0
+	v := value
+	for v > 0 && count < len(digits) {
+		digits[count] = u8('0' + v % 10)
+		v /= 10
+		count += 1
+	}
+	m := n
+	for i := count - 1; i >= 0 && m < len(buffer); i -= 1 {
+		buffer[m] = digits[i]
+		m += 1
+	}
+	return m
+}
+
 @(private)
 error_commit_static :: proc(ctx: ^Context, status: Status, body: string) {
 	if ctx.private.response.committed {

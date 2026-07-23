@@ -327,7 +327,7 @@ body :: proc(ctx: ^Context, dst: ^$T) -> bool {
 		cap = BODY_LIMIT
 	}
 	if len(raw) > cap {
-		error_commit_static(ctx, STATUS_BODY_TOO_LARGE, ERROR_BODY_TOO_LARGE)
+		error_commit_body_too_large(ctx, ctx.private.limits.max_body)
 		return false
 	}
 

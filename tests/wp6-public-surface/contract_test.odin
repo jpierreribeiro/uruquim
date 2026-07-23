@@ -17,6 +17,7 @@ package wp6_public_surface
 
 import "core:encoding/json"
 import "core:log"
+import "core:math"
 import "core:strings"
 import "core:testing"
 import web "uruquim:web"
@@ -385,6 +386,59 @@ wp6_unmarshalable_payload_yields_a_complete_500 :: proc(t: ^testing.T) {
 		t,
 		!strings.contains(res.body, "unmarshalable"),
 		"no partial payload may escape into the error response",
+	)
+}
+
+Measurement :: struct {
+	label: string `json:"label"`,
+	value: f64    `json:"value"`,
+}
+
+non_finite_payload_handler :: proc(ctx: ^web.Context) {
+	// NUM-001: the pinned marshaller writes a non-finite float as a bare
+	// `+Inf` token, which is not valid JSON. `web.json` must not put it on the
+	// wire; it takes the same complete-500 path as any other unencodable value.
+	web.ok(ctx, Measurement{label = "temperature", value = math.inf_f64(1)})
+}
+
+@(test)
+wp6_num001_non_finite_float_yields_a_complete_500 :: proc(t: ^testing.T) {
+	a := web.app()
+	defer web.destroy(&a)
+	web.get(&a, "/reading", non_finite_payload_handler)
+
+	// Capture the expected framework error, exactly as the marshal-failure test
+	// does, so the runner does not count the reported 500 as an unexpected log.
+	expected := Expected_Log {
+		inner = context.logger,
+	}
+	context.logger = log.Logger {
+		procedure    = expected_log_proc,
+		data         = rawptr(&expected),
+		lowest_level = .Debug,
+		options      = context.logger.options,
+	}
+
+	res := web.test_request(&a, .GET, "/reading")
+
+	testing.expect_value(t, expected.seen, 1)
+
+	// A non-finite float is a broken response, answered by a clean 500 —
+	// never invalid JSON on the wire.
+	testing.expect_value(t, res.status, web.Status.Internal_Server_Error)
+	expect_envelope(t, res.body, "internal_error", "Internal server error")
+
+	// The invalid tokens must never reach the client, and the response body
+	// must itself be valid JSON.
+	testing.expect(
+		t,
+		!strings.contains(res.body, "Inf") && !strings.contains(res.body, "NaN"),
+		"a non-finite float token must never escape onto the wire",
+	)
+	testing.expect(
+		t,
+		json.is_valid(transmute([]u8)res.body, .JSON),
+		"the error response body must itself be valid JSON",
 	)
 }
 

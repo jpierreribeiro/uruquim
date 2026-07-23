@@ -138,16 +138,18 @@ exist at the same object level, the selected key is deterministic.
 **Producer:** `web.body`, but enforced by the transport as it reads. **No
 field.**
 
-**Message:** `Request body exceeds the 4 MiB limit`
+**Message:** `Request body exceeds the limit of <N> bytes`, where `<N>` is the
+configured limit — the default is `4194304` (4 MiB).
 
 ```json
-{"error":{"code":"body_too_large","message":"Request body exceeds the 4 MiB limit"}}
+{"error":{"code":"body_too_large","message":"Request body exceeds the limit of 4194304 bytes"}}
 ```
 
-The cap is a fixed 4 MiB (4·1024·1024 bytes). Exactly 4 MiB is accepted; only a
-strictly larger body is rejected. The check happens **before** the handler runs,
-so the limit holds even for a handler that never calls `web.body`. A
-configurable limit is Phase 3.
+The cap defaults to 4 MiB (4·1024·1024 = 4194304 bytes) and is configurable with
+`web.limits` (`Limits.max_body`); the message reports whatever limit is in
+effect. Exactly the limit is accepted; only a strictly larger body is rejected.
+The check happens **before** the handler runs, so the limit holds even for a
+handler that never calls `web.body`.
 
 ---
 
