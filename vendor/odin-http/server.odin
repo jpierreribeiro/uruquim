@@ -591,6 +591,22 @@ Connection :: struct {
 	// `scanner.pending_recv`: without the cancel, teardown frees the
 	// connection while the send completion still points at it.
 	pending_send:    ^nbio.Operation,
+	// URUQUIM PATCH 19 (WP92 amendment) — a per-connection write deadline
+	// that takes precedence over the server-wide one. A DETACHED STREAM must
+	// be safe without tuning (phase-7-spec.md §4.1): when the application
+	// left `max_write_time` at 0, a stream connection still gets the
+	// pre-registered 30 s default, because a client that never reads is the
+	// slow-consumer terminal case and "off by default" for buffered
+	// responses must not mean "unbounded" for infinite ones.
+	write_deadline_override: time.Duration,
+	// URUQUIM PATCH 22 (WP92 amendment) — an owner notification fired by
+	// `connection_teardown` BEFORE the Connection is freed. The detached-
+	// stream adapter installs it so an EXTERNALLY-initiated end — the
+	// deadline sweep's abort, a shutdown force-close, a scanner error —
+	// releases the stream's registry slot and stops its pump from ever
+	// touching the freed Connection. Runs on the owner lane, once.
+	on_teardown:      proc(user: rawptr),
+	on_teardown_user: rawptr,
 	// URUQUIM PATCH 20 (WP90 / ADR-039) — when this connection last became
 	// idle between requests, or the zero value while a request or response is
 	// in flight. Stamped in `clean_request_loop` on the keep-alive path,
@@ -667,6 +683,13 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 @(private)
 connection_teardown :: proc(_: ^nbio.Operation, c: ^Connection) {
 	log.debugf("closed connection: %i", c.socket)
+
+	// URUQUIM PATCH 22 (WP92 amendment) — the owner hears about the end
+	// before the memory goes away, whoever initiated it.
+	if c.on_teardown != nil {
+		c.on_teardown(c.on_teardown_user)
+		c.on_teardown = nil
+	}
 
 	c.state = .Closed
 
@@ -1109,14 +1132,24 @@ server_deadline_sweep :: proc(_: ^nbio.Operation, s: ^Server) {
 	read_t := s.opts.request_read_timeout
 	write_t := s.opts.response_write_timeout
 	idle_t := s.opts.idle_timeout
-	if read_t > 0 || write_t > 0 || idle_t > 0 {
+	// The loop always runs (WP92): per-connection overrides — the detached
+	// stream's safe-without-tuning default — can arm a deadline even when
+	// every server-wide value is 0. Each branch self-gates; an all-off
+	// server pays one map iteration per 250 ms per lane, which is noise.
+	{
 		now := time.now()
 		for _, conn in td.conns {
 			if conn.state >= .Closing {
 				continue
 			}
-			if write_t > 0 && conn.send_started != (time.Time{}) &&
-			   time.diff(conn.send_started, now) > write_t {
+			// PATCH 19 (WP92 amendment): a per-connection override — set for
+			// detached streams — takes precedence over the server-wide value.
+			effective_write := write_t
+			if conn.write_deadline_override > 0 {
+				effective_write = conn.write_deadline_override
+			}
+			if effective_write > 0 && conn.send_started != (time.Time{}) &&
+			   time.diff(conn.send_started, now) > effective_write {
 				log.infof("uruquim: response write deadline exceeded; aborting connection %i", conn.socket)
 				// Abort, not close: a graceful close would flush kernel
 				// buffers to the slow reader first — see `connection_abort`.

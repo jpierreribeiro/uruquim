@@ -122,6 +122,13 @@ Registry :: struct {
 	wake_user:    rawptr,
 	allocator:    mem.Allocator,
 	initialized:  bool,
+
+	// WP92 — refusal and disconnect accounting, atomics like the WP47
+	// admission counters and for the same reason: capacity refusals are a
+	// RESULT an operator sizes queues by, not a log line per event.
+	refused_stream_full: int, // per-stream event/byte cap refused a send
+	refused_budget_full: int, // the process-wide byte budget refused a send
+	aborted_slow:        int, // owner tore a stream down on write error/deadline
 }
 
 resolve :: proc(cap: Capacity) -> Capacity {
@@ -262,16 +269,19 @@ try_send :: proc(r: ^Registry, tok: Token, data: []u8) -> Send_Result {
 	//    process-wide byte budget (reserve-then-check keeps it atomic).
 	if s.events_count >= len(s.events) {
 		sync.mutex_unlock(&s.mu)
+		sync.atomic_add(&r.refused_stream_full, 1)
 		return .Full
 	}
 	needed, gap := store_reserve(s, len(data))
 	if needed < 0 {
 		sync.mutex_unlock(&s.mu)
+		sync.atomic_add(&r.refused_stream_full, 1)
 		return .Full
 	}
 	if sync.atomic_add(&r.total_bytes, needed) + needed > r.cap.max_bytes_total {
 		sync.atomic_sub(&r.total_bytes, needed)
 		sync.mutex_unlock(&s.mu)
+		sync.atomic_add(&r.refused_budget_full, 1)
 		return .Full
 	}
 	// 3. copy into stream-owned storage. When a wrap gap was reserved, the
@@ -544,4 +554,29 @@ live_streams :: proc(r: ^Registry) -> int {
 	sync.mutex_lock(&r.free_mu)
 	defer sync.mutex_unlock(&r.free_mu)
 	return r.live
+}
+
+// WP92 — the accounting an operator sizes queues by. `note_abort` is called
+// by the owner on its error/deadline teardown path.
+Counters :: struct {
+	refused_stream_full: int,
+	refused_budget_full: int,
+	aborted_slow:        int,
+}
+
+counters :: proc(r: ^Registry) -> Counters {
+	if !r.initialized {
+		return Counters{}
+	}
+	return Counters {
+		refused_stream_full = sync.atomic_load(&r.refused_stream_full),
+		refused_budget_full = sync.atomic_load(&r.refused_budget_full),
+		aborted_slow        = sync.atomic_load(&r.aborted_slow),
+	}
+}
+
+note_abort :: proc(r: ^Registry) {
+	if r.initialized {
+		sync.atomic_add(&r.aborted_slow, 1)
+	}
 }

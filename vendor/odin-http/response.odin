@@ -412,6 +412,20 @@ clean_request_loop :: proc(conn: ^Connection, close: Maybe(bool) = nil) {
 // the ADAPTER to send on the owner lane. The request-read deadline stamp is
 // cleared: the request has fully arrived, and a long-lived response is not a
 // slow request. The write deadline still applies per send (Patch 19 stamps).
+// URUQUIM PATCH 19 (WP92 amendment) — the pre-registered slow-consumer
+// default for detached streams (phase-7-spec.md §4.1): when the application
+// left the write deadline off, a stream still gets 30 seconds per send.
+URUQUIM_STREAM_DEFAULT_WRITE_TIMEOUT :: 30 * time.Second
+
+// stream_effective_write_deadline resolves the deadline a detached stream's
+// sends live under. Pure, so the WP92 suite pins the resolution directly.
+stream_effective_write_deadline :: proc(configured: time.Duration) -> time.Duration {
+	if configured > 0 {
+		return configured
+	}
+	return URUQUIM_STREAM_DEFAULT_WRITE_TIMEOUT
+}
+
 stream_prepare :: proc(r: ^Response) -> []u8 {
 	headers_set_close(&r.headers)
 	headers_set_unsafe(&r.headers, "transfer-encoding", "chunked")
@@ -419,6 +433,11 @@ stream_prepare :: proc(r: ^Response) -> []u8 {
 	r.sent = true // the adapter owns the wire from here; `respond` must never run
 	conn := r._conn
 	conn.request_started = {}
+	// WP92 — the slow-consumer terminal policy arms here: every chunk send on
+	// this connection is bounded, tuned or not.
+	conn.write_deadline_override = stream_effective_write_deadline(
+		conn.server.opts.response_write_timeout,
+	)
 	return bytes.buffer_to_bytes(&r._buf)
 }
 
