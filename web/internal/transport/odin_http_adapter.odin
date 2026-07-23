@@ -15,7 +15,6 @@ import http "uruquim:vendor/odin-http"
 import stream "uruquim:web/internal/stream"
 import "core:mem"
 import "core:net"
-import "core:nbio"
 import "core:os"
 import "core:strconv"
 import "core:time"
@@ -340,12 +339,24 @@ dispatch_exchange :: proc(exchange: ^Exchange) {
 	res := exchange.res
 
 	// A cancellation must finish before application code blocks this event loop.
-	// If another ready connection reaches this point while the lane is entering
-	// a Handler, retain its exchange and retry on a later tick.
+	// The lane is either entered here or the request is refused — there is no
+	// deferred retry, because everything the dispatch names lives in the
+	// connection's temp arena and cannot outlive a client disconnect (F-002).
 	if !http.handler_lane_enter(res) {
-		nbio.next_tick_poly(exchange, proc(_: ^nbio.Operation, exchange: ^Exchange) {
-			dispatch_exchange(exchange)
-		})
+		// URUQUIM FIX (F-002) — a deferred dispatch can never run safely. The
+		// Exchange and everything it names (`req`/`res` into `conn.loop`, the
+		// inbound views) live in the connection's temp arena, which
+		// `connection_close` frees wholesale when the client disconnects. A
+		// `next_tick` retry therefore dereferences freed memory the moment a
+		// client drops a contended connection — and even a client that stays
+		// connected would have its response state torn down by
+		// `clean_request_loop` before the retry fires. Retrying is unsound;
+		// refuse the admission instead: answer 503 while the response state
+		// is still valid, exactly as a load-shedding proxy would, and let the
+		// client retry.
+		http.headers_set_close(&res.headers)
+		res.status = http.Status.Service_Unavailable
+		http.respond(res)
 		return
 	}
 
