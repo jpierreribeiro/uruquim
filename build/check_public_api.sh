@@ -393,11 +393,22 @@ fi
 URUQUIM_WEB_INTERNAL="$URUQUIM_WEB/internal"
 if test -d "$URUQUIM_WEB_INTERNAL"; then
   URUQUIM_INTERNAL_SUBDIRS="$(find "$URUQUIM_WEB_INTERNAL" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | LC_ALL=C sort)"
-  if test "$URUQUIM_INTERNAL_SUBDIRS" != "transport"; then
-    echo "--- web/internal subdirectories (only 'transport' is allowed) ---" >&2
+  # Amended by WP87 (2026-07-23): Phase 7 adds exactly two private lifecycle
+  # packages — `stream` (WP88/WP89) and `ingest` (WP94) — fixed as sentinels
+  # by the WP87 corpus. They are one-way like transport: never importers of
+  # `uruquim:web`, and `web` may not import them until their implementing WP
+  # lands (enforced by check_wp87_controls.sh). Anything else remains refused.
+  URUQUIM_INTERNAL_EXPECTED="$(printf 'ingest\nstream\ntransport\n')"
+  if test "$URUQUIM_INTERNAL_SUBDIRS" != "$URUQUIM_INTERNAL_EXPECTED"; then
+    echo "--- web/internal subdirectories (only 'ingest', 'stream', 'transport' are allowed) ---" >&2
     echo "$URUQUIM_INTERNAL_SUBDIRS" >&2
-    fail "web/internal/ has an unexpected subdirectory; WP8 permits only web/internal/transport/"
+    fail "web/internal/ has an unexpected subdirectory; WP8 (amended by WP87) permits only transport/, stream/ and ingest/"
   fi
+  for URUQUIM_P7_PKG in stream ingest; do
+    if grep -nE '"uruquim:web"' "$URUQUIM_WEB_INTERNAL/$URUQUIM_P7_PKG"/*.odin; then
+      fail "web/internal/$URUQUIM_P7_PKG imports uruquim:web; the internal boundary is one-way (ADR-009 Amendment 1)"
+    fi
+  done
   URUQUIM_TRANSPORT="$URUQUIM_WEB_INTERNAL/transport"
   if grep -nE '"uruquim:web"' "$URUQUIM_TRANSPORT"/*.odin; then
     fail "web/internal/transport imports uruquim:web; the transport boundary is one-way (ADR-009 / WP8 D1)"

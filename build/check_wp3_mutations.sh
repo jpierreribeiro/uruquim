@@ -69,6 +69,9 @@ fresh_tree() {
   local t
   t="$(mktemp -d -t uruquim-wp3-mutation-XXXXXXXX)"
   mkdir -p "$t/build" "$t/web/testing" "$t/web/internal/transport" "$t/tests" "$t/vendor"
+  # WP87: the checker now pins web/internal/ to exactly {transport, stream,
+  # ingest}, so the fresh tree must carry the two sentinel packages too.
+  mkdir -p "$t/web/internal/stream" "$t/web/internal/ingest"
   cp "$URUQUIM_ROOT"/build/check_public_api.sh "$t/build/"
   # The checker's 11f section reads its caller to prove every socket suite
   # runs under an external timeout, so the caller travels with it.
@@ -76,6 +79,8 @@ fresh_tree() {
   cp "$URUQUIM_ROOT"/web/*.odin "$t/web/"
   cp "$URUQUIM_ROOT"/web/testing/*.odin "$t/web/testing/"
   cp "$URUQUIM_ROOT"/web/internal/transport/*.odin "$t/web/internal/transport/"
+  cp "$URUQUIM_ROOT"/web/internal/stream/*.odin "$t/web/internal/stream/"
+  cp "$URUQUIM_ROOT"/web/internal/ingest/*.odin "$t/web/internal/ingest/"
   cp -r "$URUQUIM_ROOT"/vendor/odin-http "$t/vendor/odin-http"
   cp -r "$URUQUIM_ROOT"/tests/. "$t/tests/"
   printf '%s' "$t"
