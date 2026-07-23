@@ -72,6 +72,7 @@ Admission :: struct {
 	active:        int,
 	process_bytes: i64, // total spooled bytes across live spools; drives the process quota
 	seq:           u64, // filename entropy source, monotonic under mu
+	draining:      bool, // WP95: set at drain; admission then refuses
 	initialized:   bool,
 }
 
@@ -107,11 +108,30 @@ admit :: proc(a: ^Admission) -> Ingest_Result {
 	}
 	sync.mutex_lock(&a.mu)
 	defer sync.mutex_unlock(&a.mu)
+	if a.draining {
+		// WP95 — no new large-body ingest is admitted once drain begins; a
+		// Handler that would start one gets the same typed refusal as one
+		// that hit the concurrency cap. In-flight spools finish or are
+		// cancelled by the request that owns them.
+		return .Refused_Admission
+	}
 	if a.active >= a.cfg.max_concurrent {
 		return .Refused_Admission
 	}
 	a.active += 1
 	return .Ready
+}
+
+// admission_drain stops admission; it does not touch in-flight spools, which
+// are owned by the synchronous Handler holding them and are cancelled by that
+// request's teardown at the process drain deadline (WP95, spec §2).
+admission_drain :: proc(a: ^Admission) {
+	if !a.initialized {
+		return
+	}
+	sync.mutex_lock(&a.mu)
+	a.draining = true
+	sync.mutex_unlock(&a.mu)
 }
 
 // begin opens the spool file: a generated unpredictable `uruquim-spool-` name,

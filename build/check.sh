@@ -1287,6 +1287,16 @@ timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
   -out:"$URUQUIM_BIN_TMP/wp92-backpressure" ||
   fail "the WP92 backpressure contract did not pass within the timeout"
 
+# WP95 — drain: open detached streams terminate within max_drain_time (the one
+# process deadline, no second grace clock), and large-body admission refuses
+# once draining. Serial: fixed port + the one-server-per-process global.
+echo "--- WP95 stream/body drain within the process deadline (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp95-drain" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp95-drain" ||
+  fail "the WP95 drain contract did not pass within the timeout"
+
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
 if find "$URUQUIM_ROOT" -maxdepth 1 -type f -name 'uruquim-*' -print -quit | grep -q .; then
