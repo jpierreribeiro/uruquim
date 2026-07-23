@@ -1,0 +1,106 @@
+#!/usr/bin/env bash
+# WP87 — the stream/body lifecycle corpus is committed RED, under control.
+#
+# Three claims, each executable:
+#   1. the buffered oracle is GREEN — so the RED below cannot be blamed on the
+#      tree, and G7-10's byte pins exist before any streaming code does;
+#   2. both lifecycle corpora fail COMPLETELY, and for the sentinel's reason
+#      (`Unimplemented`), not for a compile error, a partial pass or an
+#      unrelated fault — the WP67 vacuity lesson;
+#   3. the pre-registered contract cases are all present by name, so a later
+#      edit cannot quietly drop one and call the survivor set "the corpus".
+set -euo pipefail
+
+URUQUIM_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+fail() {
+  echo "WP87-CONTROL-FAIL: $*" >&2
+  exit 1
+}
+
+if test -n "${URUQUIM_COMPILER:-}"; then
+  URUQUIM_ODIN="$URUQUIM_COMPILER"
+elif test -n "${URUQUIM_ODIN_BIN:-}"; then
+  URUQUIM_ODIN="$URUQUIM_ODIN_BIN"
+elif command -v odin >/dev/null 2>&1; then
+  URUQUIM_ODIN="$(command -v odin)"
+elif test -x /tmp/uruquim-odin-toolchain/odin; then
+  URUQUIM_ODIN=/tmp/uruquim-odin-toolchain/odin
+else
+  fail "odin compiler not found"
+fi
+
+URUQUIM_ODIN="$(readlink -f "$URUQUIM_ODIN")"
+URUQUIM_ODIN_ROOT="$(cd "$(dirname "$URUQUIM_ODIN")" && pwd)"
+URUQUIM_TMP="$(mktemp -d -t uruquim-wp87-controls-XXXXXXXX)"
+trap 'rm -rf "$URUQUIM_TMP"' EXIT
+
+run_green() { # package, output binary
+  env ODIN_ROOT="$URUQUIM_ODIN_ROOT" "$URUQUIM_ODIN" test \
+    "$1" "-collection:uruquim=$URUQUIM_ROOT" "-out:$URUQUIM_TMP/$2"
+}
+
+run_expected_red() { # package, output binary, then diagnostic tokens...
+  local package="$1" binary="$2"
+  shift 2
+  local output
+  if output="$(env ODIN_ROOT="$URUQUIM_ODIN_ROOT" "$URUQUIM_ODIN" test \
+      "$package" "-collection:uruquim=$URUQUIM_ROOT" \
+      "-out:$URUQUIM_TMP/$binary" 2>&1)"; then
+    fail "$package unexpectedly passed before WP88/WP89/WP94 exist"
+  fi
+  for token in "$@"; do
+    grep -qF "$token" <<<"$output" || {
+      echo "$output" >&2
+      fail "$package failed for the wrong reason; missing diagnostic token: $token"
+    }
+  done
+}
+
+# Claim 1 — the oracle: buffered behaviour is pinned and green today.
+run_green "$URUQUIM_ROOT/tests/wp87-buffered-oracle" oracle-green
+
+# Claim 2/3 — the response-stream corpus: complete RED, sentinel's reason,
+# every pre-registered case present by name.
+run_expected_red \
+  "$URUQUIM_ROOT/tests/wp87-stream-lifecycle" stream-red \
+  "All tests failed." \
+  "Unimplemented" \
+  "wp87_registry_initializes_with_preregistered_capacity" \
+  "wp87_open_commits_reserved_state_exactly_once" \
+  "wp87_open_beyond_capacity_refuses_typed" \
+  "wp87_stream_outlives_the_handler_scope" \
+  "wp87_enqueue_copies_the_callers_bytes" \
+  "wp87_queue_full_is_deterministic_and_immediate" \
+  "wp87_close_is_idempotent" \
+  "wp87_full_user_capacity_cannot_block_close" \
+  "wp87_send_after_close_has_one_terminal_owner" \
+  "wp87_stale_token_after_slot_reuse_refuses" \
+  "wp87_no_open_and_no_send_after_drain_begins" \
+  "wp87_close_releases_the_stream_for_accounting"
+
+# The inbound-body corpus: same discipline.
+run_expected_red \
+  "$URUQUIM_ROOT/tests/wp87-body-lifecycle" body-red \
+  "All tests failed." \
+  "Unimplemented" \
+  "wp87_admission_refuses_before_reading_any_byte" \
+  "wp87_spool_file_is_generated_private_and_inside_the_designated_dir" \
+  "wp87_large_body_bytes_never_coexist_in_memory" \
+  "wp87_per_upload_quota_breach_is_typed_and_cleans" \
+  "wp87_disconnect_cancel_is_exactly_once" \
+  "wp87_ready_hands_exactly_one_owned_body" \
+  "wp87_persist_is_the_only_path_that_leaves_a_file"
+
+# The sentinels must stay out of the linked product: `web` may not import
+# either package until the implementing WP replaces the sentinel bodies.
+if grep -rn 'internal/stream\|internal/ingest' "$URUQUIM_ROOT/web" \
+  --include='*.odin' -l | grep -v 'web/internal/stream' | grep -v 'web/internal/ingest' >/dev/null; then
+  fail "web imports a WP87 sentinel package before its implementation exists (G7-8)"
+fi
+
+echo "wp87: buffered oracle green — G7-10 byte pins exist before streaming code"
+echo "wp87: stream corpus RED, complete, for the sentinel's reason (12 cases)"
+echo "wp87: body corpus RED, complete, for the sentinel's reason (7 cases)"
+echo "wp87: no sentinel package is imported by web"
+echo "PASS: WP87 lifecycle corpus controls"

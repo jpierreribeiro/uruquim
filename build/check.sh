@@ -74,6 +74,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp41_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase7_spec.sh"
+bash -n "$URUQUIM_ROOT/build/check_wp87_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp71_controls.sh"
@@ -1076,6 +1077,12 @@ bash "$URUQUIM_ROOT/build/check_phase6_spec.sh"
 # inherited ADR-039 work so a prototype cannot renegotiate them after a result.
 echo "--- WP85 Phase-7 spec and governance gate ---"
 bash "$URUQUIM_ROOT/build/check_phase7_spec.sh"
+
+# WP87 — the streaming lifecycle corpus is committed RED under control: the
+# buffered oracle green, both corpora failing completely for the sentinel's
+# reason, and no sentinel package linked into the product.
+echo "--- WP87 stream/body lifecycle corpus (RED under control) ---"
+env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_wp87_controls.sh"
 
 # WP67 — the desired decoder/schema suites are committed RED. The control
 # proves each is red for the pre-registered reason and that the current 500 is
