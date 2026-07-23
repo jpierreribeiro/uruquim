@@ -173,6 +173,38 @@ wp68_wrong_root_aggregate_uses_the_root_path :: proc(t: ^testing.T) {
 	expect_error(t, "/input", `[]`, .Bad_Request, "invalid_field", "$")
 }
 
+Narrow :: struct {
+	small: u8 `json:"small"`,
+}
+
+bind_narrow :: proc(ctx: ^web.Context) {
+	dst: Narrow
+	if !web.body(ctx, &dst) {
+		return
+	}
+	web.ok(ctx, dst)
+}
+
+@(test)
+wp68_out_of_range_integer_is_an_invalid_field :: proc(t: ^testing.T) {
+	// A value that does not fit the destination integer type must be refused as
+	// invalid_field, not accepted with a 200 and silently truncated by the
+	// authoritative decode. `999999` into a `u8` would otherwise wrap to 63.
+	filter: Log_Filter
+	context.logger = filtered_logger(&filter)
+	a := web.app()
+	defer web.destroy(&a)
+	web.post(&a, "/narrow", bind_narrow)
+
+	res := web.test_request(&a, .POST, "/narrow", `{"small":999999}`)
+	testing.expect_value(t, res.status, web.Status.Bad_Request)
+	testing.expect(t, strings.contains(res.body, "invalid_field"))
+	testing.expect(t, strings.contains(res.body, "small"))
+
+	ok := web.test_request(&a, .POST, "/narrow", `{"small":200}`)
+	testing.expect_value(t, ok.status, web.Status.OK)
+}
+
 @(test)
 wp68_over_deep_nesting_is_refused_before_parsing :: proc(t: ^testing.T) {
 	// A body that is syntactically valid JSON but nested far past any legitimate

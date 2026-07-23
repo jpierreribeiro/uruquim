@@ -295,6 +295,28 @@ corpus_storage := []Wire_Case{
 			connection_must_close = true,
 		},
 		{
+			name = "tab obs-fold header continuation is rejected",
+			bytes = "GET /ping HTTP/1.1\r\nHost: localhost\r\nX-Fold: a\r\n\tb\r\n" +
+			"Connection: close\r\n\r\n",
+			outcome = .Rejected,
+			connection_must_close = true,
+			notes = "Patch 18 (F14): obs-fold is CRLF then a space OR a tab; the " +
+			"tab form must be refused like the space form, or a proxy that " +
+			"unfolds it and this server diverge on the header set.",
+		},
+		{
+			name = "overflowing Content-Length is rejected, its bytes never a second request",
+			bytes = "POST /echo HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\n" +
+			"Content-Length: 18446744073709551616\r\nConnection: close\r\n\r\n" +
+			`{}` + "GET /smuggled HTTP/1.1\r\nHost: localhost\r\n\r\n",
+			outcome = .Rejected,
+			connection_must_close = true,
+			has_smuggled_request = true,
+			notes = "Patch 16 (F10): 2^64 wraps to 0 under strconv.parse_int, so an " +
+			"unguarded server would read no body and parse the trailing bytes as " +
+			"a second request. The oversized length must be refused.",
+		},
+		{
 			name = "invalid request line is rejected",
 			bytes = "GET/ping HTTP/1.1\r\nHost: localhost\r\n\r\n",
 			outcome = .Rejected,

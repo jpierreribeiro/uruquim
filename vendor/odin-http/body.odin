@@ -153,6 +153,30 @@ _body_length :: proc(req: ^Request, max_length: int = -1, user_data: rawptr, cb:
 		return
 	}
 
+	// URUQUIM PATCH 16 (F10) — `_is_plain_decimal` permits an arbitrarily long
+	// digit string, and `strconv.parse_int` wraps on overflow: a value >= 2^64
+	// wraps to a small positive, so the server would read fewer bytes than
+	// declared and treat the remainder as a second request (a smuggling/desync
+	// primitive behind a proxy that frames by the true length). The [2^63, 2^64)
+	// range wraps negative and is caught by `ilen < 0` below; the >= 2^64 range
+	// is exactly the strings with more than 19 significant digits. No legitimate
+	// body approaches 10^19 bytes, so refuse them before the wrap can matter.
+	{
+		sig := 0
+		leading := true
+		for ch in len {
+			if leading && ch == '0' {
+				continue
+			}
+			leading = false
+			sig += 1
+		}
+		if sig > 19 {
+			cb(user_data, "", .Bad_Read_Count)
+			return
+		}
+	}
+
 	ilen, lenok := strconv.parse_int(len, 10)
 	if !lenok || ilen < 0 {
 		cb(user_data, "", .Bad_Read_Count)

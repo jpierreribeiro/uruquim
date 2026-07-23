@@ -27,6 +27,63 @@ condition E8-7 (composition Crystals frozen) and its reference application
 must place at least one real outbound HTTP call. WP85 records this structure
 in `planning/phase-7-spec.md`.
 
+**Amendment 2 — 2026-07-22, security-corrective backlog from the Phase-6-freeze
+scan.** A `claude-security` scan of the freeze (`e6554e5`) found 14 verified
+vulnerabilities. The three unauthenticated process-crash bugs were fixed and
+merged immediately (core PR #103: F1 JSON nesting-depth, F2 chunked-trailer
+readonly, F3 negative chunk-size). Six more clean, self-contained bugs are
+fixed in a follow-up corrective PR (F7 intermediate-directory symlink escape,
+F10 Content-Length overflow, F11 out-of-range integer truncation, F12 bare-CR
+header injection, F13 unanchored multipart boundary, F14 obs-fold tab). The
+remainder are **not** mechanical bug-fixes and are tracked here, because each
+either reverses a documented decision or is the shape of work this phase
+already owns:
+
+1. **[FIRST PRIORITY] F4 — leftmost `X-Forwarded-For` is trusted, letting any
+   client spoof the resolved client IP** (`web/client_address.odin:150`,
+   HIGH). With any `trust_proxies` configured, `client_ip` returns the
+   *leftmost* XFF entry — but real proxies (nginx `$proxy_add_x_forwarded_for`,
+   AWS ELB, HAProxy) *append* the real peer, so the leftmost value is exactly
+   what the client forged. Every control keyed on the client IP — rate limits,
+   allow-lists, geo rules, abuse counters, audit logs — attributes the
+   attacker's chosen address. This is **not a mechanical fix**: the leftmost
+   choice is a *documented design decision* (the file's own comment argues for
+   it and calls it "the original client") with a frozen `tests/wp48` suite, so
+   correcting it changes the public semantics of `client_ip`. It needs a spec
+   note and an ADR amendment before the code changes. **Correct behaviour:**
+   with a known trusted-proxy set, walk `X-Forwarded-For` from the RIGHT,
+   discarding entries whose source matches a trusted prefix, and return the
+   first untrusted address (or the peer if all are trusted); never return the
+   leftmost entry unconditionally. This is the first security item WP85's spec
+   refresh must schedule as its own corrective work package.
+
+2. **F5 / F6 — static mounts are served before the middleware chain**
+   (`web/serve.odin:182`, MEDIUM). Static responses therefore receive no
+   `secure_headers` (F5) and run no global `use()` middleware such as auth or
+   rate-limiting (F6). This is *entangled with a documented design decision*
+   ("a static mount OWNS its prefix. Checked before the router"), so the fix is
+   architectural, not a one-line change: it decides whether static serving
+   joins the dispatch/commit path (gaining the header policy and middleware) or
+   whether per-mount middleware is added and the "global middleware does not
+   cover static" limitation is documented. WP85 must choose and spec this
+   alongside the streaming commit path it is already redesigning.
+
+3. **F8 — the JSON preflight builds a full parse tree, amplifying a bounded
+   body into large transient memory** (`web/json_decode.odin`, MEDIUM). The
+   real fix is a streaming/bounded-state preflight instead of a full
+   `json.Value` tree — which is exactly the bounded-memory discipline this
+   phase's large-body work (WP93/WP94) establishes. It is partially mitigated
+   already by the F1 nesting-depth cap. Fold it into the bounded-ingest design
+   rather than bolting a second parser on now.
+
+4. **F9 — unhandled `accept()` errors panic the server process**
+   (`vendor/odin-http/server.odin:621`, MEDIUM, confidence low). A transient
+   `ECONNABORTED`/`EINTR`/`EWOULDBLOCK` at accept aborts the process. The fix
+   (tolerate transient `Accept_Error` values and re-arm accept) is small, but
+   it sits in the accept/shutdown flow the concurrency gate (WP71/WP72)
+   exercises most heavily and is race-dependent, so it belongs in a change that
+   re-runs that full fault/drain corpus rather than a quick patch.
+
 The promise:
 
 > A handler may establish a long-lived response and return; later work can

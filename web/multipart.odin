@@ -181,31 +181,97 @@ multipart_form :: proc(ctx: ^Context) -> ^Multipart_Form {
 // body into as many parts as it has bytes.
 @(private)
 multipart_boundary :: proc(content_type: string) -> (boundary: string, ok: bool) {
-	at := strings.index(content_type, "boundary=")
-	if at < 0 {
+	// Read `boundary` only as a real MIME parameter, never as a substring that
+	// happens to appear inside another parameter's quoted value. A bare
+	// `strings.index(content_type, "boundary=")` lets a crafted header like
+	//   multipart/form-data; name="x; boundary=evil"; boundary=good
+	// make this framework split on `evil` while an RFC-strict intermediary
+	// (a WAF or scanning proxy) splits on `good`, so the two disagree on where
+	// parts begin — a content-inspection bypass. Walk the header as a media
+	// type followed by `; parameter=value` pairs, honouring quoted-strings, and
+	// take the value of the first `boundary` parameter at a true parameter
+	// position.
+	rest := content_type
+
+	// Skip the media type: everything up to the first top-level `;`.
+	if semi := strings.index_byte(rest, ';'); semi >= 0 {
+		rest = rest[semi + 1:]
+	} else {
 		return "", false
 	}
-	rest := content_type[at + len("boundary="):]
-	if len(rest) == 0 {
-		return "", false
-	}
-	if rest[0] == '"' {
-		rest = rest[1:]
-		close := strings.index_byte(rest, '"')
-		if close <= 0 {
+
+	for len(rest) > 0 {
+		// One parameter: trim leading whitespace, read the name up to `=`.
+		rest = strings.trim_left_space(rest)
+		eq := strings.index_byte(rest, '=')
+		if eq < 0 {
 			return "", false
 		}
-		return rest[:close], true
+		name := strings.trim_right_space(rest[:eq])
+		rest = rest[eq + 1:]
+
+		// Read this parameter's value, then advance past it, so a `;` or a
+		// `boundary=` inside a quoted value is never mistaken for structure.
+		value: string
+		if len(rest) > 0 && rest[0] == '"' {
+			rest = rest[1:]
+			close := strings.index_byte(rest, '"')
+			if close < 0 {
+				return "", false
+			}
+			value = rest[:close]
+			rest = rest[close + 1:]
+			// Discard up to and including the next parameter separator.
+			if semi := strings.index_byte(rest, ';'); semi >= 0 {
+				rest = rest[semi + 1:]
+			} else {
+				rest = ""
+			}
+		} else {
+			end := strings.index_byte(rest, ';')
+			if end < 0 {
+				value = rest
+				rest = ""
+			} else {
+				value = rest[:end]
+				rest = rest[end + 1:]
+			}
+			value = strings.trim_space(value)
+		}
+
+		if equal_ascii_fold(name, "boundary") {
+			if len(value) == 0 {
+				return "", false
+			}
+			return value, true
+		}
 	}
-	// An unquoted boundary ends at the next parameter separator.
-	if semi := strings.index_byte(rest, ';'); semi >= 0 {
-		rest = rest[:semi]
+
+	return "", false
+}
+
+// equal_ascii_fold compares two strings case-insensitively over ASCII, for the
+// MIME parameter NAME, which is case-insensitive; the boundary VALUE itself
+// stays byte-exact.
+@(private)
+equal_ascii_fold :: proc(a: string, b: string) -> bool {
+	if len(a) != len(b) {
+		return false
 	}
-	rest = strings.trim_space(rest)
-	if len(rest) == 0 {
-		return "", false
+	for i in 0 ..< len(a) {
+		ca := a[i]
+		cb := b[i]
+		if ca >= 'A' && ca <= 'Z' {
+			ca += 32
+		}
+		if cb >= 'A' && cb <= 'Z' {
+			cb += 32
+		}
+		if ca != cb {
+			return false
+		}
 	}
-	return rest, true
+	return true
 }
 
 // multipart_parse walks the body. It allocates NOTHING: every field it produces

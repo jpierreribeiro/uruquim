@@ -27,6 +27,30 @@ JSON_FIELD_PATH_MAX :: ERROR_NAME_ESCAPED_MAX
 @(private)
 JSON_NEST_DEPTH_MAX :: 128
 
+// json_int_fits reports whether a JSON integer value fits the destination
+// integer type, given its size in bytes and signedness. A JSON integer arrives
+// as an i64, so an i64/int destination always fits and a u64/uint destination
+// only needs the value to be non-negative; narrower types are bounds-checked
+// against their exact range so an out-of-range value is refused rather than
+// silently truncated by the authoritative decode.
+@(private)
+json_int_fits :: proc(value: i64, size: int, signed: bool) -> bool {
+	switch size {
+	case 1:
+		return signed ? (value >= -128 && value <= 127) : (value >= 0 && value <= 255)
+	case 2:
+		return signed ? (value >= -32768 && value <= 32767) : (value >= 0 && value <= 65535)
+	case 4:
+		return signed ? (value >= -2147483648 && value <= 2147483647) : (value >= 0 && value <= 4294967295)
+	case 8:
+		// i64/int always fits; u64/uint receiving an i64 only needs sign.
+		return signed ? true : (value >= 0)
+	case:
+		// An unusual integer width: do not invent a bound.
+		return true
+	}
+}
+
 @(private)
 Json_Decode_Issue_Kind :: enum {
 	None,
@@ -221,10 +245,20 @@ json_shape_check :: proc(value: json.Value, info: ^reflect.Type_Info, path: ^Jso
 		return json_issue_at(.Invalid_Field, path)
 
 	case json.Integer:
-		#partial switch _ in info.variant {
-		case reflect.Type_Info_Integer, reflect.Type_Info_Float,
-		     reflect.Type_Info_Complex, reflect.Type_Info_Quaternion,
-		     reflect.Type_Info_Bit_Set:
+		#partial switch dst in info.variant {
+		case reflect.Type_Info_Integer:
+			// The preflight's contract is to classify a value that does not fit
+			// the destination as invalid_field. Without this the stdlib decode
+			// assigns with a truncating cast, so `{"count":999999}` into a `u8`
+			// silently becomes 63 with a 200 — a field feeding a length, quota,
+			// index or authorization decision then carries an attacker-chosen
+			// wrapped value the application cannot detect. Range-check here.
+			if !json_int_fits(i64(v), info.size, dst.signed) {
+				return json_issue_at(.Invalid_Field, path)
+			}
+			return {}
+		case reflect.Type_Info_Float, reflect.Type_Info_Complex,
+		     reflect.Type_Info_Quaternion, reflect.Type_Info_Bit_Set:
 			return {}
 		}
 		return json_issue_at(.Invalid_Field, path)

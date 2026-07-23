@@ -168,8 +168,13 @@ method_parse :: proc(m: string) -> (method: Method, ok: bool) #no_bounds_check {
 
 // Parses the header and adds it to the headers if valid. The given string is copied.
 header_parse :: proc(headers: ^Headers, line: string, allocator := context.temp_allocator) -> (key: string, ok: bool) {
-	// Preceding spaces should not be allowed.
-	(len(line) > 0 && line[0] != ' ') or_return
+	// URUQUIM PATCH 18 (F14) — reject obsolete line folding, both forms. RFC
+	// 7230 obs-fold is CRLF followed by a space OR a horizontal tab; the
+	// original check caught only the space. A tab-prefixed continuation line
+	// otherwise parses as its own header here while an obs-fold-normalizing
+	// proxy in front merges it into the previous value, so the two ends
+	// disagree on the header set — a request-smuggling primitive.
+	(len(line) > 0 && line[0] != ' ' && line[0] != '\t') or_return
 
 	colon := strings.index_byte(line, ':')
 	(colon > 0) or_return
@@ -401,10 +406,18 @@ write_padded_int :: proc(w: io.Writer, i: int) -> io.Error {
 
 @(private)
 write_escaped_newlines :: proc(w: io.Writer, v: string) -> io.Error {
+	// URUQUIM PATCH 17 (F12) — escape the carriage return as well as the line
+	// feed. This is the only sanitization point before header values and cookie
+	// fields reach the socket; escaping only `\n` let a lone `\r` through, which
+	// a CR-tolerant downstream parser can treat as a line terminator and use to
+	// confuse or split headers. Escaping both blocks the split at this sink.
 	for c in v {
-		if c == '\n' {
+		switch c {
+		case '\n':
 			io.write_string(w, "\\n") or_return
-		} else {
+		case '\r':
+			io.write_string(w, "\\r") or_return
+		case:
 			io.write_rune(w, c) or_return
 		}
 	}
