@@ -60,24 +60,12 @@ run_expected_red() { # package, output binary, then diagnostic tokens...
 # Claim 1 — the oracle: buffered behaviour is pinned and green today.
 run_green "$URUQUIM_ROOT/tests/wp87-buffered-oracle" oracle-green
 
-# Claim 2/3 — the response-stream corpus: complete RED, sentinel's reason,
-# every pre-registered case present by name.
-run_expected_red \
-  "$URUQUIM_ROOT/tests/wp87-stream-lifecycle" stream-red \
-  "All tests failed." \
-  "Unimplemented" \
-  "wp87_registry_initializes_with_preregistered_capacity" \
-  "wp87_open_commits_reserved_state_exactly_once" \
-  "wp87_open_beyond_capacity_refuses_typed" \
-  "wp87_stream_outlives_the_handler_scope" \
-  "wp87_enqueue_copies_the_callers_bytes" \
-  "wp87_queue_full_is_deterministic_and_immediate" \
-  "wp87_close_is_idempotent" \
-  "wp87_full_user_capacity_cannot_block_close" \
-  "wp87_send_after_close_has_one_terminal_owner" \
-  "wp87_stale_token_after_slot_reuse_refuses" \
-  "wp87_no_open_and_no_send_after_drain_begins" \
-  "wp87_close_releases_the_stream_for_accounting"
+# Claim 2/3, response side — STAGE ADVANCED BY WP88/WP89 (2026-07-23): the
+# registry and cross-lane delivery are implemented, so the stream corpus is
+# now required GREEN, unedited — the RED-under-control promise kept. The
+# corpus completeness (every pre-registered case present by name) moves to
+# check_wp88_controls.sh, next to the generation-check mutation control.
+run_green "$URUQUIM_ROOT/tests/wp87-stream-lifecycle" stream-green
 
 # The inbound-body corpus: same discipline.
 run_expected_red \
@@ -100,7 +88,7 @@ if grep -rn 'internal/stream\|internal/ingest' "$URUQUIM_ROOT/web" \
 fi
 
 echo "wp87: buffered oracle green — G7-10 byte pins exist before streaming code"
-echo "wp87: stream corpus RED, complete, for the sentinel's reason (12 cases)"
+echo "wp87: stream corpus GREEN unedited (WP88/WP89 implemented the sentinel)"
 echo "wp87: body corpus RED, complete, for the sentinel's reason (7 cases)"
 echo "wp87: no sentinel package is imported by web"
 echo "PASS: WP87 lifecycle corpus controls"
