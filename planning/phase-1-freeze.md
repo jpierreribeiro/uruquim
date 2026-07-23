@@ -2005,3 +2005,35 @@ misrepresented as a drain guarantee.
 
 **Rollback.** The evidence and ADR amendment are removable without changing a
 binary. Runtime compatibility remains available through `max_handlers = 1`.
+
+## Amendment 27 — WP-6.5.3: `is_draining`
+
+**Date: 2026-07-23. Authority: ADR-040, from the production-readiness audit.**
+**Ledger effect: application 62 → 63.** 63 application + 2 test-support = 65.
+The snapshot diff was exactly one added line.
+
+```
+application	proc	is_draining :: proc(a: ^App) -> bool
+```
+
+**ONE READABLE BIT.** WP44 refused any readable lifecycle state, on the grounds
+that a readable state invites a poll loop where a supervisor belongs. ADR-040
+narrows that refusal, it does not overturn it: the supervisor's question
+("restart this process") stays answered by the process exiting, but a load
+balancer's question ("still route new traffic here") is a different one a real
+deployment must answer, and a readiness probe reading one boolean on the
+orchestrator's own schedule is not the busy poll WP44 warned against.
+
+**WHAT IT DOES.** Reports whether `stop` has been requested. `false` before
+`stop`, `true` after, and never back to `false` — an operator who asked for a
+stop meant it. A readiness handler answers `503` while it is true, so the proxy
+stops routing to a draining instance. It reads an atomic, allocates nothing, and
+is safe from any thread; `stop` publishes the bit before asking the transport to
+stop, so the answer is never behind the refusal.
+
+| Symbol | Ledger | WP | Signature evidence | Behaviour evidence | Doc | Notes |
+|---|---|---|---|---|---|---|
+| `is_draining` | A | WP-6.5.3 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/wp58-drain/is_draining_test.odin::wp65_is_draining_is_false_until_stop` | `docs/ai-context.md::web.is_draining` | reads one atomic on the App; `false` before `stop`, `true` after, never back; owns nothing, allocates nothing |
+
+**Rollback.** The symbol, its example and its evidence are removable without
+changing any other binary; the drain machinery it reads predates it (WP44/WP58).

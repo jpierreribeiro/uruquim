@@ -1945,7 +1945,9 @@ none; the requirement it keeps is the one nobody disputes.
 
 ## ADR-040 — graceful shutdown stays app-owned, with a canonical example and a drain signal
 
-- **Status.** PROPOSED, 2026-07-23, from the production-readiness audit.
+- **Status.** ACCEPTED, 2026-07-23, implemented in WP-6.5.3 (core PR).
+  `examples/09-graceful-shutdown` and `web.is_draining` ship; the ledger grew
+  62 → 63 (Phase-1-freeze Amendment 27).
 
 - **Context.** The core installs no `SIGTERM`/`SIGINT` handler; `web.stop` is
   thread- and signal-safe but the application must call it. No example
@@ -1962,9 +1964,20 @@ none; the requirement it keeps is the one nobody disputes.
   application and the twelve-factor model (the process manager owns signals).
   Instead: ship `examples/09-graceful-shutdown` (install a `SIGTERM`/`SIGINT`
   handler → `web.stop`), document the pattern in `operations.md`, and add a
-  minimal public accessor (e.g. `web.is_draining(&app) -> bool`) so a readiness
+  minimal public accessor `web.is_draining(&app) -> bool` so a readiness
   handler can report not-ready during drain. The accessor is additive public API
   (pays the ledger amendment).
+
+- **Narrowing of WP44, recorded honestly.** `web/lifecycle.odin` (WP44) refused
+  ANY readable lifecycle state, arguing a readable state invites a poll loop
+  where a supervisor belongs. This ADR narrows that refusal to exactly one bit,
+  and only because the two questions differ: the supervisor's "restart this
+  process" stays answered by the process exiting (no readable state needed),
+  while a load balancer's "still route new traffic here" cannot be answered that
+  way — a readiness probe must see the drain begin. That probe runs on the
+  orchestrator's schedule, not a busy loop, so it is not the failure mode WP44
+  named. `is_draining` exposes one boolean and nothing more: no state enum, no
+  counters, no `Draining → Serving`.
 
 - **Reversibility. HIGH for the example/doc; MEDIUM for the accessor** (public
   once shipped).

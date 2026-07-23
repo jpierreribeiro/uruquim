@@ -121,6 +121,49 @@ web.stop(&app)   // returns immediately; safe from a signal handler
 `stop` ends admission and lets in-flight work finish; `web.serve` returns when
 the drain completes.
 
+**Wire it to a signal yourself — the core does not.** A rolling deploy sends
+`SIGTERM`; nothing drains unless your `main` installs a handler that calls
+`web.stop`. The core installs none deliberately: seizing process signals fights
+your supervisor. The canonical shape (full program in
+`examples/09-graceful-shutdown`):
+
+```odin
+app: web.App   // package global: a signal handler gets only the signal
+
+on_signal :: proc "c" (_: posix.Signal) {
+	context = runtime.default_context()
+	web.stop(&app)   // async-signal-safe: an atomic flag plus a wake-up
+}
+
+main :: proc() {
+	app = web.app()
+	defer web.destroy(&app)
+	// ... routes ...
+	posix.signal(.SIGTERM, on_signal)
+	posix.signal(.SIGINT, on_signal)
+	web.serve(&app, 8080)   // returns after the signal drains it
+}
+```
+
+**Readiness during drain: `web.is_draining(&app)`.** So a load balancer stops
+routing to an instance that is shutting down, a readiness endpoint must answer
+not-ready the moment the drain begins:
+
+```odin
+web.get(&app, "/ready", proc(ctx: ^web.Context) {
+	if web.is_draining(&app) {
+		web.text(ctx, web.Status(503), "draining")
+		return
+	}
+	web.text(ctx, .OK, "ready")
+})
+```
+
+`is_draining` is `false` before `stop`, `true` after, and never returns to
+`false`. Keep it distinct from liveness (`/health`, which stays 200 as long as
+the process can answer at all): liveness tells the supervisor whether to
+restart; readiness tells the proxy whether to route.
+
 **`stop` has a deadline: `Limits.max_drain_time`, ten seconds by default.**
 When it expires, connections still serving a request are closed rather than
 waited for, and `web.serve` returns.

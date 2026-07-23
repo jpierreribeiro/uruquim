@@ -77,6 +77,12 @@ App_Internal :: struct {
 	// No route or policy storage is mutated once `serving` becomes non-zero.
 	dispatched: u32,
 	serving:    u32,
+	// WP-6.5.3 — `draining` is set once, by `stop`, and read by `is_draining`.
+	// It is the framework's own copy of "a stop was requested", kept so a
+	// readiness handler can answer the orchestrator without reaching into the
+	// transport. Written before `transport.request_stop` so the answer is never
+	// behind the refusal. Atomic because `stop` may run in a signal handler.
+	draining:   u32,
 
 	// WP18 fail-closed state (ADR-019/ADR-024). `closed` marks a Router that
 	// `mount` has already copied: a later registration on it would be silently

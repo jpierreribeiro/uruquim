@@ -16,6 +16,7 @@ application	proc	form_file :: proc(ctx: ^Context, name: string) -> (file: Upload
 application	proc	get :: proc(a: ^App, pattern: string, handler: Handler)
 application	proc	header :: proc(ctx: ^Context, name: string) -> (value: string, ok: bool)
 application	proc	internal_error :: proc(ctx: ^Context)
+application	proc	is_draining :: proc(a: ^App) -> bool
 application	proc	json :: proc(ctx: ^Context, status: Status, value: $T)
 application	proc	limits :: proc(a: ^App, l: Limits)
 application	proc	logger :: proc(ctx: ^Context)
