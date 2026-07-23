@@ -833,7 +833,7 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
 # these.
 #
 # WP27 measures and decides; it changes no behaviour. The decisions are recorded
-# in planning/allocation-audit.md, and the fixes belong to WP29 and WP35 where
+# in planning/history/allocation-audit.md, and the fixes belong to WP29 and WP35 where
 # they can be regression-tested against the WP26 baseline.
 echo "--- WP27 allocation audit: A-8, A-12, A-13, measured (throwaway package) ---"
 URUQUIM_WP27_TMP="$(mktemp -d -t uruquim-wp27-internal-XXXXXXXX)"
@@ -964,7 +964,7 @@ env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin"
 # is exactly what fast looks like from outside.
 #
 # No timing is asserted (FINDING-E). The numbers come from tests/wp28-runner,
-# run by hand, and are recorded in planning/router-shootout.md.
+# run by hand, and are recorded in planning/history/router-shootout.md.
 echo "--- WP28 route shootout: seven representations must agree (odin test) ---"
 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
   "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp28-shootout" \

@@ -1,0 +1,328 @@
+# Production Readiness Closure — the systemic pass the write-deadline revealed
+
+**Status: DRAFT PLAN, 2026-07-23.** Owner-directed after the write-deadline
+finding and two external analyses (production-readiness review; httprouter
+comparative study). **Plan only — no code authored under it until the owner
+says to ship.**
+
+This document proposes inserting a **systemic closure phase** between the
+feature-completion corrective (Phase 7.5) and proof-by-use (the current Phase
+8). It also folds the httprouter work in as a bounded, non-blocking research
+package.
+
+---
+
+## 0. What the fourth accidental finding actually revealed
+
+The write deadline was not an unknown need that appeared from nowhere. It was in
+the original contract (Phase-3 plan named configurable "read/write timeouts"),
+was deliberately declined at the Phase-3 freeze because the backend had no real
+deadline mechanism (the correct call — better no field than a field that does
+nothing), and the freeze recorded exactly that: no read timeout, no write
+timeout, event-loop surgery required, add by amendment later. The read side then
+shipped for slowloris; the write side stayed pending — and **stopped existing as
+a tracked item until it resurfaced in conversation.**
+
+So the real question is not *"how did nobody notice a server needs a write
+deadline?"* It is:
+
+> How did a known, recorded pending item stop being trackable until it
+> reappeared by accident?
+
+**The diagnosis: Uruquim has an excellent per-feature discipline** (spec →
+tests → implementation → freeze → ledgers) **but no layer above it** that
+reconciles every promise and pendency into one readiness matrix before
+"production" is claimed. The facts are correct in each document (phase plans,
+freezes, `operations.md`, ADRs, the experiment backlog, code comments, the
+known-limitations lists); the risk lives in the **reconciliation between them.**
+The architecture-evidence backlog is a list of trigger-gated *questions*, not a
+list of *minimum production requirements over what already exists.*
+
+This is not "the framework is bad." It is the opposite: the framework is now
+mature enough to run a **review-by-resource-and-state** pass instead of only
+review-by-feature. That change tends to surface a **finite, administrable** set
+of gaps and then stop surfacing them randomly, because the analysis space has
+been enumerated.
+
+---
+
+## 1. Where this sits in the roadmap (and the renumbering question)
+
+Proposed order:
+
+```text
+Phase 7 (frozen: streaming)
+  → Phase 7.5   feature-completion corrective (composition Crystals + public upload)
+  → Production Readiness Closure   ← THIS PHASE (systemic review-by-resource)
+  → Proof-by-use / reference system   (the current Phase-8 plan)
+```
+
+The closure must precede proof-by-use, because proof-by-use on an unreconciled
+foundation keeps discovering gaps one at a time — which is exactly the failure
+mode this phase exists to end.
+
+**The renumbering decision (owner's call — recorded with its cost):**
+
+- **Option R1 — keep numbers, insert a distinct phase.** The closure becomes a
+  named phase (e.g. "Phase 7.9 — Production Readiness Closure") with WP
+  identifiers that do NOT collide with the frozen ranges; proof-by-use stays
+  **Phase 8 / WP102–113, untouched.** Cost: none — no frozen gate changes.
+- **Option R2 — the owner's floated framing.** The closure becomes the new
+  **Phase 8**; proof-by-use becomes **Phase 9**, its WPs renumbered. Cost: the
+  **frozen** `build/check_phase6_spec.sh` asserts *"WP85-WP101 and WP102-WP113
+  are numbered and bounded"*; making WP102+ mean the closure and renumbering
+  proof-by-use requires a **dated amendment to that phase-freeze gate** plus
+  renumbering `phase-8-plan.md`. Achievable, but it edits a frozen governance
+  gate for a labelling change.
+
+**Recommendation: R1.** The conceptual value (closure before proof-by-use) is
+identical either way, and R1 buys it without amending a frozen gate — the same
+reasoning that kept the Phase-7 composition half from renumbering Phase 8. If
+the owner wants the clean "8/9" labels, R2 is a one-amendment cost, taken
+knowingly.
+
+The rest of this plan uses the neutral name **"the Closure"** and leaves the
+final phase number to the owner.
+
+---
+
+## 2. The method — three instruments, then classification
+
+### 2.1 The async-operation inventory (the strongest test)
+
+Enumerate **every `nbio` operation the server starts** — `accept`, `recv`,
+`send`, `timeout`, `close`, `wake-up` — and answer, per operation:
+
+1. Who creates it?
+2. Where is the handle stored?
+3. Who can cancel it?
+4. Can the callback fire after cancellation?
+5. Can the callback touch freed memory?
+6. Who cleans up on success?
+7. Who cleans up on error?
+8. Who cleans up at shutdown?
+9. Is there a maximum deadline?
+10. Is there a test interrupting it in each state?
+
+This is precisely the analysis whose ABSENCE let the old pending `recv` outlive
+its connection (endless drain + use-after-free, fixed by storing
+`pending_recv`), and whose application to `send_poly` would have found the
+write-deadline/cancellation gap structurally — no need to know the name "write
+deadline" in advance. **WP90a already stored `pending_send` and added the
+cancellation + abort**; the inventory confirms that fix is complete and checks
+`accept`/`timeout`/`wake-up` with the same rigor.
+
+Deliverable: a table in `production-readiness-closure.md`, one row per op, every
+cell answered or flagged.
+
+### 2.2 The resource × property matrix
+
+For every framework-owned resource, one row; columns: **limit, deadline,
+cancellation, saturation policy, metric, shutdown behaviour.** An empty cell is
+a visible gap, not a forgotten question. The starting matrix (to be verified and
+completed, not taken as truth):
+
+| Resource | Limit | Deadline | Cancellation | Saturation | Metric | Shutdown |
+|---|---|---|---|---|---|---|
+| connection | `max_connections` | — | close socket | refuse | `refused_connections` | yes |
+| request read | body/headers caps | `max_request_time` | cancel recv (`pending_recv`) | close | event/log | yes |
+| handler | `max_handlers` | application | not preemptible | stop admission per lane | indirect | limited |
+| response write | **response size unbounded** | `max_write_time` (WP90a) | cancel send (`pending_send`, WP90a) | retains conn/memory; RST at deadline | refused/aborted counters (WP92) | partial |
+| detached stream | §4.1 caps | per-stream 30s default | close/retire | disconnect | stream counters (WP92) | drain (WP95) |
+| spool ingest | quotas (§4.2) | request deadline | cancel (exactly-once) | admission refuse | — (substrate) | drain |
+| per-connection arena | partly controlled | — | cleanup | retention needs soak | not consolidated | yes |
+| accept backlog | kernel | — | kernel | kernel | external | external |
+
+The matrix immediately shows the residual amber cells: **response size has no
+limit**, **arena retention is unmeasured (soak)**, **write/stream metrics are
+partial**, **combined saturation is unmeasured**.
+
+### 2.3 The closed fault-injection campaign
+
+Run a fixed scenario grid once, instead of discovering one at a time. Axes:
+
+- **Input:** connect-and-send-nothing; one byte/second; truncated request line;
+  truncated headers; truncated fixed body; truncated chunked body; ambiguous
+  framing; disconnect as the handler begins.
+- **Execution:** handler blocks; handler returns without responding; handler
+  responds then faults; all lanes busy; database slow; client disconnects while
+  the handler runs.
+- **Output:** client never reads; client reads slowly; client reads part then
+  stops; response larger than the TCP buffer; error during `send`; keep-alive
+  after a healthy response; disconnect during response.
+- **Lifecycle:** shutdown during accept / recv / handler / send; shutdown
+  between callback and cleanup; deadline and shutdown expiring together; second
+  `stop`; supervisor kill after drain.
+
+Many cells are already covered (WP41 fault lab, WP58/59 drain, WP72 concurrency,
+WP90 deadlines, WP91/92 stream security/backpressure). The campaign's job is to
+prove the grid is **complete**, fill the blanks, and leave a single executable
+matrix — promoting the backlog's "each new async op must prove shutdown, stale
+completion, ownership, cancellation" from a future question to a **full
+inspection of what already exists.**
+
+---
+
+## 3. Classification — not everything found is a blocker
+
+Every gap the instruments surface is labelled exactly one of:
+
+- **Defect** — violates an existing promise (e.g. the old silent keep-alive
+  close). Fix in-phase.
+- **Production-blocking absence** — a framework-controlled operation can retain
+  resources indefinitely with no reasonable guard (the write deadline was
+  this). Fix in-phase.
+- **Acceptable operational limitation** — explicitly delegated to another layer
+  (TLS→proxy, total memory→cgroup, backlog→kernel, restart→supervisor).
+  Acceptable **only if** the topology is mandatory, documented and tested.
+- **Future work** — useful but not required for an ordinary JSON/stream service
+  (WebSocket, in-process HTTP/2, OpenAPI, a CPU executor, adaptive concurrency).
+  Stays evidence-gated in the backlog.
+
+This is the guard against a "framework is never ready" spiral: the closure ends
+when the space is enumerated and every cell is classified — not when nothing
+could ever be improved.
+
+---
+
+## 4. The perimeters to close before "production-ready"
+
+Verified against current state (several are already green from Phase 5–7):
+
+1. **Write deadline + `send` cancellation.** ✅ DONE (WP90a: `max_write_time`,
+   `pending_send`, RST abort). Closure confirms via the inventory.
+2. **Unbounded response size** and its arena/memory impact. ⚠️ OPEN — no size
+   limit; the write deadline bounds *time held*, not *bytes*. Decide: a
+   `max_response_bytes` limit, or a documented "the application owns response
+   size; set a cgroup" with a test.
+3. **Memory retention after large responses (soak).** ⚠️ OPEN — a backlog item;
+   run an hours-long soak with per-connection/arena attribution.
+4. **Shutdown of every async op, not just recv.** ◑ MOSTLY — recv
+   (`pending_recv`) and send (`pending_send`) cancel; the inventory verifies
+   `accept`/`timeout`/`wake-up`.
+5. **Client disconnect during handler**, and where the response goes. ◑ MOSTLY
+   — covered for the drain path; the campaign proves the handler-active case.
+6. **Combined saturation** (connections + handlers + database + memory). ⚠️
+   OPEN — the backlog's "which queue saturates first" question, unmeasured.
+7. **Write observability** — deadline-expired, send error, bytes/logical
+   response size. ◑ PARTIAL — WP92 added refused/aborted counters; response
+   bytes are not exposed.
+8. **The exact reverse-proxy contract** — timeouts, buffering, upstream
+   keep-alive, duplicated limits. ◑ PARTIAL — `operations.md` documents it
+   (WP100); formalize as a tested contract (direct vs proxied control arms
+   exist in WP98).
+
+The RST-flood liveness wedge (flagged by the F-002 security report as
+follow-up) is a **defect/absence** the campaign owns: under sustained RST the
+server stops accepting (threads alive, backlog fills, no crash). Moved here from
+the Phase-7.5 hardening track, because it is exactly a review-by-resource
+finding on the WP71 accept/lane path.
+
+---
+
+## 5. Work packages (the Closure)
+
+| WP | Name | Type | Deliverable |
+|---|---|---|---|
+| **C-01** | Async-operation inventory | AUDIT + TESTS | The §2.1 table, every op × 10 questions answered; a test that interrupts each op in each state (accept/recv/send/timeout/close/wake-up). Confirms the WP90a send-cancellation is complete and finds any op with a dropped handle. |
+| **C-02** | Resource × property matrix | AUDIT + DOCS | The §2.2 matrix completed and made a living gate: every framework-owned resource has limit/deadline/cancellation/saturation/metric/shutdown answered, and a `check_readiness_matrix.sh` fails if a row loses a cell. |
+| **C-03** | Closed fault-injection campaign | TESTS | The §2.3 grid as one executable suite (reusing WP41/58/72/90/91/92 where they already cover a cell), filling the blanks; the RST-flood wedge reproduced and fixed. |
+| **C-04** | Response-size and memory closure | IMPLEMENTATION or DECISION + SOAK | Resolve perimeter 2 (size limit vs documented delegation, with a test) and perimeter 3 (an hours-long soak with per-connection/arena/allocator attribution; a leak threshold). |
+| **C-05** | Write & saturation observability | IMPLEMENTATION | Perimeters 6–7: a combined-saturation lab (connections+handlers+DB+memory, which queue saturates first) and the missing write-side observability (response size / send outcome), redaction preserved. |
+| **C-06** | The reverse-proxy contract | TESTS + DOCS | Perimeter 8 as a tested contract with direct and proxied control arms (extending WP98): timeouts, buffering-off, upstream keep-alive, duplicated limits — the mandatory topology proven, not just described. |
+| **C-07** | Closure record + verdict | FREEZE + DOCS | `production-readiness-closure.md` finalized as the reconciled matrix; every gap classified (defect / blocking-absence / acceptable-limitation / future-work); a production-readiness **verdict** with the exit condition met or the residual named. |
+| **C-08** | httprouter comparative study | RESEARCH (non-blocking) | See §6. Kept only on material gain; **zero public API change.** Deliberately not a readiness blocker — it is optimization/reference work parked in this phase because it is a "review what exists" exercise of the same spirit. |
+
+**Exit condition (the closure's verdict must satisfy):**
+
+> No framework-owned operation exists without an explicitly declared owner,
+> capacity, deadline, or cancellation; and where something is unbounded or
+> external, the responsible topology is named, mandatory, documented and tested.
+
+A residual that is a classified **acceptable operational limitation** does not
+block the verdict; an unclassified cell or a **blocking absence** does.
+
+---
+
+## 6. The httprouter comparative study (WP C-08, non-blocking)
+
+`httprouter` (Go) is **reference, not dependency**: Uruquim already has a
+private, segment-oriented radix router (the WP29 benchmark fell from ~883 µs to
+~1.5 µs at 5,000 routes, near-constant 5→5,000). Value ranking: copying the
+router — low; **implementation reference — high; test corpus — very high;** a
+new benchmark competitor — high; copying its HTTP semantics — low/dangerous.
+
+Two bounded steps, in order:
+
+1. **Now (high return): port the edge-case corpus.** Translate httprouter's
+   test cases — overlapping prefixes (`/contact`, `/co`, `/c`), Unicode routes,
+   multi-param, deep paths, catch-all, static-vs-param conflicts, differently
+   named params in the same position, invalid routes, trailing slash, method
+   collection for OPTIONS — into `tests/router_external_corpus_test.odin`, **not**
+   to prove Uruquim behaves like httprouter but to prove **every difference is
+   deliberate.**
+2. **Later (measurement): an experimental `radix_compact`.** A private,
+   experimental compressed-radix competitor (`radix_idx` = current;
+   `radix_compact` = httprouter-inspired) measured in Uruquim's own harness for
+   the one unmeasured cost — **registration time and memory** (a node + a map per
+   distinct segment): registration/route, memory at 50/500/5,000 routes, node/map
+   counts, teardown cost, lookup p50/p95, `Allow` build, deep/shared-prefix
+   behaviour. **Keep only on material gain**, same harness, same gate.
+
+**What must NOT be copied** (Uruquim's deliberate semantics, to preserve as a
+**negative corpus**):
+
+- **Precedence:** httprouter forbids a static and a param route at the same
+  position; Uruquim's rule is **static wins param**, WITH controlled backtracking
+  (`/users/me/settings` + `/users/:id/profile`; a request to `/users/me/profile`
+  must abandon the static branch and try the param branch). A literal port of
+  httprouter's tree would break this — any compact implementation must keep the
+  backtracking.
+- **Automatic path correction** (trailing-slash redirect, case-fix, path
+  cleanup) — directly conflicts with Uruquim's security policy: no
+  normalization, `/users` ≠ `/users/`, case-sensitive, reject `..`/`.`/`//`/
+  `%2F`/`%00` before routing. This is a **contrast/negative corpus**, never a
+  feature to copy.
+- **Catch-all (`*filepath`)** — possibly useful later (reverse proxy, SPA
+  fallback, path-preserving gateways), but Uruquim already has safe static
+  mounts; do **not** add `*filepath` to core without a real case the current
+  system cannot express. httprouter's code/tests are a good reference **if** the
+  need arises (last-segment-only, conflict rules, precedence, alloc-free
+  capture).
+
+**What Uruquim already has and need not borrow:** automatic HEAD/OPTIONS, 405
+with frozen-order `Allow`, alloc-free per-request params, conflict diagnostics
+(`/users/:id` vs `/users/:uid` refused), and the deliberate absence of panic
+recovery (Odin has none; supervision is the model).
+
+**Licence:** httprouter is BSD-3-Clause — modification/redistribution allowed;
+any translated/adapted code must preserve the copyright notice and conditions.
+
+---
+
+## 7. Reconciliation with Phase 7.5
+
+Phase 7.5 (`planning/phase-7.5-plan.md`) stays the **feature-completion**
+corrective — the composition Crystals (`http_client`, `metrics`) and the public
+large-body upload — because those are missing *surfaces* Phase 8/9 depends on
+(E8-7, E8-2). Its **Track B (hardening)** — the RST-flood wedge, the
+memory/soak items — **moves into this Closure** (C-03/C-04), where it belongs as
+review-by-resource work. The one exception is the **3,000 real-socket SSE
+round** (a G7-6 wire proof): keep it wherever a quiet CI machine first becomes
+available; it is listed in both plans and should be run once, not twice.
+
+Net effect on Phase 7.5: it narrows to the two feature tracks (composition
+Crystals + public upload); the Closure absorbs the systemic hardening and adds
+the inventory/matrix/campaign that make the write-deadline class of gap
+impossible to lose again.
+
+---
+
+## 8. Rollback
+
+The Closure is audit, tests, docs and small targeted fixes — additive and
+revertible. The only new public surface it might mint is a `max_response_bytes`
+limit (C-04) *if* the size decision goes that way, which pays the normal ledger
+amendment; every other deliverable is a matrix, a suite, a soak result or a
+BRIDGE fix deletable at the `core:net/http` transition. The httprouter study
+changes no public API by construction.
