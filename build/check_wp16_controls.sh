@@ -34,12 +34,20 @@ trap 'rm -rf "$URUQUIM_W16_TMP"' EXIT
 # A minimal static tree: exactly what check_public_api.sh reads.
 static_tree() {
   local t="$URUQUIM_W16_TMP/static-$1"
-  mkdir -p "$t/build" "$t/web/testing" "$t/web/internal/transport" "$t/tests" "$t/vendor"
+  # web/internal now holds three private packages: check_public_api.sh (amended
+  # by WP87/WP94) requires the subdir set to be EXACTLY {transport, stream,
+  # ingest}, so the static tree must mirror all three or the subdir guard fires
+  # before the control's own probe can. (transport was the only one this helper
+  # copied until WP7.5-C1 found the staleness.)
+  mkdir -p "$t/build" "$t/web/testing" "$t/web/internal/transport" \
+    "$t/web/internal/stream" "$t/web/internal/ingest" "$t/tests" "$t/vendor"
   cp "$URUQUIM_ROOT"/build/check_public_api.sh "$t/build/"
   cp "$URUQUIM_ROOT"/build/check.sh "$t/build/"
   cp "$URUQUIM_ROOT"/web/*.odin "$t/web/"
   cp "$URUQUIM_ROOT"/web/testing/*.odin "$t/web/testing/"
   cp "$URUQUIM_ROOT"/web/internal/transport/*.odin "$t/web/internal/transport/"
+  cp "$URUQUIM_ROOT"/web/internal/stream/*.odin "$t/web/internal/stream/"
+  cp "$URUQUIM_ROOT"/web/internal/ingest/*.odin "$t/web/internal/ingest/"
   cp -r "$URUQUIM_ROOT"/vendor/odin-http "$t/vendor/odin-http"
   cp -r "$URUQUIM_ROOT"/tests/. "$t/tests/"
   printf '%s' "$t"

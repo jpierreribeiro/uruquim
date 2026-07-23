@@ -73,6 +73,23 @@ Scanner :: struct /* #no_copy */ {
 	// BRIDGE, per `vendor-policy.md` §8: this goes away with the vendored server
 	// when `core:net/http` lands.
 	pending_recv:                 ^nbio.Operation,
+
+	// URUQUIM PATCH 23 (WP7.5-C1) — BRIDGE. Streaming-body buffer reclamation.
+	//
+	// Upstream never compacts `buf`: `start` advances as tokens are consumed but
+	// the buffer only ever grows (see the `// TODO: write over the part of the
+	// buffer already used` at the resize site below). For a header scan or a
+	// buffered body that is fine — the whole thing is wanted contiguously. But a
+	// STREAMED body read one bounded window at a time would still grow `buf` to
+	// the body's full length, defeating the point. When this flag is set the
+	// scanner shifts the unconsumed tail down to offset 0 before it would grow,
+	// so a body of any size costs one window of buffer. Off by default: the
+	// buffered path (`http.body`) is byte-for-byte upstream. Set only by
+	// `http.body_stream`; cleared by `scanner_reset`.
+	//
+	// BRIDGE, per `vendor-policy.md` §8: goes away with the vendored server when
+	// `core:net/http` lands.
+	stream_compact:               bool,
 }
 
 INIT_BUF_SIZE :: 1024
@@ -106,6 +123,9 @@ scanner_reset :: proc(s: ^Scanner) {
 	s.could_be_too_short           = false
 	s.user_data                    = nil
 	s.callback                     = nil
+	// URUQUIM PATCH 23 (WP7.5-C1) — BRIDGE. A reused connection scans the next
+	// request's headers on the buffered path; the streaming flag must not leak.
+	s.stream_compact               = false
 }
 
 scanner_scan :: proc(
@@ -185,6 +205,20 @@ scanner_scan :: proc(
 	}
 
 	could_be_too_short := false
+
+	// URUQUIM PATCH 23 (WP7.5-C1) — BRIDGE. Reclaim the consumed prefix before
+	// deciding whether the buffer must grow, so a streamed body of any size costs
+	// one window of buffer rather than its full length. Only on the streaming
+	// path (`stream_compact`); the buffered path never sets it and is unchanged.
+	// The previous token was already handed to — and copied by — the synchronous
+	// consumer before this re-arm, so shifting the tail invalidates nothing live.
+	if s.stream_compact && s.start > 0 {
+		if s.end > s.start {
+			copy(s.buf[:], s.buf[s.start:s.end])
+		}
+		s.end -= s.start
+		s.start = 0
+	}
 
 	// Resize the buffer if full
 	if s.end == len(s.buf) {

@@ -14,7 +14,7 @@ and WP46 is the first work package held to them.
 
 `vendor/odin-http/` is a snapshot of the root server package of
 `laytan/odin-http` at commit `112c49b` (2026-04-11), vendored 2026-07-19, MIT.
-Twenty-two local patches, all security-, lifecycle- or ownership-motivated, all
+Twenty-three local patches, all security-, lifecycle- or ownership-motivated, all
 marked `URUQUIM PATCH` at their site and all covered by an executable case that
 failed before the patch.
 
@@ -42,7 +42,7 @@ forever is a fork with extra steps.
 queue is not a schedule, and re-vendoring across an API its author says moves is
 work regardless of who wrote the fix.
 
-### 2.1 The twenty-two patches, each with its upstream disposition
+### 2.1 The twenty-three patches, each with its upstream disposition
 
 | # | Patch | Is it upstream's bug? | Disposition |
 |---|---|---|---|
@@ -68,8 +68,9 @@ work regardless of who wrote the fix.
 | 20 | The idle keep-alive timeout: `idle_since` stamped between requests, cleared on the next request's first bytes, graceful close in the sweep (WP90 / ADR-039) | **No** — upstream simply has no idle policy; keep-alive economy is Uruquim's own operational contract | **CARRY AS BRIDGE.** Same replacement obligation as Patch 19 |
 | 21 | Transient accept errors are tolerated (log, delayed re-arm, per-lane consecutive-failure limit) instead of panicking the process (WP90 / F9) | **Yes** — an unauthenticated remote crash: `ECONNABORTED` at accept is peer-triggerable weather, and upstream panics on it | **OFFER UPSTREAM.** The persistence limit is the honest part: a listener that can never accept again stays fatal rather than a silent outage |
 | 22 | Detached-stream hooks: chunked heading commit, request-cycle finish after the terminator, unflushed abort (WP90b) | **No** — streaming is Uruquim's Phase-7 capability; upstream's own `Response_Writer` covers the handler-synchronous case only | **CARRY AS BRIDGE.** Deletable with the adapter; the ADR-033 replacement must pass the same wire corpus |
+| 23 | Streaming inbound body: deliver a request body one bounded window at a time (Content-Length windowed, chunked per-chunk), reclaiming the consumed buffer prefix so a body of any size costs one window, not its length (WP7.5-C1) | **No** — the read-side twin of Patch 22; streaming ingestion is Uruquim's Phase-7.5 large-body capability, not a defect upstream shares (upstream materializes the whole body) | **CARRY AS BRIDGE.** Deletable with the adapter; the ADR-033 replacement must expose an equivalent incremental body reader and pass the `wp7_5-c1-inbound-stream` corpus |
 
-**Twelve of twenty-two are or contain upstream bugs; the rest are deliberate divergences.** WP70's
+**Twelve of twenty-three are or contain upstream bugs; the rest are deliberate divergences.** WP70's
 multi-lane lifecycle correction joins the upstream group; WP59's absolute drain
 deadline joins the policy group. The bridge label changes expected lifetime,
 not the evidence or upstream-offer obligation.
