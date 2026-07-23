@@ -42,13 +42,14 @@ URUQUIM_EXPECTED_EXAMPLES="01-hello-world
 06-authentication
 07-app-state
 08-table-stakes
-09-graceful-shutdown"
+09-graceful-shutdown
+10-config-and-health"
 
 test -d "$URUQUIM_EXAMPLES" || fail "examples/ does not exist"
 
 for URUQUIM_NAME in $URUQUIM_EXPECTED_EXAMPLES; do
   test -d "$URUQUIM_EXAMPLES/$URUQUIM_NAME" ||
-    fail "examples/$URUQUIM_NAME/ is missing; the seven examples are a contract (WP10 D3, extended by WP24 and WP37)"
+    fail "examples/$URUQUIM_NAME/ is missing; the examples are a contract (WP10 D3, extended by WP24 and WP37)"
   test -f "$URUQUIM_EXAMPLES/$URUQUIM_NAME/main.odin" ||
     fail "examples/$URUQUIM_NAME/main.odin is missing; each example is a self-contained program"
 done
@@ -151,4 +152,4 @@ fi
 rm -rf "$URUQUIM_BIN_TMP"
 trap - EXIT
 
-echo "PASS: the seven examples compile and use only the public surface"
+echo "PASS: the examples compile and use only the public surface"
