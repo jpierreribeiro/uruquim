@@ -36,6 +36,14 @@ current assertions encode the buggy leftmost behaviour and must move. Deliberate
 compatibility break; the ADR is the record. **Rollback: LOW once shipped.**
 
 ### WP-6.5.2 — write and idle timeouts (ADR-039) — **P1**
+**DELIVERED BY PHASE 7's WP90 (2026-07-23), not by this phase.** The 6.5
+attempt was implemented but not merged: its write deadline never observably
+fired. WP90, rewriting the same vendored transport path for streaming, landed
+both fields in one `Limits` amendment with the root cause fixed (the graceful
+close flushed kernel buffers to the slow reader, hiding the deadline — the
+shipped enforcement aborts with RST) plus the send-cancellation memory-safety
+fix. G6.5-2 is satisfied by `tests/wp90-deadlines` on the raw wire; ADR-039 is
+ACCEPTED. Original scope kept below for the record:
 Add `max_write_time` and `max_idle_time` to `Limits` (0 = disabled). Enforce in
 the vendored backend's deadline sweep as **BRIDGE** patches (mark `URUQUIM PATCH`,
 update `planning/vendor-policy.md` row count + `build/check_vendor_policy.sh` +

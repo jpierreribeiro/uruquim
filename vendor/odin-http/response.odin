@@ -7,6 +7,9 @@ import "core:mem/virtual"
 import "core:nbio"
 import "core:slice"
 import "core:strconv"
+// URUQUIM PATCH 19/20 (WP90 / ADR-039) — deadline stamps on the send and
+// keep-alive paths.
+import "core:time"
 
 Response :: struct {
 	// Add your headers and cookies here directly.
@@ -334,12 +337,21 @@ response_send_got_body :: proc(r: ^Response, will_close: bool) {
 	}
 
 	buf := bytes.buffer_to_bytes(&r._buf)
-	nbio.send_poly(conn.socket, {buf}, conn, on_response_sent)
+	// URUQUIM PATCH 19 (WP90 / ADR-039) — the write-deadline clock starts when
+	// the completed response is handed to the event loop, and the operation
+	// handle is retained so a deadline abort (or any close) can cancel it.
+	conn.send_started = time.now()
+	conn.pending_send = nbio.send_poly(conn.socket, {buf}, conn, on_response_sent)
 }
 
 
 @(private)
 on_response_sent :: proc(op: ^nbio.Operation, conn: ^Connection) {
+	// URUQUIM PATCH 19 (WP90) — the send is over, however it ended; the write
+	// deadline no longer applies and there is nothing left to cancel.
+	conn.pending_send = nil
+	conn.send_started = {}
+
 	if op.send.err != nil {
 		log.errorf("could not send response: %v", op.send.err)
 		if !connection_set_state(conn, .Will_Close) { return }
@@ -369,11 +381,19 @@ clean_request_loop :: proc(conn: ^Connection, close: Maybe(bool) = nil) {
 	// an idle keep-alive connection is not swept as a slow request. The next
 	// `conn_handle_req` stamps the next one.
 	conn.request_started = {}
+	// URUQUIM PATCH 19 (WP90) — same rule for the write side: whatever path
+	// ended this request cycle, no send deadline may leak into the next one.
+	conn.send_started = {}
 
 	if c, ok := close.?; (ok && c) || conn.state == .Will_Close {
 		connection_close(conn)
 	} else {
 		if !connection_set_state(conn, .Idle) { return }
+		// URUQUIM PATCH 20 (WP90 / ADR-039) — the keep-alive gap starts here
+		// and ends when the next request's bytes arrive (`on_rline1`). The
+		// idle sweep reads this stamp; `request_started` keeps its Patch-6
+		// meaning untouched.
+		conn.idle_since = time.now()
 		conn_handle_req(conn, context.temp_allocator)
 	}
 }

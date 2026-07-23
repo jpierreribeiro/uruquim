@@ -2037,3 +2037,35 @@ stop, so the answer is never behind the refusal.
 
 **Rollback.** The symbol, its example and its evidence are removable without
 changing any other binary; the drain machinery it reads predates it (WP44/WP58).
+
+## Amendment 28 — WP90: `Limits.max_write_time` and `Limits.max_idle_time`
+
+**Date: 2026-07-23. Authority: ADR-039 (ACCEPTED), delivered by Phase 7's
+WP90 with the vendored transport in hand.** **Ledger effect: none.** Two
+FIELDS on the frozen `Limits` record, on the field-cost precedent of
+`max_request_time` (WP46), `max_drain_time` (WP59) and `max_handlers` (WP71):
+a field pays signature, documentation and behaviour evidence, but adds no
+name. 63 application + 2 test-support = 65, unchanged. The snapshot diff is
+exactly the `Limits` row, gaining `max_write_time: i64, max_idle_time: i64`
+after `max_request_time`.
+
+**WHAT THEY DO.** `max_write_time` bounds how long one response may take to
+SEND; at the deadline the connection is **reset**, not closed gracefully,
+because a graceful close first flushes kernel-buffered bytes to the slow
+reader at the client's own pace — the deadline would bound nothing observable
+(the measured Phase-6.5 failure, recorded in ADR-039). `max_idle_time` bounds
+the quiet gap between keep-alive requests; the clock stops when the next
+request's bytes arrive and the close is graceful. Both are `i64` nanoseconds
+(the FINDING-B rule: `package web` links no clock), both `0` = off, both
+validated non-negative at `web.limits`, both enforced by the vendored
+backend's deadline sweep as BRIDGE patches 19/20 with the raw-wire proof in
+`tests/wp90-deadlines/deadlines_test.odin`.
+
+| Field | WP | Signature evidence | Behaviour evidence | Doc |
+|---|---|---|---|---|
+| `max_write_time` | WP90 | the frozen `Limits` row | `tests/wp90-deadlines/deadlines_test.odin::wp90_a_stalled_write_is_aborted_at_the_deadline` (+ healthy-reader and zero controls) | `docs/operations.md` limits table; `docs/ai-context.md` |
+| `max_idle_time` | WP90 | the frozen `Limits` row | `tests/wp90-deadlines/deadlines_test.odin::wp90_an_idle_keepalive_is_closed_at_the_idle_deadline` (+ active and zero controls) | `docs/operations.md` limits table; `docs/ai-context.md` |
+
+**Rollback.** Fields on a frozen record are permanent once shipped; the safe
+retreat recorded by ADR-039 is defaulting to `0` (off), never removal. The
+bridge enforcement is deletable with the adapter (ADR-033 obligations).

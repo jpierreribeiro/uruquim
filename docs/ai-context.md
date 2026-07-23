@@ -39,9 +39,8 @@ a standardized JSON envelope.
   `Content-Length`, bad chunking, truncated bodies) is rejected and the
   connection closed.
 
-**Not available yet** — do not emit any of it: a **write deadline** (the read
-deadline exists as `Limits.max_request_time`; the write side does not, and no
-field for it may be invented); graceful shutdown with a deadline (Phase 4). There is **no request-scoped state** and there will not be one
+**Not available yet** — do not emit any of it: graceful shutdown with a
+deadline (Phase 4). There is **no request-scoped state** and there will not be one
 (ADR-028): `ctx` is not an extension bag, and a value a middleware computes for
 a handler is passed down or recomputed. Panic recovery does not exist and never will: Odin has
 no recoverable panic (ADR-020). See the appendix.
@@ -314,8 +313,15 @@ fail-closed rather than run on a guess.
   REQUEST deadline, not an idle timeout — a client trickling one byte per second
   would reset an idle timer forever. It does **not** bound a slow handler: that
   is your program's own time.
-- **There is still no WRITE deadline**, and no field for one. Do not emit
-  `web.Limits{write_timeout = ...}` — it does not exist.
+- **`max_write_time` bounds how long one response may take to SEND** (WP90 /
+  ADR-039), in **nanoseconds**, `0` = off (the default). At the deadline the
+  connection is **reset**, not closed gracefully — a graceful close would
+  flush kernel buffers to the slow reader first and hide the deadline. The
+  field is `max_write_time`; do not emit `web.Limits{write_timeout = ...}` —
+  no `write_timeout` field exists.
+- **`max_idle_time` bounds the quiet gap between keep-alive requests**, in
+  nanoseconds, `0` = off (the default). The clock stops the moment the next
+  request's bytes arrive; the close is graceful.
 - **`max_connections` bounds concurrent connections** (1024 by default; `0` is
   unbounded), and **`reserved_conns` holds slots back from admission** (16) so
   a shutdown always has room to work in. Admission is refused **at or below**
@@ -917,6 +923,7 @@ Phase boundaries in one line each:
 - **Phase 2** — middleware, route organisation, header lookup, the typed
   error observer, the built-in `logger` and `request_id` (all delivered). No
   panic recovery — Odin has no recoverable panic (ADR-020).
-- **Phase 3** — route groups, typed application state, configurable limits and
-  read/write timeouts.
+- **Phase 3** — route groups, typed application state and configurable limits
+  (the read deadline arrived in Phase 4; the write and idle deadlines in
+  Phase 7's WP90).
 - **Phase 4** — graceful shutdown with a deadline, security hardening.

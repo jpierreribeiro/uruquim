@@ -14,7 +14,7 @@ and WP46 is the first work package held to them.
 
 `vendor/odin-http/` is a snapshot of the root server package of
 `laytan/odin-http` at commit `112c49b` (2026-04-11), vendored 2026-07-19, MIT.
-Thirteen local patches, all security-, lifecycle- or ownership-motivated, all
+Twenty-one local patches, all security-, lifecycle- or ownership-motivated, all
 marked `URUQUIM PATCH` at their site and all covered by an executable case that
 failed before the patch.
 
@@ -42,7 +42,7 @@ forever is a fork with extra steps.
 queue is not a schedule, and re-vendoring across an API its author says moves is
 work regardless of who wrote the fix.
 
-### 2.1 The thirteen patches, each with its upstream disposition
+### 2.1 The twenty-one patches, each with its upstream disposition
 
 | # | Patch | Is it upstream's bug? | Disposition |
 |---|---|---|---|
@@ -64,8 +64,11 @@ work regardless of who wrote the fix.
 | 16 | A `Content-Length` with more than 19 significant digits is rejected | **Yes** — a request-smuggling desync. `strconv.parse_int` wraps a value `>= 2^64` to a small positive, so the server reads fewer bytes than declared and treats the remainder as a second request; the `[2^63, 2^64)` range already wrapped negative and was caught, the `>= 2^64` range was not | **OFFER UPSTREAM.** The magnitude check completes the existing negative/non-decimal guard on the same field |
 | 17 | A bare carriage return in a header or cookie value is escaped, not passed through | **Yes** — a header-injection vector. `write_escaped_newlines` escaped only the line feed, so a lone `\r` reached the wire and a CR-tolerant downstream parser could treat it as a line terminator | **OFFER UPSTREAM.** The sink already escapes `\n`; escaping `\r` at the same point closes the other half |
 | 18 | An obs-fold continuation line beginning with a horizontal tab is rejected, like one beginning with a space | **Yes** — a request-smuggling primitive. RFC 7230 obs-fold is CRLF then a space OR a tab; the original guard caught only the space, so a tab-prefixed line parsed as its own header here while an unfolding proxy merged it, diverging the header set | **OFFER UPSTREAM.** Completes the existing leading-space refusal to both obs-fold forms |
+| 19 | The response write deadline: send-path stamps, a write branch in the sweep, cancellation of the outstanding send on every close, and an RST abort as the enforcement (WP90 / ADR-039) | **Mixed** — the missing send cancellation is upstream's use-after-free (Patch 10's twin on the write side); the deadline itself and the RST-not-graceful enforcement are Uruquim policy | **CARRY AS BRIDGE; offer the send-cancel upstream.** Delete with the adapter when `core:net/http` lands; the official adapter must expose an equivalent write deadline before it can replace this one |
+| 20 | The idle keep-alive timeout: `idle_since` stamped between requests, cleared on the next request's first bytes, graceful close in the sweep (WP90 / ADR-039) | **No** — upstream simply has no idle policy; keep-alive economy is Uruquim's own operational contract | **CARRY AS BRIDGE.** Same replacement obligation as Patch 19 |
+| 21 | Transient accept errors are tolerated (log, delayed re-arm, per-lane consecutive-failure limit) instead of panicking the process (WP90 / F9) | **Yes** — an unauthenticated remote crash: `ECONNABORTED` at accept is peer-triggerable weather, and upstream panics on it | **OFFER UPSTREAM.** The persistence limit is the honest part: a listener that can never accept again stays fatal rather than a silent outage |
 
-**Seven of thirteen are upstream bugs; six are deliberate divergences.** WP70's
+**Twelve of twenty-one are or contain upstream bugs; the rest are deliberate divergences.** WP70's
 multi-lane lifecycle correction joins the upstream group; WP59's absolute drain
 deadline joins the policy group. The bridge label changes expected lifetime,
 not the evidence or upstream-offer obligation.

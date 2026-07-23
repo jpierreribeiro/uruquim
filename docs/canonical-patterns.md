@@ -17,8 +17,10 @@ these forms. If a pattern here conflicts with any other document except
 >
 > Still ahead: graceful shutdown with a deadline (Phase 4). Typed application
 > state (WP37) and configurable limits (WP36) shipped in Phase 3; **read and
-> write timeouts did not**, because the vendored server has no deadline to
-> configure. Request-scoped state is not ahead either and never will be, because
+> write timeouts did not**, because the vendored server then had no deadline to
+> configure — the read deadline arrived in Phase 4 (`max_request_time`, WP46)
+> and the write/idle deadlines in Phase 7 (`max_write_time`/`max_idle_time`,
+> WP90). Request-scoped state is not ahead either and never will be, because
 > ADR-028 decided against it, and panic recovery never will be: Odin has no recoverable
 > panic, a faulting handler aborts the process, and ADR-020 records why.
 
@@ -587,7 +589,10 @@ be worse than one that refuses to start.
 - **`max_request_time` is a REQUEST deadline, not an idle timeout**, and the
   difference is the whole defence: an idle timer is reset by every byte, so a
   client trickling one byte per second resets it forever. This bounds the total
-  time a request may take to arrive. It does **not** bound a slow handler —
+  time a request may take to arrive. The idle gap between keep-alive requests
+  has its own bound, `max_idle_time`, and the response send has
+  `max_write_time` (both WP90 / ADR-039, both `0` = off by default). It does
+  **not** bound a slow handler —
   that is your program's own time, and killing its connection would turn a slow
   page into a broken one. Set it to `0` to ask for the old unbounded behaviour
   explicitly;

@@ -88,6 +88,43 @@ Limits :: struct {
 	// boundary, where a clock is already linked.
 	max_request_time: i64,
 
+	// WP90 / ADR-039 — how long ONE response may take to SEND, from the moment
+	// the completed response is handed to the transport until the transport
+	// reports it sent, in nanoseconds. Zero means no deadline, which is what
+	// shipped before this field existed.
+	//
+	// THE MIRROR OF `max_request_time`: that field bounds a client that sends
+	// slowly; this one bounds a client that READS slowly. Without it, a client
+	// that stops reading parks the response — and the connection, and its
+	// buffers — for as long as the client chooses.
+	//
+	// A CONNECTION PAST THIS DEADLINE IS ABORTED, NOT CLOSED GRACEFULLY: the
+	// transport discards the undelivered tail and resets the connection. A
+	// graceful close would first flush kernel-buffered bytes to the slow
+	// reader at the client's own pace, which can hide the close for minutes —
+	// a deadline that bounds nothing observable is decoration. The client
+	// sees a reset mid-body, which is the honest signal for "you were too
+	// slow"; a deadline generous enough for legitimate slow links is the
+	// application's judgement, which is why the default is off.
+	//
+	// `i64` nanoseconds rather than `time.Duration` for the measured FINDING-B
+	// reason recorded on `max_request_time`.
+	max_write_time:   i64,
+
+	// WP90 / ADR-039 — how long a keep-alive connection may sit IDLE between
+	// requests before the server closes it, in nanoseconds. Zero means no
+	// timeout, which is what shipped before this field existed.
+	//
+	// NOT A REQUEST DEADLINE AND NOT A DEFENCE: closing an idle connection is
+	// keep-alive economy — reclaiming slots from clients that went away
+	// without saying so — and the close is graceful (an idle connection has
+	// nothing buffered to discard). The clock starts when a response
+	// completes and stops the moment the next request's bytes arrive;
+	// `max_request_time` then owns that request's arrival as before.
+	//
+	// Same `i64` nanoseconds convention, same FINDING-B reason.
+	max_idle_time:    i64,
+
 	// WP47 — the maximum number of concurrent connections the server will hold.
 	// Zero means unbounded, which is what shipped before this field existed.
 	//
@@ -166,6 +203,12 @@ DEFAULT_LIMITS :: Limits {
 	max_request_line = REQUEST_LINE_LIMIT,
 	max_headers      = HEADER_BLOCK_LIMIT,
 	max_request_time = REQUEST_TIME_LIMIT,
+	// ADR-039: both timeout fields default OFF. Turning either on is an
+	// application decision about its slowest legitimate client, not a number
+	// the framework can guess — and a default that resets real slow readers
+	// would be a behaviour change for every shipped application.
+	max_write_time   = 0,
+	max_idle_time    = 0,
 	max_connections  = CONNECTION_LIMIT,
 	reserved_conns   = RESERVED_CONNECTION_LIMIT,
 	max_drain_time   = DRAIN_TIME_LIMIT,
@@ -311,6 +354,12 @@ limits :: proc(a: ^App, l: Limits) {
 	// Same rule as `max_request_time`: zero is a meaningful choice (no
 	// deadline), negative is a mistake.
 	if l.max_drain_time < 0 {
+		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
+		return
+	}
+	// WP90 / ADR-039 — the write and idle deadlines follow the identical
+	// zero-means-off, negative-is-a-mistake convention.
+	if l.max_write_time < 0 || l.max_idle_time < 0 {
 		limits_poison(a, FRAMEWORK_MESSAGE_LIMITS_INVALID)
 		return
 	}

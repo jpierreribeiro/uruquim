@@ -88,6 +88,11 @@ Config :: struct {
 	// and the adapter converts, on the side of the line where a clock is
 	// already linked. Zero disables it.
 	max_request_time: i64,
+	// WP90 / ADR-039 — the response write deadline and the idle keep-alive
+	// timeout, in NANOSECONDS, zero disabled — carried as plain integers for
+	// the same FINDING-B reason as `max_request_time`; the adapter converts.
+	max_write_time:   i64,
+	max_idle_time:    i64,
 	// WP47 — bounded admission. Zero is unbounded.
 	max_connections:  int,
 	reserved_conns:   int,

@@ -10,6 +10,10 @@ import "core:log"
 import "core:mem"
 import "core:mem/virtual"
 import "core:nbio"
+// URUQUIM PATCH 19 (WP90) — for the SO_LINGER abort in `connection_abort`.
+// `core:net`'s own `.Linger` option is unusable here: on this pinned
+// toolchain it marshals a `timeval` where the kernel expects `struct linger`.
+import "core:sys/linux"
 import "core:net"
 import "core:os"
 import "core:slice"
@@ -101,6 +105,35 @@ Server_Opts :: struct {
 	// allocation, and no timer-capacity question — at the cost of granularity,
 	// which for a defence measured in seconds is not a cost.
 	request_read_timeout:    time.Duration,
+	// URUQUIM PATCH 19 (WP90 / ADR-039) — the response write deadline.
+	//
+	// How long ONE response send may take, from the moment the completed
+	// response is handed to the event loop until the backend reports it sent.
+	// Zero disables it, the upstream behaviour and the default.
+	//
+	// WHY THIS EXISTS: a client that stops reading (or reads one byte a
+	// minute) parks the response in the send path indefinitely; the connection
+	// and its buffers are held for as long as the CLIENT chooses. The same
+	// slowloris shape as the read side, pointed at the write side.
+	//
+	// ENFORCED BY THE SAME SWEEP as the read deadline. A connection past this
+	// deadline is ABORTED — closed with SO_LINGER zero so the kernel discards
+	// the undelivered tail and sends RST. A graceful close would flush kernel
+	// buffers to the slow reader first, making the close invisible for however
+	// long megabytes take at the client's chosen pace — the deadline would
+	// bound nothing observable. (This is why the Phase-6.5 attempt read as
+	// "does not fire": its test watched for EOF that the kernel's buffered
+	// bytes delayed past the test window.)
+	response_write_timeout:  time.Duration,
+	// URUQUIM PATCH 20 (WP90 / ADR-039) — the idle keep-alive timeout.
+	//
+	// How long a connection may sit BETWEEN requests before the server closes
+	// it. Zero disables it (upstream behaviour, default). Distinct from the
+	// read deadline: `request_started` is stamped when the server begins
+	// waiting for a request, while `idle_since` is cleared the moment request
+	// bytes actually arrive — so this bounds only the quiet gap, and closing
+	// an idle connection is a normal keep-alive economy measure, not an error.
+	idle_timeout:            time.Duration,
 	// The thread count to use, defaults to your core count - 1.
 	thread_count:            int,
 
@@ -185,9 +218,21 @@ Server_Thread :: struct {
 	// performs on itself (WP40 §2.5).
 	refused_connections: int,
 
+	// URUQUIM PATCH 21 (WP90 / F9) — consecutive accept failures on this
+	// lane. Reset by every successful accept; reaching
+	// `URUQUIM_ACCEPT_FAILURE_LIMIT` is still fatal, so a permanently dead
+	// listener cannot become a silent outage.
+	accept_failures: int,
+
 	// free_temp_blocks:       map[int]queue.Queue(^Block),
 	// free_temp_blocks_count: int,
 }
+
+// URUQUIM PATCH 21 (WP90 / F9) — accept-error tolerance bounds.
+@(private)
+URUQUIM_ACCEPT_FAILURE_LIMIT :: 128
+@(private)
+URUQUIM_ACCEPT_RETRY_DELAY :: 10 * time.Millisecond
 
 @(private, disabled = ODIN_DISABLE_ASSERT)
 assert_has_td :: #force_inline proc(loc := #caller_location) {
@@ -536,6 +581,21 @@ Connection :: struct {
 	// request starts and never refreshed, so total time to send a request is
 	// what is bounded.
 	request_started: time.Time,
+	// URUQUIM PATCH 19 (WP90 / ADR-039) — when the current response send was
+	// handed to the event loop, or the zero value when no send is in flight.
+	// Stamped in `response_send_got_body`, cleared in `on_response_sent` and
+	// `clean_request_loop`; the sweep's write branch reads it.
+	send_started:    time.Time,
+	// URUQUIM PATCH 19 — the outstanding send operation, so closing a
+	// connection mid-send can cancel it. The write-side twin of Patch 10's
+	// `scanner.pending_recv`: without the cancel, teardown frees the
+	// connection while the send completion still points at it.
+	pending_send:    ^nbio.Operation,
+	// URUQUIM PATCH 20 (WP90 / ADR-039) — when this connection last became
+	// idle between requests, or the zero value while a request or response is
+	// in flight. Stamped in `clean_request_loop` on the keep-alive path,
+	// cleared when the next request's bytes arrive (`on_rline1`).
+	idle_since:      time.Time,
 }
 
 // Loop/request cycle state.
@@ -581,6 +641,16 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 		c.scanner.pending_recv = nil
 	}
 
+	// URUQUIM PATCH 19 (WP90) — the write-side twin of the cancel above, and
+	// the same memory-safety argument: the teardown callback below frees `c`,
+	// and an outstanding send completion would then dereference it. WP59
+	// measured that failure on the recv side; closing mid-send (which the
+	// write deadline now does deliberately) reaches the send side.
+	if c.pending_send != nil {
+		nbio.remove(c.pending_send)
+		c.pending_send = nil
+	}
+
 	// RFC 7230 6.6.
 
 	// Close read side of the connection, then wait a little bit, allowing the client
@@ -588,20 +658,70 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 	net.shutdown(c.socket, net.Shutdown_Manner.Send)
 
 	nbio.timeout_poly(Conn_Close_Delay, c, proc(_: ^nbio.Operation, c: ^Connection) {
-		nbio.close_poly(c.socket, c, proc(_: ^nbio.Operation, c: ^Connection) {
-			log.debugf("closed connection: %i", c.socket)
-
-			c.state = .Closed
-
-			// allocator_destroy(&c.temp_allocator)
-			virtual.arena_destroy(&c.temp_allocator)
-
-			scanner_destroy(&c.scanner)
-			delete_key(&td.conns, c.socket)
-			_ = sync.atomic_add(&c.server.active_connections, -1)
-			free(c, c.server.conn_allocator)
-		})
+		nbio.close_poly(c.socket, c, connection_teardown)
 	})
+}
+
+// URUQUIM PATCH 19 (WP90) — the final teardown, shared by the graceful close
+// above and the deadline abort below so there is exactly one free path.
+@(private)
+connection_teardown :: proc(_: ^nbio.Operation, c: ^Connection) {
+	log.debugf("closed connection: %i", c.socket)
+
+	c.state = .Closed
+
+	// allocator_destroy(&c.temp_allocator)
+	virtual.arena_destroy(&c.temp_allocator)
+
+	scanner_destroy(&c.scanner)
+	delete_key(&td.conns, c.socket)
+	_ = sync.atomic_add(&c.server.active_connections, -1)
+	free(c, c.server.conn_allocator)
+}
+
+// URUQUIM PATCH 19 (WP90 / ADR-039) — abort a connection whose response send
+// exceeded its deadline.
+//
+// DIFFERENT FROM `connection_close` ON PURPOSE: the graceful path does
+// `shutdown(Send)` and a delayed `close`, which FLUSHES kernel-buffered bytes
+// to the client first — correct for an orderly end, and exactly wrong for a
+// write deadline, where megabytes of buffered response would keep trickling
+// to the slow reader at the client's own pace, making the "close" invisible
+// for minutes. SO_LINGER {on, 0} makes `close` discard the unsent tail and
+// send RST: the deadline is observable the moment it fires, on both sides.
+@(private)
+connection_abort :: proc(c: ^Connection, loc := #caller_location) {
+	assert_has_td(loc)
+
+	if c.state >= .Closing {
+		return
+	}
+	c.state = .Closing
+
+	// Both outstanding operations are cancelled before anything can free `c`
+	// — the Patch 10/19 memory-safety rule.
+	if c.scanner.pending_recv != nil {
+		nbio.remove(c.scanner.pending_recv)
+		c.scanner.pending_recv = nil
+	}
+	if c.pending_send != nil {
+		nbio.remove(c.pending_send)
+		c.pending_send = nil
+	}
+
+	// struct linger { l_onoff = 1, l_linger = 0 } → close() sends RST and
+	// discards the send buffer. Raw setsockopt because the pinned
+	// `core:net` `.Linger` marshals the wrong struct (a timeval).
+	Linger_Value :: struct {
+		l_onoff:  i32,
+		l_linger: i32,
+	}
+	lv := Linger_Value{1, 0}
+	// SOL_SOCKET = 1, SO_LINGER = 13 on Linux, the only gate-validated
+	// platform (production-service-bom.md §6).
+	_ = linux.setsockopt_base(linux.Fd(i32(c.socket)), 1, 13, &lv)
+
+	nbio.close_poly(c.socket, c, connection_teardown)
 }
 
 @(private)
@@ -618,8 +738,33 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 			return
 		}
 
-		fmt.panicf("accept error: %v", op.accept.err)
+		// URUQUIM PATCH 21 (WP90 / F9) — a transient accept failure must not
+		// kill the process. `ECONNABORTED` (peer gave up while queued),
+		// `EINTR` and load-shed conditions are ordinary weather at accept;
+		// upstream's panic turned each into an unauthenticated remote crash.
+		// Tolerate by re-arming with a short delay; the failure counter makes
+		// a PERSISTENTLY failing listener still fatal — a server that can
+		// never accept again but keeps ticking would be a silent outage,
+		// which is the dishonest failure mode (WP40 §2.5).
+		td.accept_failures += 1
+		if td.accept_failures >= URUQUIM_ACCEPT_FAILURE_LIMIT {
+			fmt.panicf(
+				"accept failing persistently (%d consecutive), last error: %v",
+				td.accept_failures, op.accept.err,
+			)
+		}
+		log.errorf("uruquim: transient accept error (%v); re-arming accept", op.accept.err)
+		nbio.timeout_poly(URUQUIM_ACCEPT_RETRY_DELAY, server, proc(_: ^nbio.Operation, server: ^Server) {
+			if td.accept == nil && !td.handler_active {
+				td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+			}
+		})
+		return
 	}
+
+	// URUQUIM PATCH 21 — a successful accept proves the listener works;
+	// only CONSECUTIVE failures may accumulate toward the fatal limit.
+	td.accept_failures = 0
 
 	// Accept next connection unless this lane has entered synchronous
 	// application code (Patch 13). A raced completion is installed without
@@ -759,6 +904,10 @@ conn_handle_req :: proc(c: ^Connection, allocator := context.temp_allocator) {
 		l := cast(^Loop)loop
 
 		if !connection_set_state(l.conn, .Active) { return }
+
+		// URUQUIM PATCH 20 (WP90) — bytes arrived: the connection stopped
+		// being idle the moment a request line landed, whatever its fate.
+		l.conn.idle_since = {}
 
 		if err != nil {
 			if err == .EOF {
@@ -952,18 +1101,38 @@ URUQUIM_SWEEP_INTERVAL :: 250 * time.Millisecond
 server_deadline_sweep :: proc(_: ^nbio.Operation, s: ^Server) {
 	if atomic_load(&s.closing) { return }
 
-	timeout := s.opts.request_read_timeout
-	if timeout > 0 {
+	// URUQUIM PATCH 19/20 (WP90 / ADR-039) — the sweep now carries three
+	// deadlines: request arrival (Patch 6), response write and idle
+	// keep-alive. One connection is judged by at most one branch per pass:
+	// a sending connection by the write deadline, an arriving request by the
+	// read deadline, a quiet keep-alive by the idle timeout.
+	read_t := s.opts.request_read_timeout
+	write_t := s.opts.response_write_timeout
+	idle_t := s.opts.idle_timeout
+	if read_t > 0 || write_t > 0 || idle_t > 0 {
 		now := time.now()
 		for _, conn in td.conns {
-			if conn.request_started == (time.Time{}) {
-				continue
-			}
 			if conn.state >= .Closing {
 				continue
 			}
-			if time.diff(conn.request_started, now) > timeout {
+			if write_t > 0 && conn.send_started != (time.Time{}) &&
+			   time.diff(conn.send_started, now) > write_t {
+				log.infof("uruquim: response write deadline exceeded; aborting connection %i", conn.socket)
+				// Abort, not close: a graceful close would flush kernel
+				// buffers to the slow reader first — see `connection_abort`.
+				connection_abort(conn)
+				continue
+			}
+			if read_t > 0 && conn.request_started != (time.Time{}) &&
+			   conn.send_started == (time.Time{}) &&
+			   time.diff(conn.request_started, now) > read_t {
 				log.infof("uruquim: request read deadline exceeded; closing connection %i", conn.socket)
+				connection_close(conn)
+				continue
+			}
+			if idle_t > 0 && conn.state == .Idle && conn.idle_since != (time.Time{}) &&
+			   time.diff(conn.idle_since, now) > idle_t {
+				log.infof("uruquim: idle keep-alive timeout exceeded; closing connection %i", conn.socket)
 				connection_close(conn)
 			}
 		}
