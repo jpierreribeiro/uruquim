@@ -1297,6 +1297,23 @@ timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
   -out:"$URUQUIM_BIN_TMP/wp95-drain" ||
   fail "the WP95 drain contract did not pass within the timeout"
 
+# WP96 — the PUBLIC streaming API (web.stream/stream_send/stream_close) end to
+# end through web.serve, and the G7-6 scale claim on the registry (3,000
+# streams open/receive/drain without a leak — in memory, faithful and reliable
+# where 3,000 real sockets are not on a shared machine).
+echo "--- WP96 public streaming API end to end (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp96-public-stream" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp96-public-stream" ||
+  fail "the WP96 public streaming API did not pass within the timeout"
+echo "--- WP96 registry scale: 3,000 streams open/receive/drain (odin test) ---"
+env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp96-scale" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp96-scale" ||
+  fail "the WP96 3,000-stream scale contract failed"
+
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
 if find "$URUQUIM_ROOT" -maxdepth 1 -type f -name 'uruquim-*' -print -quit | grep -q .; then

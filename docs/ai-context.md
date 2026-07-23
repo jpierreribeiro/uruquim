@@ -116,6 +116,31 @@ it is true, so a load balancer stops routing new traffic to a draining instance.
 It is `false` before `stop`, `true` after, and never returns to `false`. Reads
 an atomic; safe from any thread. See `examples/09-graceful-shutdown`.
 
+### Response streaming (opt-in, Phase 7)
+
+```text
+stream(ctx) -> (Stream, bool)     open a detached response; then RETURN
+Stream                            an opaque, stale-safe value token (copyable)
+stream_send(s, data) -> Stream_Send   enqueue bounded output from any thread
+Stream_Send                       enum {Sent, Full, Closed}
+stream_close(s)                   end the stream; idempotent
+```
+
+`web.stream(ctx)` opens a long-lived response bound to the request's
+connection and commits its status/headers (200 plus whatever the chain —
+`secure_headers`, `cors`, the request id — added), then the **Handler
+returns**. Later code sends on the token from any thread: `web.stream_send`
+copies the bytes into stream-owned storage and never blocks — a full bounded
+queue returns `.Full`, and the application decides whether to retry, drop or
+coalesce. `web.stream_close` writes the terminating chunk. `ok` is `false`
+when there is no connection to detach (the in-memory `test_request`
+transport) or the open-stream cap is reached; the Handler then falls back to
+an ordinary buffered response. A Handler that never calls `stream` links none
+of the streaming machinery (pay only when used). SSE is a Crystal over this
+surface, not a core concept. **Do not** emit `web.stream` on the buffered
+path or against `test_request` and expect a socket — it reports `ok=false`
+there by design.
+
 ### Observability
 
 ```text
@@ -831,7 +856,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-63 application symbols.
+68 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

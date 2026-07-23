@@ -268,12 +268,12 @@ URUQUIM_FREEZE_APP_COUNT="$(grep -c '^application	' "$URUQUIM_FREEZE_ACTUAL_SIG"
 URUQUIM_FREEZE_TS_COUNT="$(grep -c '^test-support	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"
 URUQUIM_FREEZE_TOTAL="$(( URUQUIM_FREEZE_APP_COUNT + URUQUIM_FREEZE_TS_COUNT ))"
 
-[ "$URUQUIM_FREEZE_APP_COUNT" -eq 63 ] ||
-  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the recorded 63 (the Phase-1 32, the Phase-2 twelve, the Phase-3 six, plus WP44 stop, WP48 client_ip/trust_proxies, WP49 secure_headers, WP50 refused_connections and WP60 cors/Cors_Options, plus WP-6.5.3 is_draining)"
+[ "$URUQUIM_FREEZE_APP_COUNT" -eq 68 ] ||
+  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the recorded 68 (… WP-6.5.3 is_draining, plus WP96 stream/Stream/stream_send/Stream_Send/stream_close)"
 [ "$URUQUIM_FREEZE_TS_COUNT" -eq 2 ] ||
   fail "the test-support ledger holds $URUQUIM_FREEZE_TS_COUNT symbols, not the frozen 2"
-[ "$URUQUIM_FREEZE_TOTAL" -eq 65 ] ||
-  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the recorded 65"
+[ "$URUQUIM_FREEZE_TOTAL" -eq 70 ] ||
+  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the recorded 70"
 
 # ---------------------------------------------------------------------------
 # 5. Named assertions on the contracts most likely to be eroded quietly.
@@ -515,9 +515,12 @@ done
 # it had not built, and Phase 5 built it (ADR-034, WP63). A word that guards an
 # unbuilt feature stops guarding anything once the feature ships with its
 # evidence — keeping it would only force the next person to spell the symbol
-# badly. Everything else stays: `stream`, `websocket` and `openapi` in
-# particular are still unbuilt and still demand-driven.
-URUQUIM_FREEZE_FUTURE='middleware|group|radix|wildcard|user_data|locals|typed_state|static_file|openapi|websocket|stream|recover|timeout|serve_with|serve_transport|header_lookup'
+# badly.
+# `stream` LEFT THIS LIST on 2026-07-23 for the identical reason: Phase 7 built
+# response streaming (ADR-044, WP96) with its evidence, so `web.stream`/`Stream`/
+# `stream_send`/`stream_close` are shipped contracts, not a promise. `websocket`
+# and `openapi` in particular are still unbuilt and still demand-driven.
+URUQUIM_FREEZE_FUTURE='middleware|group|radix|wildcard|user_data|locals|typed_state|static_file|openapi|websocket|recover|timeout|serve_with|serve_transport|header_lookup'
 if cut -f3 "$URUQUIM_FREEZE_ACTUAL_SIG" | sed -E 's@ ::.*@@' \
    | grep -qiE "^($URUQUIM_FREEZE_FUTURE)"; then
   cut -f3 "$URUQUIM_FREEZE_ACTUAL_SIG" | sed -E 's@ ::.*@@' \

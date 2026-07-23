@@ -147,6 +147,13 @@ registry_init :: proc(r: ^Registry, cap: Capacity, wake: Wake_Proc = nil, wake_u
 	}
 	c := resolve(cap)
 	r.allocator = context.allocator
+	// Only the slot HEADERS and the free list are allocated eagerly (small:
+	// a Slot is slice headers + counters). The per-slot event ring and byte
+	// store are allocated LAZILY on a slot's first open and kept for reuse —
+	// so a server that never opens a stream pays a few hundred KiB, not
+	// max_streams × max_bytes_stream (which at the §4.1 defaults is 256 MiB).
+	// This is the difference between "pay only when used" and taxing every
+	// buffered-only server for a feature it never touches (G7-8).
 	slots, s_err := make([]Slot, c.max_streams, r.allocator)
 	if s_err != nil {
 		return false
@@ -155,24 +162,6 @@ registry_init :: proc(r: ^Registry, cap: Capacity, wake: Wake_Proc = nil, wake_u
 	if f_err != nil {
 		delete(slots, r.allocator)
 		return false
-	}
-	for &s, i in slots {
-		events, e_err := make([]Event, c.max_events_stream, r.allocator)
-		store, b_err := make([]u8, c.max_bytes_stream, r.allocator)
-		if e_err != nil || b_err != nil {
-			// Unwind whatever was allocated; init is all-or-nothing.
-			if e_err == nil {delete(events, r.allocator)}
-			if b_err == nil {delete(store, r.allocator)}
-			for j in 0 ..< i {
-				delete(slots[j].events, r.allocator)
-				delete(slots[j].store, r.allocator)
-			}
-			delete(slots, r.allocator)
-			delete(free_list, r.allocator)
-			return false
-		}
-		s.events = events
-		s.store = store
 	}
 	// Explicit free list, filled so the LOWEST slot is handed out first —
 	// deterministic reuse, which the forced-tiny-capacity tests rely on.
@@ -196,9 +185,10 @@ registry_destroy :: proc(r: ^Registry) {
 	if !r.initialized {
 		return
 	}
+	// Free only the slots that were ever opened (and so allocated their ring).
 	for &s in r.slots {
-		delete(s.events, r.allocator)
-		delete(s.store, r.allocator)
+		if s.events != nil {delete(s.events, r.allocator)}
+		if s.store != nil {delete(s.store, r.allocator)}
 	}
 	delete(r.slots, r.allocator)
 	delete(r.free_list, r.allocator)
@@ -233,6 +223,26 @@ open :: proc(
 
 	s := &r.slots[idx]
 	sync.mutex_lock(&s.mu)
+	// Lazily allocate this slot's ring on first open; kept for reuse until the
+	// registry is destroyed. If allocation fails, hand the slot back and
+	// report capacity — an open that cannot get its buffer is not open.
+	if s.events == nil || s.store == nil {
+		events, e_err := make([]Event, r.cap.max_events_stream, r.allocator)
+		store, b_err := make([]u8, r.cap.max_bytes_stream, r.allocator)
+		if e_err != nil || b_err != nil {
+			if e_err == nil {delete(events, r.allocator)}
+			if b_err == nil {delete(store, r.allocator)}
+			sync.mutex_unlock(&s.mu)
+			sync.mutex_lock(&r.free_mu)
+			r.free_list[r.free_top] = idx
+			r.free_top += 1
+			r.live -= 1
+			sync.mutex_unlock(&r.free_mu)
+			return Token{slot = -1}, .At_Capacity
+		}
+		s.events = events
+		s.store = store
+	}
 	s.state = .Open
 	s.connection_id = connection_id
 	s.close_requested = false

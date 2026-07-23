@@ -135,6 +135,18 @@ Context_Internal :: struct {
 	miss_kind:  Miss_Kind,
 	miss_allow: string,
 
+	// WP96 — the transport's opaque per-request handle, threaded from the
+	// neutral inbound so `web.stream` can open a detached response bound to
+	// THIS connection. Nil on the in-memory test transport, which has no
+	// connection to detach — `web.stream` there returns ok=false, and the
+	// buffered path is what test_request exercises. A rawptr, never a
+	// transport type: the core still names none.
+	stream_exchange: rawptr,
+	// WP96 — set by `web.stream` when this request detached its response, read
+	// by `serve_dispatch` to tell the adapter to commit headers and hand the
+	// wire to the owner-lane pump instead of writing a body.
+	stream_detached: bool,
+
 	// WP91 (F5/F6) — the mounts pointer the static terminal serves from,
 	// stamped by `dispatch` when a mount owns the path, in the same spirit as
 	// `miss_kind`: `dispatch` holds the App and decides; the terminal — an

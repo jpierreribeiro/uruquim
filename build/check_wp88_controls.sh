@@ -88,7 +88,8 @@ fi
 # but ONLY through the transport boundary. `package web` (the public core)
 # still imports it nowhere, and the stream package itself remains
 # executor-agnostic: no backend, no `uruquim:web`, no transport.
-if grep -rn '"uruquim:web/internal/stream"' "$URUQUIM_ROOT/web" --include='*.odin' -l |
+if grep -rnE '^[[:space:]]*import[[:space:]].*"uruquim:web/internal/stream"' \
+  "$URUQUIM_ROOT/web" --include='*.odin' -l |
   grep -v 'web/internal/transport/' >/dev/null; then
   fail "the stream package is imported outside the transport boundary (ADR-009)"
 fi
