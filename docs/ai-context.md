@@ -64,7 +64,7 @@ Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
 `logger` and `request_id` from Phase 2, and `route`, `app_with_state`,
 `state`, `Limits`, `DEFAULT_LIMITS`, `limits`, `stop`, `client_ip` and
-`trust_proxies`, `secure_headers` and `refused_connections` from Phases 3-4).
+`trust_proxies`, `secure_headers`, `refused_connections` from Phases 3-4, and `is_draining`).
 The test-support API is a separate ledger of exactly **2**. Union: **57**. Do not
 fold them together and do not invent a third form.
 
@@ -110,6 +110,12 @@ the outer bound — it should be longer than `max_drain_time`.
 lanes continue while capacity remains, but teardown cannot free state the
 blocked Handler still uses. The supervisor's stop timeout remains the outer
 bound for permanently stuck application or foreign code.
+
+`web.is_draining(&app) -> bool` reports whether `stop` has been requested. It is
+the one readable bit of the lifecycle: a readiness handler returns `503` while
+it is true, so a load balancer stops routing new traffic to a draining instance.
+It is `false` before `stop`, `true` after, and never returns to `false`. Reads
+an atomic; safe from any thread. See `examples/09-graceful-shutdown`.
 
 ### Observability
 
@@ -819,7 +825,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-62 application symbols.
+63 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

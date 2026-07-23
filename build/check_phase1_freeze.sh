@@ -254,7 +254,7 @@ while IFS=$'\t' read -r ledger kind decl; do
 done <"$URUQUIM_FREEZE_ACTUAL_SIG"
 
 # ---------------------------------------------------------------------------
-# 4. The ledgers still add up: 62 application + 2 test-support = 64
+# 4. The ledgers still add up: 63 application + 2 test-support = 65
 #    (32 frozen Phase-1 application symbols, plus WP17 use/next — Amendment
 #    3 — WP18 Router/router/mount — Amendment 4 — and WP19 header/
 #    bearer_token — Amendment 5 — the test_request headers parameter —
@@ -268,12 +268,12 @@ URUQUIM_FREEZE_APP_COUNT="$(grep -c '^application	' "$URUQUIM_FREEZE_ACTUAL_SIG"
 URUQUIM_FREEZE_TS_COUNT="$(grep -c '^test-support	' "$URUQUIM_FREEZE_ACTUAL_SIG" || true)"
 URUQUIM_FREEZE_TOTAL="$(( URUQUIM_FREEZE_APP_COUNT + URUQUIM_FREEZE_TS_COUNT ))"
 
-[ "$URUQUIM_FREEZE_APP_COUNT" -eq 62 ] ||
-  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the recorded 62 (the Phase-1 32, the Phase-2 twelve, the Phase-3 six, plus WP44 stop, WP48 client_ip/trust_proxies, WP49 secure_headers, WP50 refused_connections and WP60 cors/Cors_Options)"
+[ "$URUQUIM_FREEZE_APP_COUNT" -eq 63 ] ||
+  fail "the application ledger holds $URUQUIM_FREEZE_APP_COUNT symbols, not the recorded 63 (the Phase-1 32, the Phase-2 twelve, the Phase-3 six, plus WP44 stop, WP48 client_ip/trust_proxies, WP49 secure_headers, WP50 refused_connections and WP60 cors/Cors_Options, plus WP-6.5.3 is_draining)"
 [ "$URUQUIM_FREEZE_TS_COUNT" -eq 2 ] ||
   fail "the test-support ledger holds $URUQUIM_FREEZE_TS_COUNT symbols, not the frozen 2"
-[ "$URUQUIM_FREEZE_TOTAL" -eq 64 ] ||
-  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the recorded 64"
+[ "$URUQUIM_FREEZE_TOTAL" -eq 65 ] ||
+  fail "the exported union is $URUQUIM_FREEZE_TOTAL, not the recorded 65"
 
 # ---------------------------------------------------------------------------
 # 5. Named assertions on the contracts most likely to be eroded quietly.
@@ -470,8 +470,8 @@ grep -oE '(build|tests|examples|docs|experiments|web|planning|ops|vendor)/[A-Za-
   "$URUQUIM_FREEZE_MANIFEST" | LC_ALL=C sort -u >"$URUQUIM_FREEZE_REFS" || true
 
 URUQUIM_FREEZE_REF_COUNT="$(wc -l <"$URUQUIM_FREEZE_REFS" | tr -d ' ')"
-[ "$URUQUIM_FREEZE_REF_COUNT" -ge 64 ] ||
-  fail "$URUQUIM_FREEZE_MANIFEST carries only $URUQUIM_FREEZE_REF_COUNT resolvable evidence citations for 64 recorded symbols; the matrix is incomplete"
+[ "$URUQUIM_FREEZE_REF_COUNT" -ge 65 ] ||
+  fail "$URUQUIM_FREEZE_MANIFEST carries only $URUQUIM_FREEZE_REF_COUNT resolvable evidence citations for 65 recorded symbols; the matrix is incomplete"
 
 URUQUIM_FREEZE_BAD_REFS=0
 while IFS= read -r ref; do
@@ -550,7 +550,7 @@ echo "freeze: signatures      -> $URUQUIM_FREEZE_APP_COUNT application + $URUQUI
 echo "freeze: fields/enums    -> Method(u8, 6), Status(int, 10, no 413), Handler, Context, Request, Header_View, App, Recorded_Response pinned"
 echo "freeze: extractors      -> named results pinned, no #optional_ok on any exported procedure"
 echo "freeze: dependencies    -> $(wc -l <"$URUQUIM_FREEZE_ACTUAL_DEP" | tr -d ' ') direct imports match the snapshot; boundaries one-way"
-echo "freeze: evidence matrix -> $URUQUIM_FREEZE_REF_COUNT citations resolved, all 64 symbols present, none NOT_FROZEN"
+echo "freeze: evidence matrix -> $URUQUIM_FREEZE_REF_COUNT citations resolved, all 65 symbols present, none NOT_FROZEN"
 echo "freeze: proc_group extraction self-test passed (private-member group is visible)"
 echo "freeze: no future-phase vocabulary exported; no open Phase-1 blocker"
 echo "PASS: Phase 1 freeze gate"

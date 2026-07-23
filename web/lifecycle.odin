@@ -20,13 +20,23 @@
 //
 // WHAT IT DELIBERATELY IS NOT. There is no `pause`, no `resume`, and no
 // `Draining → Serving`: a client refused during the drain has already gone
-// elsewhere, and an operator who asked for a stop meant it. There is also no
-// public way to READ the state. An application that needs to know whether it is
-// draining is asking a question the framework answers by refusing its requests,
-// and a readable state invites a poll loop where a supervisor belongs.
+// elsewhere, and an operator who asked for a stop meant it.
+//
+// ONE READABLE BIT, and no more (WP-6.5.3, ADR-040). WP44 refused any readable
+// state, on the grounds that a readable state invites a poll loop where a
+// supervisor belongs. That reasoning holds for the supervisor's question —
+// "should this process be restarted" is the supervisor's, answered by the
+// process exiting. It does NOT hold for a different question a real deployment
+// must answer: "should the load balancer still route new traffic here." A
+// Kubernetes-style readiness probe must flip to not-ready the instant a drain
+// begins, or the proxy keeps sending requests the server is about to refuse.
+// That probe is not a busy poll — it is the orchestrator's own traffic
+// decision, on its own schedule — so `is_draining` exposes exactly one bit for
+// it and nothing else: no state enum, no counters, no `Draining → Serving`.
 package web
 // uruquim:file application
 
+import "core:sync"
 import transport "uruquim:web/internal/transport"
 
 // stop asks the running server to stop serving.
@@ -54,6 +64,22 @@ stop :: proc(a: ^App) {
 	// for what it makes possible later — a process may run one server today
 	// (R-10), but a `stop` that ignored its App could never become per-server
 	// without changing its signature, and a frozen signature cannot change.
-	_ = a
+	//
+	// Publish the drain bit BEFORE asking the transport to stop, so a readiness
+	// probe racing the signal can never see "still ready" after the refusal has
+	// begun. Atomic store: `stop` is safe from a signal handler.
+	sync.atomic_store(&a.private.draining, 1)
 	transport.request_stop()
+}
+
+// is_draining reports whether `stop` has been requested on this application.
+//
+// It is the ONE readable bit of the lifecycle (see the file header): a readiness
+// handler returns not-ready — a 503, so the load balancer stops routing new
+// traffic here — while this is true. It is false before `stop`, true after, and
+// never returns to false: an operator who asked for a stop meant it, and a
+// process that has begun draining is going away. It reads an atomic and
+// allocates nothing; call it from any thread.
+is_draining :: proc(a: ^App) -> bool {
+	return sync.atomic_load(&a.private.draining) != 0
 }
