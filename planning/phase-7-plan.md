@@ -1,8 +1,11 @@
 # Phase 7 — Streaming foundation: server push, large bodies and bounded I/O
 
-**Status: OWNER-APPROVED PROGRAM PLAN, 2026-07-21.** Written before Phase 6 has
-run. WP85 must refresh this plan against the Phase-6 freeze; no signature below
-is approved or frozen. Work packages continue at **WP85–WP101**.
+**Status: OWNER-APPROVED PROGRAM PLAN, 2026-07-21; refreshed by WP85 on
+2026-07-23 against the Phase-6 freeze and the Phase-6.5 corrective.** The
+normative gate is `planning/phase-7-spec.md`; where they disagree, the spec
+wins. Entry ledger is **63 application + 2 test-support = 65** (Phase 6 added
+no symbol; Phase 6.5 added `web.is_draining`). No signature below is approved
+or frozen. Work packages continue at **WP85–WP101**.
 
 **Amendment 1 — 2026-07-22, owner decision: the composition half.** Phase 7
 adopts the two-half structure Phase 6 shipped with (concurrency in core, data
@@ -38,6 +41,12 @@ header injection, F13 unanchored multipart boundary, F14 obs-fold tab). The
 remainder are **not** mechanical bug-fixes and are tracked here, because each
 either reverses a documented decision or is the shape of work this phase
 already owns:
+
+**Amendment 2 status refresh — WP85, 2026-07-23.** F4 was fixed and merged by
+Phase 6.5 (core PR #108, ADR-037); no Phase-7 work remains on it. F5/F6 are
+decided by `phase-7-spec.md` §8.2 (static joins the dispatch/commit path,
+implemented in WP91). F8 folds into WP93/WP94; F9 lands in WP90. The original
+backlog text below is retained as the record of what was found:
 
 1. **[FIRST PRIORITY] F4 — leftmost `X-Forwarded-For` is trusted, letting any
    client spoof the resolved client IP** (`web/client_address.odin:150`,
@@ -130,8 +139,8 @@ smallest accepted primitive without privileged access or further core growth.
 | ID | Condition |
 |---|---|
 | E7-1 | Phase 6 frozen; WP72 accepted concurrent serving and the full Phase-5 feature corpus passes on multiple lanes. |
-| E7-2 | The final handler-concurrency/default contract and application-state rules are reflected here. |
-| E7-3 | PostgreSQL pool exhaustion is bounded, so the stream lab cannot be invalidated by handlers waiting forever for database capacity. |
+| E7-2 | **Satisfied (WP85 refresh).** The frozen contract (ADR-030 Amendment 1, WP71/WP72): `max_handlers = 0` selects automatic bounded 4..32; `1` is explicit single-lane compatibility; `2..256` is exact. Application-owned mutable state, observer sinks and logger sinks must synchronize themselves; framework-owned counters and lifecycle flags are atomic or lane-owned; request-local memory never migrates between lanes. |
+| E7-3 | **Satisfied (WP85 refresh).** The bounded PostgreSQL pool lives in the **Crystals** data stack (Phase 6, frozen), reached through `App_State` — not in `web`. Acquisition has a hard capacity and deadline with a typed exhaustion result, so the stream lab cannot be invalidated by handlers waiting forever. WP96's blocked-database-Handler cases use the Crystal. |
 | E7-4 | ADR-008, ADR-009 and ADR-012 are explicitly reopened only for the long-lived path; buffered responses remain unchanged. |
 | E7-5 | The owner records that bounded long-lived responses and large-body ingestion are core HTTP capabilities, while protocol policy such as SSE remains outside `web`. |
 | E7-6 | Current transport and Odin toolchain are pinned. Official `core:net/http` is used only if its real API exists and passes a spike. |
@@ -436,6 +445,19 @@ cannot be removed with the adapter, or cannot prove lifecycle safety.
 If official `core:net/http` exists at execution time, a compile/behaviour spike
 is added here. Its absence does not block the phase.
 
+**Inherited into this WP (WP85 refresh, 2026-07-23):**
+
+- **ADR-039 write + idle timeouts.** Phase 6.5's WP-6.5.2 was implemented but
+  not merged: the write deadline does not fire (diagnosis and narrowed root
+  cause in `phase-7-spec.md` §8.1 — `response_write_started` never reaches the
+  Connection the sweep iterates). WP90 rewrites the same vendored transport
+  path, so it closes `max_write_time` **and** `max_idle_time` together in one
+  `Limits` amendment, proves both on the raw wire (G6.5-2), marks ADR-039
+  ACCEPTED and updates `phase-6.5-plan.md`.
+- **F9 accept-error tolerance.** Transient `Accept_Error` values are tolerated
+  and accept re-armed, inside this WP because its gate re-runs the
+  concurrency fault/drain corpus that change needs.
+
 **Rollback:** MEDIUM — bridge patch governed by vendor policy.
 
 ### WP91 — Commit, partial-write and failure security
@@ -698,8 +720,10 @@ public accepted contracts.
 ### G7-8 — Pay only when used
 
 A buffered-only application links no stream writer, registry or SSE protocol
-code. Any unavoidable base-layout cost is measured against the Phase-5 frozen
-binary and entered in the capacity/cost ledger.
+code. Any unavoidable base-layout cost is measured against the **Phase-6**
+frozen binary — which already carries the +5,472-byte concurrent path — and
+entered in the capacity/cost ledger (re-baselined by WP85; measuring against
+Phase 5 would double-charge streaming for concurrency).
 
 ### G7-9 — Large-body boundedness
 

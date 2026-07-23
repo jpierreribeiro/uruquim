@@ -73,6 +73,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp39_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp41_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_phase6_spec.sh"
+bash -n "$URUQUIM_ROOT/build/check_phase7_spec.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp71_controls.sh"
@@ -1069,6 +1070,12 @@ bash "$URUQUIM_ROOT/build/check_phase5_freeze.sh"
 # restoring the rules the owner amended.
 echo "--- WP66 Phase-6 spec and governance gate ---"
 bash "$URUQUIM_ROOT/build/check_phase6_spec.sh"
+
+# WP85 — Phase 7 also starts from thresholds fixed before its experiments. The
+# gate pins the streaming capacity numbers, the ADR reopenings and the
+# inherited ADR-039 work so a prototype cannot renegotiate them after a result.
+echo "--- WP85 Phase-7 spec and governance gate ---"
+bash "$URUQUIM_ROOT/build/check_phase7_spec.sh"
 
 # WP67 — the desired decoder/schema suites are committed RED. The control
 # proves each is red for the pre-registered reason and that the current 500 is

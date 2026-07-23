@@ -178,6 +178,11 @@ per-upload/concurrent/process quota, disk-full, timeout, disconnect, shutdown,
 crash remnants and explicit persistence transfer before spool code ships. The
 buffered answer remains unchanged and is the compatibility oracle.
 
+**Formalized 2026-07-23 (WP85).** The answers are pre-registered in
+`phase-7-spec.md` §4.2 — every item above has a threshold or refusal rule
+fixed before spool code exists. WP93 commits the RED corpus against those
+answers; changing one after seeing a result requires a dated spec amendment.
+
 ## Routing table
 
 | OQ | Critical? | Blocks | Due |
@@ -213,7 +218,7 @@ owning WP does not rediscover them.
 | OQ-29 | Does bounded multi-lane synchronous serving preserve independent-request liveness without breaking framework safety? | prototype four lanes, keep one-lane on any safety ambiguity | WP69–WP72 | **yes** — ADR-030 Amendment 1 |
 | OQ-30 | Which PostgreSQL implementation arm can meet secure auth, TLS, cancellation, bounded framing and maintainable ownership? | select by the WP74 contract and wire lab; do not assume a new driver is free | WP74–WP75 | yes, delegated by the Phase-6 spec |
 | OQ-31 | What are the canonical nullable and PATCH-state types? | one optional type for none/value and a distinct absent/null/value representation where PATCH needs three states | WP81 | yes, exact names remain gated |
-| OQ-32 | Can response streaming and large-body spool share one private lifecycle without imposing a second Handler model? | prototype both directions; keep buffered request/response canonical and expose only the minimum transport-owned concepts | Phase 7 WP85–WP94 | yes, program approved; signatures not approved |
+| OQ-32 | Can response streaming and large-body spool share one private lifecycle without imposing a second Handler model? **IN EXECUTION since 2026-07-23:** WP85's spec is merged and WP86 runs the two scheduled evidence questions (`phase-7-spec.md` §6.2) | prototype both directions; keep buffered request/response canonical and expose only the minimum transport-owned concepts | Phase 7 WP85–WP94 | yes, program approved; signatures not approved |
 
 
 ## OQ — request-scoped typed state — CLOSED, 2026-07-20 (ADR-028, WP37)
