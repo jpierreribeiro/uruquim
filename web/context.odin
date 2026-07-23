@@ -135,6 +135,14 @@ Context_Internal :: struct {
 	miss_kind:  Miss_Kind,
 	miss_allow: string,
 
+	// WP91 (F5/F6) — the mounts pointer the static terminal serves from,
+	// stamped by `dispatch` when a mount owns the path, in the same spirit as
+	// `miss_kind`: `dispatch` holds the App and decides; the terminal — an
+	// ordinary Handler receiving only this Context — acts on the record. A
+	// pointer to one App-owned record, not an App back-pointer (the observer
+	// precedent).
+	static_mounts: ^Static_Mounts,
+
 	// WP20 — the observer this request reports to (copied from the App by the
 	// driver, nil when none is registered) and the REGISTERED PATTERN this
 	// request matched (empty on a miss).

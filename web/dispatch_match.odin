@@ -324,6 +324,24 @@ dispatch :: proc(a: ^App, ctx: ^Context) {
 	// boundary, so no route and no middleware ever acts on an ambiguous one
 	// (`planning/phase-3-spec.md` §1). It is not a framework failure and emits
 	// no event, exactly like a 404.
+	// WP91 (F5/F6) — a static mount still owns its prefix ahead of the router
+	// AND ahead of the path policy (its own refusal rules answer 404 for every
+	// unsafe path, deliberately indistinguishable from absence — the WP61
+	// contract, unchanged), but its response now runs the SAME chain as every
+	// other: global middleware and the response-header policy cover files.
+	// Only GET (HEAD arrives as GET, WP32b) enters the static chain — the
+	// same rule `static_serve` applies. A POST under a mount stays the
+	// router's business and produces the 405 that names what the path
+	// supports, exactly as before.
+	if a.private.static_serve != nil && ctx.request.method == .GET {
+		if _, _, owned := static_match(&a.private.static, ctx.request.path); owned {
+			ctx.private.static_mounts = &a.private.static
+			static_chain_ensure(a)
+			chain_enter(a, ctx, a.private.static_start, a.private.static_len)
+			return
+		}
+	}
+
 	if path_rejected(ctx.request.path) {
 		bad_request(ctx, PATH_REJECT_MESSAGE)
 		return

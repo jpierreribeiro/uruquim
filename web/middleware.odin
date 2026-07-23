@@ -165,6 +165,11 @@ mw_destroy :: proc(a: ^App) {
 	a.private.miss_start = 0
 	a.private.miss_len = 0
 	a.private.miss_built = false
+	// WP91 — the static chain is invalidated by the same events for the same
+	// reason: it embeds the global middleware list.
+	a.private.static_start = 0
+	a.private.static_len = 0
+	a.private.static_built = false
 }
 
 // ---------------------------------------------------------------------------

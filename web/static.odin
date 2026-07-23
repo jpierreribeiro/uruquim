@@ -198,6 +198,34 @@ static :: proc(a: ^App, prefix: string, dir: string, o: Static_Options = {}) {
 	a.private.static_serve = static_serve
 }
 
+// WP91 (F5/F6) — the static chain and its terminal. A static mount still OWNS
+// its prefix (the routing decision is unchanged and shadowing semantics with
+// it), but the response is produced through the same middleware chain as
+// every route: global `use` middleware — auth, logging, `secure_headers` —
+// covers a file exactly as it covers a handler. Before this, static responses
+// bypassed the chain entirely, which the Phase-6-freeze scan recorded as
+// F5/F6 and `phase-7-spec.md` §8.2 decided.
+@(private)
+static_chain_ensure :: proc(a: ^App) {
+	if a.private.static_built {
+		return
+	}
+	start, length := chain_flatten(a, static_terminal)
+	a.private.static_start = start
+	a.private.static_len = length
+	a.private.static_built = true
+}
+
+@(private)
+static_terminal :: proc(ctx: ^Context) {
+	if ctx.private.static_mounts == nil {
+		// Unreachable when entered through `dispatch`; an uncommitted response
+		// is finalized as the standard 500 by the driver.
+		return
+	}
+	_ = static_serve(ctx, ctx.private.static_mounts)
+}
+
 // static_match finds the mount that owns this path, if one does.
 //
 // The prefix must be followed by `/` or by nothing at all: `/assets` must not
