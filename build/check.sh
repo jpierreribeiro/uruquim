@@ -1272,6 +1272,15 @@ timeout 180 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/u
   -out:"$URUQUIM_BIN_TMP/wp90-streaming" ||
   fail "the WP90b detached-stream adapter contract did not pass within the timeout"
 
+# WP92 — backpressure policy: refusal/slow-abort counters, the safe-without-
+# tuning stream write deadline, and fast/slow stream isolation on the wire.
+echo "--- WP92 response backpressure and slow-consumer policy (odin test) ---"
+timeout 120 env ODIN_ROOT="$URUQUIM_COMPILER_DIR" PATH="$URUQUIM_COMPILER_DIR:/usr/bin:/bin" \
+  "$URUQUIM_COMPILER" test "$URUQUIM_ROOT/tests/wp92-backpressure" \
+  "-collection:uruquim=$URUQUIM_ROOT" -define:ODIN_TEST_THREADS=1 \
+  -out:"$URUQUIM_BIN_TMP/wp92-backpressure" ||
+  fail "the WP92 backpressure contract did not pass within the timeout"
+
 # The gate leaves NO artifact in the working tree.
 rm -rf "$URUQUIM_BIN_TMP"
 if find "$URUQUIM_ROOT" -maxdepth 1 -type f -name 'uruquim-*' -print -quit | grep -q .; then

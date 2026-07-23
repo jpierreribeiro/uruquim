@@ -396,8 +396,27 @@ stream_open :: proc(exchange_handle: rawptr) -> (stream.Token, bool) {
 	// Re-register the wake with its user pointer now that the link exists.
 	// Safe: no producer can hold the token before stream_open returns it.
 	stream.rebind_wake(&runtime.streams, tok, stream_pump_arm, rawptr(link))
+	// WP92 — an EXTERNALLY-initiated end (deadline sweep abort, shutdown
+	// force-close, scanner error) must release the slot and silence the pump
+	// before the Connection is freed; the backend fires this on its teardown.
+	conn.on_teardown_user = rawptr(link)
+	conn.on_teardown = stream_conn_torn_down
 	exchange.stream_link = link
 	return tok, true
+}
+
+// stream_conn_torn_down runs on the owner lane, from the backend's
+// connection teardown, exactly once — whoever initiated the end.
+@(private)
+stream_conn_torn_down :: proc(user: rawptr) {
+	link := (^Stream_Link)(user)
+	if link == nil || link.terminated {
+		return
+	}
+	link.terminated = true
+	stream.note_abort(&link.runtime.streams)
+	_ = stream.close(&link.runtime.streams, link.tok)
+	_ = stream.retire(&link.runtime.streams, link.tok.slot)
 }
 
 // stream_pump_arm may run on ANY thread (it is the registry's per-slot wake).
@@ -499,7 +518,10 @@ on_stream_terminator_sent :: proc(op: ^nbio.Operation, link: ^Stream_Link) {
 	conn.pending_send = nil
 	conn.send_started = {}
 	// Success or failure, the request cycle ends here; a failed terminator
-	// still retires the connection (close = true either way).
+	// still retires the connection (close = true either way). Marking the
+	// link terminated FIRST makes the backend's teardown notification a
+	// no-op — the slot release below is the only one.
+	link.terminated = true
 	_ = stream.close(&link.runtime.streams, link.tok) // idempotent; refuses stragglers
 	_ = stream.retire(&link.runtime.streams, link.tok.slot)
 	if op.send.err != nil {
@@ -515,6 +537,7 @@ on_stream_terminator_sent :: proc(op: ^nbio.Operation, link: ^Stream_Link) {
 @(private)
 stream_teardown_error :: proc(link: ^Stream_Link) {
 	link.terminated = true
+	stream.note_abort(&link.runtime.streams)
 	_ = stream.close(&link.runtime.streams, link.tok)
 	_ = stream.retire(&link.runtime.streams, link.tok.slot)
 	http.stream_abort(link.conn)
