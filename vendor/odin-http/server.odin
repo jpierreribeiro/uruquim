@@ -755,8 +755,20 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 		#partial switch op.accept.err {
 		case .Insufficient_Resources:
 			log.error("Connection limit reached, trying again in a bit")
+			// URUQUIM PATCH 24 (C-01 / F-C01-1) — the same guard the transient
+			// branch below carries, and for the same reason. `on_accept`
+			// cleared `td.accept` on entry, so within this second the lane can
+			// service a request it had already read and `handler_lane_leave`
+			// arms a NEW accept. An unguarded re-arm here overwrites that
+			// handle: the earlier operation becomes unreachable, survives
+			// `nbio.remove(td.accept)` at shutdown, and keeps `num_waiting()`
+			// above zero — the WP58/WP59 pending-`recv` hang, on the accept
+			// path, reached exactly when fds are exhausted and an operator is
+			// restarting the process.
 			nbio.timeout_poly(time.Second, server, proc(_: ^nbio.Operation, server: ^Server) {
-				td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+				if td.accept == nil && !td.handler_active {
+					td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+				}
 			})
 			return
 		}

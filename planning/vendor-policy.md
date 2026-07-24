@@ -70,7 +70,9 @@ work regardless of who wrote the fix.
 | 22 | Detached-stream hooks: chunked heading commit, request-cycle finish after the terminator, unflushed abort (WP90b) | **No** — streaming is Uruquim's Phase-7 capability; upstream's own `Response_Writer` covers the handler-synchronous case only | **CARRY AS BRIDGE.** Deletable with the adapter; the ADR-033 replacement must pass the same wire corpus |
 | 23 | Streaming inbound body: deliver a request body one bounded window at a time (Content-Length windowed, chunked per-chunk), reclaiming the consumed buffer prefix so a body of any size costs one window, not its length (WP7.5-C1) | **No** — the read-side twin of Patch 22; streaming ingestion is Uruquim's Phase-7.5 large-body capability, not a defect upstream shares (upstream materializes the whole body) | **CARRY AS BRIDGE.** Deletable with the adapter; the ADR-033 replacement must expose an equivalent incremental body reader and pass the `wp7_5-c1-inbound-stream` corpus |
 
-**Twelve of twenty-three are or contain upstream bugs; the rest are deliberate divergences.** WP70's
+| 24 | The `.Insufficient_Resources` accept retry re-arms only when the lane has no accept and is not inside a Handler — the guard the transient-error retry beside it already carried (Closure C-01 / F-C01-1) | **Yes** — an unguarded re-arm overwrites `td.accept` when the lane armed a new accept while the retry timer ran, leaving an unreachable `accept` that survives `nbio.remove(td.accept)` at shutdown and holds `num_waiting()` above zero forever. It is patch 9/10's dropped-handle defect on the accept path, reached exactly at fd exhaustion | **OFFER UPSTREAM.** The retry itself is upstream's; the missing guard makes shutdown unreachable regardless of Uruquim policy |
+
+**Thirteen of twenty-four are or contain upstream bugs; the rest are deliberate divergences.** WP70's
 multi-lane lifecycle correction joins the upstream group; WP59's absolute drain
 deadline joins the policy group. The bridge label changes expected lifetime,
 not the evidence or upstream-offer obligation.

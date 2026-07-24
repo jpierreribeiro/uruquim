@@ -350,59 +350,47 @@ hook in the vendored backend is a numbered `BRIDGE` patch, deletable when
 
 ---
 
-## 10. Known limitations, in one place
+## 10. Known limitations — the canonical list is the readiness matrix
 
-* **No TLS**, by decision. Use a proxy.
-* **A blocking Handler cannot be preempted.** `max_drain_time` bounds transport
-  shutdown and `max_request_time` bounds arrival; neither interrupts arbitrary
-  application or foreign code. Other Handler lanes retain progress until the
-  configured capacity is saturated.
-* **A faulting handler aborts the process.** By construction, not by defect.
-* **No WebSocket or arbitrary full-duplex.** Response streaming and SSE cover
-  server push; a bidirectional product that cannot fit SSE is out of core by
-  decision (evidence-gated, not yet built).
-* **Large-body upload has a substrate but no public API yet.** The spool +
-  streaming multipart parser are implemented and tested internally (Phase-7
-  WP93/WP94), but the public upload contract that wires them into the request
-  path is deferred — large uploads remain buffered under `max_body` until it
-  ships. The response-streaming direction is fully public (`web.stream`).
-* **The 3,000-concurrent-stream drain is proven on the registry in memory**,
-  and on the wire at modest count; a 3,000 *real-socket* round awaits a
-  dedicated quiet CI machine and is recorded as the one scale claim not yet
-  demonstrated end to end on hardware.
-* **The write deadline and idle timeout default OFF.** `max_write_time` and
-  `max_idle_time` exist (WP90 / ADR-039) but ship disabled: a default generous
-  enough for every legitimate slow link is a judgement the application must
-  make, and a framework-chosen number would reset real clients on upgrade.
-  Enable both in production, sized to your slowest legitimate client.
-* **No bound on the accept backlog or inbound header count.**
-* **One server per process.**
-* **No WebSocket or streaming.** Out of core by decision, and both need a
-  response model this framework does not have (ADR-014 buffers responses
-  whole). CORS, static files and uploads were on this list until Phase 5 moved
-  them into the core (ADR-034).
-* **Uploads are bounded by `max_body` and held in memory.** A file larger than
-  that is refused with 413 before your handler runs. There is no setting that
-  makes a 2 GB upload work — the body is held whole, so raising `max_body`
-  raises what one request can cost. **If you need large uploads, terminate them
-  at a proxy or an object store and hand the application a reference.** The
-  framework will not spool to disk, and a version that pretended to would be
-  spooling into RAM.
-* **Static files are served whole, with no ranges and no `Last-Modified`.**
-  `ETag`/`If-None-Match` work and answer 304. A file above
-  `Static_Options.max_file_size` is answered 404. Every symlink is refused
-  whatever it points at, and so is any path containing `..`, `%`, a backslash,
-  a NUL, an empty segment, or a segment starting with `.`.
-* **A CORS misconfiguration fails at boot, not at runtime.** `*` with
-  credentials, `*` beside named origins, and `*` in the header list with
-  credentials are all refused by `web.cors`, and the application will not
-  start.
-* **The HTTP server underneath is a vendored snapshot of `laytan/odin-http`,
-  which describes itself as beta.** A set of local patches is carried (see planning/vendor-policy.md), several of
-  them fixing upstream defects — including one that broke keep-alive for every
-  GET, and one use-after-free on the shutdown path.
-  `planning/vendor-policy.md` governs them. **This is scheduled to end:** Odin's
-  standard library gains an official `core:net/http` in January 2027, and
-  ADR-033 now points at swapping to it rather than owning a connection layer.
-  The streaming and drain patches are marked `BRIDGE` and are expected to be
-  deleted rather than ported.
+**`planning/closure-readiness-matrix.md` is the single canonical list of what
+this core does and does not bound.** It is a gate, not a document: every
+framework-owned resource has a row, every row has a limit, a deadline, a
+cancellation, a saturation policy, a metric and a shutdown behaviour, and
+`build/check_readiness_matrix.sh` fails when a cell goes missing.
+
+This section used to restate that list, and it is worth recording why it stopped.
+It had drifted into being **wrong**: it told operators that large-body upload
+had "no public API yet" and that "the framework will not spool to disk" — both
+false since Phase 7.5 shipped `web.enable_upload`/`web.upload` — and it declared
+streaming "out of core by decision" four bullets after saying that response
+streaming and SSE cover server push. A list maintained in parallel with ten
+others decays into telling you to build a workaround for a problem that was
+solved. One list, gate-checked, or none.
+
+What stays here is the part that is **operational rather than enumerative** —
+the topology those limitations make mandatory:
+
+* **Run behind a reverse proxy.** TLS is delegated to it by decision, and the
+  proxy's own timeouts are a second, independent bound on a slow client. §7 and
+  the C-06 contract.
+* **Run under a supervisor with `Restart=always` and a kill timeout.** A
+  faulting handler aborts the process by construction — Odin has no recoverable
+  panic (ADR-020) — and a handler blocked in foreign code cannot be preempted,
+  so the supervisor's kill is the outer bound on shutdown. Keep
+  `max_drain_time` (default 10 s) well inside `TimeoutStopSec`.
+* **Run under a memory cgroup.** The core caps a request body (`max_body`) but
+  not a response, so total process memory is delegated. Matrix rows 5, 8 and 12.
+* **Enable `max_write_time` and `max_idle_time`**, sized to your slowest
+  legitimate client. They ship OFF because a framework-chosen number would reset
+  real clients on upgrade; OFF is not a recommendation. Matrix row 5.
+* **Tune the accept backlog** (`somaxconn`) — it is the kernel's, and the only
+  place a connection can queue. Matrix row 11.
+* **One server per process**, and install your own `SIGTERM`/`SIGINT` handler
+  that calls `web.stop` — the core installs none. §2 and §9.
+
+The vendored HTTP backend remains a snapshot of `laytan/odin-http` with local
+patches (`planning/vendor-policy.md`), several fixing upstream defects. This is
+scheduled to end: Odin's standard library gains an official `core:net/http` in
+January 2027, and ADR-033 points at swapping to it. The streaming, drain and
+deadline patches are marked `BRIDGE` and are expected to be deleted rather than
+ported.

@@ -1,0 +1,132 @@
+# C-02 — The resource × property matrix
+
+**Status: LIVE GATE (Closure, WP C-02).** This file is the **single canonical
+list of what the Uruquim core does and does not bound.** Every other document
+points here rather than restating it; `build/check_readiness_matrix.sh` fails
+when a row loses a cell, when a `web.Limits` field has no row, or when the
+documents that used to keep their own lists start keeping them again.
+
+---
+
+## 0. Why one table instead of eleven lists
+
+The Closure exists because a *recorded* pendency — the write deadline — stopped
+being trackable until it resurfaced by accident. The mechanism was not
+forgetfulness. It was that the answer to "what does this framework not bound?"
+was maintained in eleven places (`docs/operations.md` §10,
+`docs/quick-start.md`, `docs/canonical-patterns.md`, seven phase freezes, the
+evidence backlog) and each was true about its own scope, so no reader and no
+gate could see the union.
+
+**Proof that this is the real failure mode, found while building this table:**
+those lists had already drifted into being *wrong*, not merely incomplete.
+Before this WP, `docs/operations.md` §10 stated —
+
+- *"Large-body upload has a substrate but no public API yet"* — false since
+  Phase 7.5-C2 shipped `web.enable_upload` / `web.upload` / `web.upload_persist`;
+- *"Uploads are bounded by `max_body` and held in memory … The framework will
+  not spool to disk"* — false for the same reason, and it is the exact opposite
+  of what the core now does;
+- *"No WebSocket or streaming. Out of core by decision"* — false since Phase 7
+  shipped `web.stream`, and **self-contradictory**: four bullets earlier the
+  same section says "Response streaming and SSE cover server push."
+
+`docs/quick-start.md` carried two of the same three. A list that says a shipped
+feature does not exist is worse than no list: it is a document actively telling
+an operator to build a workaround for a problem that was solved. That is what an
+enumeration maintained in parallel decays into, and it is why this table is a
+gate rather than a document.
+
+**The rule from here:** the *enumeration* lives here. Prose explaining a
+*specific* behaviour stays where it is. Phase freezes keep their own
+non-deliveries, because a freeze's job is to record what *that phase* did not
+deliver — history, not current state.
+
+---
+
+## 1. The matrix
+
+Every framework-owned resource, one row. An empty cell is a visible gap; there
+are none — a cell reading "none" is an **answer**, and where the answer is
+"none" the classification column says who owns the consequence.
+
+Classification vocabulary (§3 of `production-readiness-closure.md`):
+**OK** · **LIMITATION** (acceptable, delegated, with a mandatory topology) ·
+**OPEN** (a Closure WP owns it) · **FUTURE** (evidence-gated).
+
+<!-- c02-rows: 13 -->
+
+| # | Resource | Limit | Deadline | Cancellation | Saturation policy | Metric | Shutdown | Class |
+|---|---|---|---|---|---|---|---|---|
+| 1 | Connection (accepted socket) | `max_connections`, default **1024** | none as a connection; `max_idle_time` bounds the gap between requests, **default OFF** | `connection_close` (shutdown(Send) + 500 ms + close) or `connection_abort` (SO_LINGER 0 → RST) | refuse: the accepted socket is closed at once above `max_connections - reserved_conns` (default 1008); never queued | `web.refused_connections()` — **the only public counter in the core** | drained: `.New`/`.Idle`/`.Pending` closed immediately, `.Active` force-closed once `max_drain_time` expires | OK |
+| 2 | Listening socket / `accept` | one outstanding accept per lane (WP71); the backlog itself is the kernel's | none — it blocks until a client arrives, by design | `nbio.remove(td.accept)` at shutdown | kernel backlog; `.Insufficient_Resources` re-arms after 1 s (guarded, vendored patch 24 / F-C01-1) | none exposed; consecutive failures are counted per lane and **128 in a row is fatal** rather than a silent outage | cancelled at shutdown | OK |
+| 3 | Request read (request line, headers, buffered body) | `max_request_line` **8000**, `max_headers` **8000**, `max_body` **4 MiB** | `max_request_time` **30 s, ON by default** | `nbio.remove(scanner.pending_recv)` | close the connection | none exposed; the resulting status reaches the typed `Framework_Event` observer | cancelled per connection; **the deadline itself stops being enforced once `closing` is set — F-C01-2** | OK |
+| 4 | Handler execution (one lane) | `max_handlers`, default 0 = automatic (adapter resolves to [4, 32] by core count; explicit values bounded at 256) | **none — the application's own** | **not preemptible.** Odin has no recoverable panic and no preemption; a handler runs to return | lane contention answers **503 and the client retries** (F-002 fix); admission for that lane is suspended while it runs | none exposed | a running handler is not interrupted; `max_drain_time` bounds the *transport*, not the handler. **The supervisor's kill is the outer bound** | LIMITATION — mandatory topology: a supervisor with a kill timeout |
+| 5 | Response write (buffered) | **none on response size** | `max_write_time`, **default OFF** | `nbio.remove(conn.pending_send)` | the connection and its buffer are retained for as long as the client chooses; RST at the deadline when one is set | **none** — no response-byte counter and no send-outcome counter | cancelled at close; **deadline not enforced during drain — F-C01-2** | **OPEN — C-04** (size) and **C-05** (metric) |
+| 6 | Detached response stream | per-stream event and byte caps + a process-wide byte budget (`web/internal/stream` registry) | `max_write_time` per send, or the pre-registered **30 s** default when unset — a stream is bounded whether tuned or not | `stream.close` + `retire`; an externally-initiated end reaches it through the connection teardown hook | `Full` refusal — the bounded queue refuses, never waits and never drops silently | `refused_stream_full`, `refused_budget_full`, `aborted_slow` — **counted in the registry and NOT reachable from the public API** | `drain_begin` wakes every owner, the terminator follows the last queued event, bounded by `max_drain_time` (WP95) | **OPEN — C-05** (the counters are unreachable) |
+| 7 | Spool ingest (opt-in large-body upload) | per-upload quota + the configured spool directory; opt-in, default off | the request deadline (`max_request_time`) | `upload_cancel` at driver teardown — exactly once, idempotent | admission refuse; refuses new spools once draining (WP95) | none exposed | admission stops at drain; a spooled file is deleted at teardown unless `upload_persist` moved it | LIMITATION — no metric; the substrate is opt-in |
+| 8 | Per-connection arena (`virtual.Arena`, growing) | **none directly** — it grows to the largest request or response the connection has held, so it is bounded by `max_body` on the read side and by nothing on the write side | n/a | n/a — freed wholesale at teardown | process memory | **none** — retention across keep-alive requests is unmeasured | destroyed in `connection_teardown`; **leaked if the drain deadline expires with the close still outstanding — F-C01-4** | **OPEN — C-04 soak** |
+| 9 | Static file read | `Static_Options.max_file_size`, default **8 MiB**; a larger file is answered 404 | **none** | **none — the read is synchronous** (`os.read_entire_file_from_path`) | it **blocks its handler lane** for the duration of the read, and the file is buffered whole (ADR-014) | none | not interruptible: it is inside the handler, so row 4's answer applies | LIMITATION — sized by `max_file_size`; **FUTURE:** an async read needs the F-C01-6 handles first |
+| 10 | Periodic lane timers (Date cache 1 s, deadline sweep 250 ms) | two per lane, fixed | their own period | **none — the handles are dropped**; they self-terminate by not rescheduling once `closing` is set | n/a | none | the final drain waits up to one period for the outstanding timeout — **measured at 991 ms** (C-01 P1) | LIMITATION — bounded by the period, declared in the C-01 inventory |
+| 11 | Accept backlog | the kernel's (`listen` backlog, `somaxconn`) | kernel | kernel | SYN drop | external (`ss -lnt` Recv-Q) | the listening socket is closed by `serve` after every lane returns | LIMITATION — **delegated to the kernel**, mandatory topology: tune `somaxconn` |
+| 12 | Total process memory | **none** — the core sets no aggregate cap | n/a | n/a | the OOM killer | external | n/a | LIMITATION — **delegated to a cgroup / supervisor**, mandatory and tested by C-06 |
+| 13 | TLS termination | n/a | n/a | n/a | n/a | external | n/a | LIMITATION — **delegated to the reverse proxy** by decision; the contract is C-06's |
+
+---
+
+## 2. The amber cells, restated as the current limitation list
+
+This is the list every other document points at. Seven entries; each says who
+owns it.
+
+1. **A response has no size limit.** `max_write_time` bounds how long a
+   response may take to leave, not how many bytes it may be. A handler that
+   builds a 2 GiB body costs 2 GiB of arena, per concurrent request. *Owner:
+   C-04 — a `max_response_bytes` limit, or a documented delegation with a test.*
+2. **The write and idle deadlines default OFF.** `max_write_time` and
+   `max_idle_time` exist and work; they ship disabled because a
+   framework-chosen number would reset real slow clients on upgrade. *Enable
+   both in production.* Owner: the operator, and `docs/operations.md` says so.
+3. **Deadlines are request-scoped, not shutdown-scoped.** Between `web.stop`
+   and the drain deadline, the sweep no longer runs; `max_drain_time`
+   (default 10 s) is the only bound that survives. Setting it to 0 is valid
+   and removes that bound too. *Owner: declared — F-C01-2.*
+4. **There is no write-side observability.** No response-byte counter, no
+   send-outcome counter, and the stream registry's three counters are not
+   reachable from the public API. An operator cannot currently see slow-consumer
+   aborts. *Owner: C-05.*
+5. **Arena retention after large responses is unmeasured.** *Owner: C-04 soak.*
+6. **A blocking handler is not preemptible and a faulting one aborts the
+   process.** Both are by construction (Odin has no recoverable panic). The
+   supervisor is the outer bound. *Owner: the mandatory topology — C-06.*
+7. **A static file is read synchronously and buffered whole**, blocking its
+   lane. *Owner: `max_file_size`; an async read is FUTURE and blocked on
+   F-C01-6.*
+
+Delegated by decision, with a mandatory topology C-06 must prove: **TLS**
+(reverse proxy), **total memory** (cgroup), **accept backlog** (kernel),
+**restart** (supervisor).
+
+---
+
+## 3. What the gate checks
+
+`build/check_readiness_matrix.sh`:
+
+1. the matrix has all eight columns and the declared number of rows, and **no
+   cell is empty** — an unanswered cell is the thing this WP exists to make
+   impossible;
+2. **every field of `web.Limits` appears in the matrix.** A new limit with no
+   row fails the build, which is the structural half of "no framework-owned
+   operation without a declared capacity";
+3. every public observability procedure appears, so a counter cannot be added
+   or removed without the metric column noticing;
+4. **the documents that used to keep their own lists point here instead** —
+   `docs/operations.md` §10 and `docs/quick-start.md` "Current limitations";
+5. **the three drifted claims cannot come back**: no document may again say
+   that large-body upload has no public API, that the framework will not spool
+   to disk, or that streaming is out of core.
+
+Check 5 is unusual and deliberate. A pointer is only worth something if the
+thing it replaced cannot quietly regrow, and these three sentences are the
+measured evidence that it does.
