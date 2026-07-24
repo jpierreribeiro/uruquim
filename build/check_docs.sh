@@ -30,8 +30,8 @@ URUQUIM_TS_SYMBOLS="$(sed -n '/^URUQUIM_EXPECTED_TESTSUPPORT_EXPORTS="/,/"$/p' \
 
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_APP_SYMBOLS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TS_SYMBOLS")"
-test "$URUQUIM_APP_COUNT" -eq 68 ||
-  fail "the canonical application ledger is $URUQUIM_APP_COUNT, not 68; docs parity cannot be trusted"
+test "$URUQUIM_APP_COUNT" -eq 73 ||
+  fail "the canonical application ledger is $URUQUIM_APP_COUNT, not 73; docs parity cannot be trusted"
 test "$URUQUIM_TS_COUNT" -eq 2 ||
   fail "the canonical test-support ledger is $URUQUIM_TS_COUNT, not 2"
 
@@ -146,10 +146,10 @@ while IFS= read -r URUQUIM_SYMBOL; do
 done <<<"$URUQUIM_TS_SYMBOLS"
 
 # 2c. The documented counts must be the real ones.
-grep -qE '\b55\b' <<<"$URUQUIM_AI_ACTIVE" ||
-  fail "docs/ai-context.md does not state the 55-symbol application ledger"
-grep -qE '\b57\b' <<<"$URUQUIM_AI_ACTIVE" ||
-  fail "docs/ai-context.md does not state the 57-symbol union"
+grep -qE '\b73\b' <<<"$URUQUIM_AI_ACTIVE" ||
+  fail "docs/ai-context.md does not state the 73-symbol application ledger"
+grep -qE '\b75\b' <<<"$URUQUIM_AI_ACTIVE" ||
+  fail "docs/ai-context.md does not state the 75-symbol union"
 
 # ---------------------------------------------------------------------------
 # 3. Method and Status members in the docs match the package.

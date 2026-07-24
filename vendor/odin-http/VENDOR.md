@@ -34,6 +34,13 @@ These are exactly the root-level `.odin` files of the upstream package, plus the
 MIT `LICENSE` and the package manifest `mod.pkg`. The root package imports only
 `core:` and `base:` packages (no OpenSSL, no HTTP client).
 
+One file is a **local addition, not from upstream**: `body_stream.odin`, the
+streaming inbound-body reader (patch 23, BRIDGE — WP7.5-C1). Unlike every other
+patch, which edits an existing upstream file, this one lives on its own so it is
+deletable in a single step when `core:net/http` lands. A re-vendor re-copies the
+upstream files above and PRESERVES `body_stream.odin` (re-applying its paired
+`scanner.odin` compaction hook), exactly as it re-applies the other patches.
+
 ## What is deliberately OMITTED
 
 The following upstream trees are **not** vendored, because the bootstrap server
@@ -54,15 +61,17 @@ README.md, odinfmt.json, .editorconfig, .gitignore — repo tooling
 
 ## Local patches
 
-**Twenty-two.** Five added by WP9 (transport conformance), one each by WP45,
+**Twenty-three.** Five added by WP9 (transport conformance), one each by WP45,
 WP46 (ADR-031) and WP47, three by WP59's drain repair, one by WP70's multi-lane
 lifecycle repair, one by WP71's Handler-capacity mapping, five security
 hardening fixes from the Phase-6-freeze scan: two chunked-body process crashes
 (a negative chunk size and a trailer field), a Content-Length overflow, a
 bare-CR header-injection sink and an obs-fold tab that could desync a proxy —
-and four by WP90 (ADR-039/F9/streaming): the response write deadline with
+four by WP90 (ADR-039/F9/streaming): the response write deadline with
 its send-cancellation and RST abort, the idle keep-alive timeout,
-accept-error tolerance, and the three detached-stream hooks.
+accept-error tolerance, and the three detached-stream hooks;
+and one by WP7.5-C1 (streaming inbound body): the read-side twin of WP90's
+detached-stream pump, delivering a request body one bounded window at a time.
 All are minimal and fix a security issue, an upstream defect,
 a lifecycle defect or a capacity the server had no way to bound. Each is marked
 in source with `URUQUIM PATCH`, recorded below, and covered by executable
@@ -97,6 +106,7 @@ decides whether a re-vendor carries a policy or expects a fix to disappear.
 | 20 | `server.odin`, `response.odin` | The idle keep-alive timeout (`Server_Opts.idle_timeout`): `Connection.idle_since` stamped when a keep-alive goes idle, cleared when the next request's bytes arrive, an idle branch in the sweep closing gracefully. | **RESOURCE ECONOMY.** An idle connection holds a slot until `max_connections` or the OS reclaims it; `request_started` (Patch 6) keeps its request-arrival meaning untouched, so the two clocks bound different things. |
 | 21 | `server.odin` (`on_accept`) | Tolerate transient accept errors: log, re-arm accept after a short delay, count CONSECUTIVE failures per lane and panic only past a persistence limit. | **UNAUTHENTICATED REMOTE CRASH (F9).** Upstream panics the whole process on any accept error, and `ECONNABORTED`/`EINTR` are ordinary events a peer can cause at will. The failure limit keeps a permanently dead listener fatal rather than a silent outage. |
 | 22 | `response.odin` (`stream_prepare`, `stream_finish`, `stream_abort`) | Three BRIDGE hooks for the detached-stream adapter: commit status/headers with chunked framing and hand the buffered heading bytes to the adapter's owner-lane pump; end the request cycle after the terminating chunk; abort without flushing on a mid-stream error. | **BRIDGE (WP90b).** The pump, framing and registry interplay live in the adapter; the backend contributes only what is private to it (the heading writer, `clean_request_loop`, `connection_abort`). Keep-alive across a detached stream is deliberately not offered. Deletable with the adapter; the official `core:net/http` adapter must expose equivalent commit/chunk/cancel capabilities before it can replace this bridge. |
+| 23 | `body_stream.odin` (new local file: `body_stream`, `scan_stream_window`, `scan_buffer_cap`) and `scanner.odin` (`Scanner.stream_compact`, `scanner_scan` compaction, `scanner_reset`) | Streaming inbound body: deliver a request body to a consumer one bounded window at a time — Content-Length windowed, chunked per-chunk — reclaiming the consumed buffer prefix so a body of any size costs one window, not its length. A synchronous non-blocking sink returns `.Continue`/`.Stop`; a `.Stop` (early refusal, quota breach, drain) halts the read by never arming the next recv. Re-applies every framing guard the buffered path earned (F3 chunk-size, WP9-D2/F10 Content-Length, WP9-D3 chunk CRLF). **BRIDGE.** | **BRIDGE (WP7.5-C1).** The read-side twin of patch 22: the large-body opt-in (`web/internal/ingest`) needs the body streamed, not materialized. The buffered `body` (body.odin) is untouched — the new path is off unless `body_stream` sets `stream_compact`. Held by the `tests/wp7_5-c1-inbound-stream` corpus (reassembly, bounded buffer, early stop, chunked, over-cap refusal). Deletable with the adapter; the official `core:net/http` adapter must expose an equivalent incremental body reader before it can replace this bridge. |
 
 Patch 5 also adds a tenth entry to `_method_strings` and makes `method_parse`
 skip the new member, so the existing `for r in Method` lookup (which indexes
@@ -104,7 +114,7 @@ that array under `#no_bounds_check`) stays in bounds.
 
 Every other line is byte-for-byte upstream.
 
-To update to a newer upstream commit, re-apply the twenty-two patches above (they are
+To update to a newer upstream commit, re-apply the twenty-three patches above (they are
 small and each is commented at its site) and re-run the WP9 raw-wire corpus,
 which is what proves they are still needed and still sufficient.
 
@@ -122,7 +132,7 @@ this cost is not.
 
 To move to a different upstream commit: re-copy the root `.odin` files, the
 `LICENSE` and `mod.pkg` from a fresh checkout at the new commit, re-apply the
-twenty-two patches listed above, update the provenance table, and re-run the full
+twenty-three patches listed above, update the provenance table, and re-run the full
 gate — including the WP9 raw-wire corpus, which is what proves the patches are
 still necessary and still sufficient. Do not make unrelated edits to these
 files.

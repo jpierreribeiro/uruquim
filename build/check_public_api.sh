@@ -143,7 +143,12 @@ stream_send
 text
 trust_proxies
 unauthorized
-use"
+upload
+upload_persist
+use
+Upload
+Upload_Config
+enable_upload"
 
 # ---------------------------------------------------------------------------
 # Expected test-support ledger after WP3 — exactly two public symbols, both in
@@ -488,7 +493,7 @@ if test -n "$URUQUIM_MISSING"; then
   fail "web/ is missing part of the ratified Phase-1 surface"
 fi
 
-echo "public API contract: application ledger is exactly 68 symbols (32 Phase-1 + Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies + WP49 secure_headers + WP50 refused_connections + WP60 cors/Cors_Options + WP61 static/Static_Options + WP63 form_field/form_file/Uploaded_File + WP-6.5.3 is_draining + WP96 stream/Stream/stream_send/Stream_Send/stream_close)"
+echo "public API contract: application ledger is exactly 73 symbols (32 Phase-1 + Phase-2 twelve + the Phase-3 six + WP44 stop + WP48 client_ip/trust_proxies + WP49 secure_headers + WP50 refused_connections + WP60 cors/Cors_Options + WP61 static/Static_Options + WP63 form_field/form_file/Uploaded_File + WP-6.5.3 is_draining + WP96 stream/Stream/stream_send/Stream_Send/stream_close + WP7.5-C2 enable_upload/upload/upload_persist/Upload/Upload_Config)"
 
 # ---------------------------------------------------------------------------
 # 2b. Test-support ledger (planning/public-api-guardrails.md G-11)
@@ -555,16 +560,16 @@ fi
 URUQUIM_APP_COUNT="$(grep -c . <<<"$URUQUIM_ACTUAL_EXPORTS")"
 URUQUIM_TS_COUNT="$(grep -c . <<<"$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS")"
 URUQUIM_UNION="$(printf '%s\n%s\n' "$URUQUIM_ACTUAL_EXPORTS" "$URUQUIM_TESTSUPPORT_ACTUAL_EXPORTS" | LC_ALL=C sort -u | grep -c .)"
-if test "$URUQUIM_APP_COUNT" -ne 68; then
-  fail "application ledger is $URUQUIM_APP_COUNT, not 68 (… + WP-6.5.3 is_draining + WP96 stream/Stream/stream_send/Stream_Send/stream_close)"
+if test "$URUQUIM_APP_COUNT" -ne 73; then
+  fail "application ledger is $URUQUIM_APP_COUNT, not 73 (… + WP96 stream/Stream/stream_send/Stream_Send/stream_close + WP7.5-C2 enable_upload/upload/upload_persist/Upload/Upload_Config)"
 fi
 if test "$URUQUIM_TS_COUNT" -ne 2; then
   fail "test-support ledger is $URUQUIM_TS_COUNT, not 2"
 fi
-if test "$URUQUIM_UNION" -ne 70; then
-  fail "exported union is $URUQUIM_UNION, not 70 (the two ledgers must be disjoint)"
+if test "$URUQUIM_UNION" -ne 75; then
+  fail "exported union is $URUQUIM_UNION, not 75 (the two ledgers must be disjoint)"
 fi
-echo "public API contract: test-support ledger is exactly 2; exported union is exactly 70"
+echo "public API contract: test-support ledger is exactly 2; exported union is exactly 75"
 
 # ---------------------------------------------------------------------------
 # 2d. Bridge exports — the LOCKED, minimal set package `testing` exports so the
@@ -1443,7 +1448,7 @@ for URUQUIM_PROBE_FILE in discard_path_int_ok discard_query_int_ok discard_query
 done
 
 echo "public API contract: every shipped file declares its ledger; subdirectory structure is exact"
-echo "public API contract: application ledger 68 + test-support ledger 2 = union 70"
+echo "public API contract: application ledger 73 + test-support ledger 2 = union 75"
 echo "public API contract: Method is the ratified UPPERCASE set; Request has the five ratified fields"
 echo "public API contract: Response, Header_Pair and Header_View_Internal stayed internal"
 echo "public API contract: web/testing machinery imports no uruquim:web / core:testing, declares no @(init)"

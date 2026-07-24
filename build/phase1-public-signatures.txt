@@ -10,6 +10,7 @@ application	proc	cors :: proc(a: ^App, o: Cors_Options)
 application	proc	created :: proc(ctx: ^Context, value: $T)
 application	proc	delete :: proc(a: ^App, pattern: string, handler: Handler)
 application	proc	destroy :: proc(a: ^App)
+application	proc	enable_upload :: proc(a: ^App, cfg: Upload_Config, loc := #caller_location)
 application	proc	forbidden :: proc(ctx: ^Context, message: string)
 application	proc	form_field :: proc(ctx: ^Context, name: string) -> (value: string, ok: bool)
 application	proc	form_file :: proc(ctx: ^Context, name: string) -> (file: Uploaded_File, ok: bool)
@@ -49,6 +50,8 @@ application	proc	stream_send :: proc(s: Stream, data: []u8) -> Stream_Send
 application	proc	text :: proc(ctx: ^Context, status: Status, s: string)
 application	proc	trust_proxies :: proc(a: ^App, prefixes: []string)
 application	proc	unauthorized :: proc(ctx: ^Context, message: string)
+application	proc	upload :: proc(ctx: ^Context) -> (up: Upload, ok: bool)
+application	proc	upload_persist :: proc(ctx: ^Context, destination: string) -> bool
 application	proc	use :: proc(a: ^App, middleware: Handler)
 application	type	App :: struct {private: App_Internal}
 application	type	Context :: struct {request: Request, private: Context_Internal}
@@ -65,6 +68,8 @@ application	type	Static_Options :: struct {max_file_size: int, index: string}
 application	type	Status :: enum int {OK = 200, Created = 201, Accepted = 202, No_Content = 204, Bad_Request = 400, Unauthorized = 401, Forbidden = 403, Not_Found = 404, Method_Not_Allowed = 405, Internal_Server_Error = 500}
 application	type	Stream :: struct {private: Stream_Handle}
 application	type	Stream_Send :: enum {Sent, Full, Closed}
+application	type	Upload :: struct {path: string, size: i64}
+application	type	Upload_Config :: struct {dir: string, per_upload_quota: i64, process_quota: i64, max_concurrent: int, memory_prefix_max: int}
 application	type	Uploaded_File :: struct {field: string, filename: string, content_type: string, bytes: []u8}
 test-support	proc	test_request :: proc(a: ^App, method: Method, path: string, body: string = "", query: string = "", headers: []string = nil) -> Recorded_Response
 test-support	type	Recorded_Response :: struct {status: Status, body: string, headers: []string}

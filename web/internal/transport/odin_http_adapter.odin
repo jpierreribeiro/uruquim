@@ -12,6 +12,7 @@
 package transport
 
 import http "uruquim:vendor/odin-http"
+import ingest "uruquim:web/internal/ingest"
 import stream "uruquim:web/internal/stream"
 import "core:mem"
 import "core:net"
@@ -68,6 +69,10 @@ Server_Global :: struct {
 	// server pointer is here (one server per process; readable without a
 	// request in hand). Tests reach it through `stream_registry_current`.
 	streams: ^stream.Registry,
+	// Phase 7.5-C2 — the running server's large-body ingest admission, here for
+	// the same reason: `request_stop` must drain it (refuse new spools) without a
+	// request in hand. Nil when upload is not enabled.
+	admission: ^ingest.Admission,
 }
 
 // The one ratified process-global server lifetime (WP43), now one protected
@@ -90,6 +95,9 @@ Server_Runtime :: struct {
 	// dereferencing freed memory.
 	streams: stream.Registry,
 	links:   []Stream_Link,
+	// Phase 7.5-C2 — the large-body ingest admission, alive exactly as long as
+	// the server (like `streams`). Zero/uninitialized unless `config.upload_enabled`.
+	admission: ingest.Admission,
 }
 
 // Stream_Link binds one registry slot to its connection and owner lane.
@@ -125,6 +133,15 @@ Exchange :: struct {
 	inbound:     Inbound,
 	// WP90b — set by `stream_open` when this exchange detached its response.
 	stream_link: ^Stream_Link,
+	// Phase 7.5-C2 — large-body upload spool state, when this request's body was
+	// consumed to an owned spool instead of buffered. `spool` lives here in the
+	// connection temp arena; `spool_active` gates it; `spool_last` carries the
+	// last ingest result so `on_upload_done` can map a mid-body breach to a
+	// status. A `^ingest.Spool` into this field crosses to dispatch via
+	// `inbound.upload`.
+	spool:        ingest.Spool,
+	spool_active: bool,
+	spool_last:   ingest.Ingest_Result,
 }
 
 // serve runs the backend event loop and blocks until the server is stopped.
@@ -154,10 +171,37 @@ serve :: proc(cfg: Config) -> Serve_Error {
 		delete(runtime.links)
 	}
 
+	// Phase 7.5-C2 — the large-body ingest admission, initialized once here from
+	// the resolved upload config and torn down with the server. `admission_init`
+	// requires a designated directory (no silent /tmp), so a bad config fails the
+	// listen rather than silently disabling uploads.
+	if cfg.upload_enabled {
+		if !ingest.admission_init(
+			&runtime.admission,
+			ingest.Spool_Config {
+				dir = cfg.upload_dir,
+				per_upload_quota = cfg.upload_per_quota,
+				process_quota = cfg.upload_proc_quota,
+				max_concurrent = cfg.upload_max_conc,
+				memory_prefix_max = cfg.upload_prefix_max,
+			},
+		) {
+			return .Listen_Failed
+		}
+	}
+	// The teardown defer is at FUNCTION scope, not inside the `if` above: an Odin
+	// `defer` runs at the end of its enclosing block, so a defer inside the `if`
+	// would destroy the admission the instant it was initialized. Destroying an
+	// unenabled (zero) admission is a harmless no-op.
+	defer ingest.admission_destroy(&runtime.admission)
+
 	s: http.Server
 	sync.lock(&g_server.mutex)
 	g_server.server = &s
 	g_server.streams = &runtime.streams
+	if cfg.upload_enabled {
+		g_server.admission = &runtime.admission
+	}
 	sync.unlock(&g_server.mutex)
 
 	opts := http.Default_Server_Opts
@@ -199,6 +243,7 @@ serve :: proc(cfg: Config) -> Serve_Error {
 		sync.lock(&g_server.mutex)
 		g_server.server = nil
 		g_server.streams = nil
+		g_server.admission = nil
 		sync.unlock(&g_server.mutex)
 		return .Listen_Failed
 	}
@@ -217,6 +262,7 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	sync.lock(&g_server.mutex)
 	g_server.server = nil
 	g_server.streams = nil
+	g_server.admission = nil
 	sync.unlock(&g_server.mutex)
 	return .None
 }
@@ -254,6 +300,12 @@ request_stop :: proc() {
 	// spool sees the server closing.
 	if g_server.streams != nil {
 		stream.drain_begin(g_server.streams)
+	}
+	// Phase 7.5-C2 — stop admitting new large-body spools once drain begins; the
+	// in-flight ones are owned by their request and cancelled at teardown or by
+	// the backend's own max_drain_time.
+	if g_server.admission != nil {
+		ingest.admission_drain(g_server.admission)
 	}
 	server := g_server.server
 	if server != nil {
@@ -297,9 +349,133 @@ catch_all :: proc(runtime: ^Server_Runtime, req: ^http.Request, res: ^http.Respo
 	exchange.runtime = runtime
 	exchange.inbound.exchange = rawptr(exchange)
 
+	// Phase 7.5-C2 — opt-in large-body upload. A body whose Content-Length
+	// EXCEEDS max_body is consumed to an owned spool instead of answered 413; the
+	// only behaviour this changes is that one case. Every other body — one within
+	// max_body, or a chunked body of any size — takes the unchanged buffered path
+	// below. A malformed Content-Length that slips this loose gate is re-validated
+	// and rejected by `body_stream`'s own guards.
+	if runtime.config.upload_enabled {
+		if clen, ok := http.headers_get_unsafe(req.headers, "content-length"); ok {
+			if n, pok := strconv.parse_int(clen, 10); pok && n > runtime.config.max_body {
+				start_upload(exchange, n)
+				return
+			}
+		}
+	}
+
 	// The backend enforces the cap as it reads: an over-length body never gets
 	// buffered, and `on_body` is told with `.Too_Long`.
 	http.body(req, runtime.config.max_body, exchange, on_body)
+}
+
+// --- Phase 7.5-C2: large-body upload (spool-then-dispatch) ------------------
+
+@(private)
+upload_window :: proc(runtime: ^Server_Runtime) -> int {
+	if runtime.config.upload_prefix_max > 0 {
+		return runtime.config.upload_prefix_max
+	}
+	return ingest.DEFAULT_MEMORY_PREFIX
+}
+
+// start_upload admits and opens a spool BEFORE reading a byte, then streams the
+// body into it one bounded window at a time (PATCH 23). Admission or disk
+// refusal is answered with a typed status by the adapter — the same
+// transport-level shape as the Expect and 413 refusals — with no dispatch.
+@(private)
+start_upload :: proc(exchange: ^Exchange, content_length: int) {
+	runtime := exchange.runtime
+
+	// Reserve a bounded slot, or refuse before reading (§4.2). A drained
+	// admission refuses here too, so a stop stops new uploads.
+	if ingest.admit(&runtime.admission) != .Ready {
+		upload_refuse(exchange, http.Status.Service_Unavailable)
+		return
+	}
+	// Open the 0600 spool file. On failure the admission slot is released the
+	// same way the multipart consumer releases it (mp_start_content): the disk
+	// path is the rare one and shares that substrate contract.
+	if ingest.begin(&runtime.admission, &exchange.spool) != .Ready {
+		upload_refuse(exchange, http.Status.Insufficient_Storage)
+		return
+	}
+	exchange.spool_active = true
+	exchange.spool_last = .Ready
+
+	// The spool's own per-upload and process quotas bound the body mid-stream, so
+	// body_stream needs no separate max_length (-1); the window bounds memory.
+	http.body_stream(exchange.req, -1, upload_window(runtime), exchange, on_upload_chunk, on_upload_done)
+}
+
+@(private)
+on_upload_chunk :: proc(user_data: rawptr, chunk: []u8) -> http.Body_Sink_Result {
+	exchange := (^Exchange)(user_data)
+	r := ingest.append_chunk(&exchange.spool, chunk)
+	exchange.spool_last = r
+	return .Continue if r == .Ready else .Stop
+}
+
+@(private)
+on_upload_done :: proc(user_data: rawptr, outcome: http.Stream_Outcome, err: http.Body_Error) {
+	exchange := (^Exchange)(user_data)
+	switch outcome {
+	case .Complete:
+		// The whole body is on the spool; hand the Handler an owned upload.
+		ingest.finish(&exchange.spool)
+		dispatch_upload(exchange)
+	case .Stopped:
+		// A mid-body consumer breach (quota/disk). append_chunk already cancelled
+		// the spool; map its reason to a status.
+		upload_refuse(exchange, upload_status_for(exchange.spool_last))
+	case .Failed:
+		// A framing/transport error while the spool was still open — clean it up.
+		ingest.cancel(&exchange.spool, .Disconnected)
+		upload_refuse(exchange, http.Status.Bad_Request)
+	}
+}
+
+@(private)
+upload_status_for :: proc(r: ingest.Ingest_Result) -> http.Status {
+	#partial switch r {
+	case .Quota_Exceeded:
+		return .Payload_Too_Large
+	case .Process_Quota_Exceeded:
+		return .Service_Unavailable
+	case .Disk_Full:
+		return .Insufficient_Storage
+	case:
+		return .Payload_Too_Large
+	}
+}
+
+// upload_refuse answers a refused/failed upload directly, like the Expect and
+// over-limit refusals: a typed status, Connection: close, no dispatch.
+@(private)
+upload_refuse :: proc(exchange: ^Exchange, status: http.Status) {
+	http.headers_set_close(&exchange.res.headers)
+	exchange.res.status = status
+	http.respond(exchange.res)
+}
+
+// dispatch_upload builds the neutral request with the owned spool attached (and
+// an empty body — the body lives on disk, not in memory) and dispatches, exactly
+// as on_body does for a buffered body.
+@(private)
+dispatch_upload :: proc(exchange: ^Exchange) {
+	req := exchange.req
+	rline := req.line.(http.Requestline)
+	preserved_exchange := exchange.inbound.exchange
+	exchange.inbound = Inbound {
+		exchange = preserved_exchange,
+		method   = rline.method_raw,
+		path     = req.url.path,
+		query    = req.url.query,
+		headers  = neutral_headers(req, context.temp_allocator),
+		peer     = net.address_to_string(req.client.address, context.temp_allocator),
+		upload   = rawptr(&exchange.spool),
+	}
+	dispatch_exchange(exchange)
 }
 
 // on_body runs once the body has been read (or rejected for length). It builds

@@ -109,6 +109,14 @@ App_Internal :: struct {
 	// traffic. Three ints, no allocation; the laziness claim is unaffected.
 	limits: Limits,
 
+	// Phase 7.5-C2 — the large-body upload opt-in (`web.enable_upload`). LAZY and
+	// off by default: the zero value disables spooling, so an App that never calls
+	// `enable_upload` behaves exactly as before (a >max_body body is answered
+	// 413). When on, `serve` resolves `upload` into the transport's spool
+	// primitives. `upload.dir` is required to enable; no allocation here.
+	upload_enabled: bool,
+	upload:         Upload_Config,
+
 	// WP48 — the trusted-proxy set (ADR-013). A fixed inline array, no
 	// allocation, no teardown; the driver copies it onto each request beside
 	// the observer, the state and the limits.

@@ -52,6 +52,12 @@ Inbound :: struct {
 	// can open a detached stream bound to THIS connection via `stream_open`.
 	// Valid only for the duration of the dispatch call, on the owner lane.
 	exchange:   rawptr,
+	// Phase 7.5-C2 — an opaque `^ingest.Spool` when this request's large body was
+	// consumed to an owned spool (upload opt-in), else nil. The dispatch side
+	// (which imports `web/internal/ingest`) casts it and hands the Handler an
+	// owned upload; it also owns the spool's request-teardown cleanup. Opaque
+	// here for the same reason `exchange` is: the boundary names no owning type.
+	upload:     rawptr,
 }
 
 // Outbound is the neutral response the core's callback fills. The adapter copies
@@ -116,6 +122,19 @@ Config :: struct {
 	// WP71 — maximum concurrent synchronous Handler execution. Zero asks the
 	// adapter for its documented bounded automatic policy; one is compatibility.
 	max_handlers:     int,
+	// Phase 7.5-C2 — large-body upload opt-in, as resolved primitives (no ingest
+	// type crosses the boundary, exactly as no `Limits` does). When
+	// `upload_enabled`, a request body over `max_body` is spooled to `upload_dir`
+	// under these §4.2 quotas instead of answered 413, and the dispatch receives
+	// an owned spool via `Inbound.upload`. Disabled (the zero value) is the
+	// unchanged buffered path. `upload_dir` is required to enable — the core never
+	// picks a spool directory.
+	upload_enabled:   bool,
+	upload_dir:       string,
+	upload_per_quota: i64,
+	upload_proc_quota:i64,
+	upload_max_conc:  int,
+	upload_prefix_max:int,
 	// WP90b — detached-stream capacities. Zero fields select the
 	// phase-7-spec.md §4.1 registered defaults; tests force tiny queues here.
 	stream_capacity:  stream.Capacity,
