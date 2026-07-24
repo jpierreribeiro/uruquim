@@ -10,7 +10,6 @@ package web
 // uruquim:file application
 
 import "core:mem"
-import ingest "uruquim:web/internal/ingest"
 import transport "uruquim:web/internal/transport"
 
 // serve runs the application's HTTP server on the given port and blocks until
@@ -234,15 +233,11 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 // AFTER it has captured or written the response.
 @(private)
 driver_cleanup :: proc(ctx: ^Context) {
-	// Phase 7.5-C2: the owned upload's automatic cleanup (§4.2). `cancel` deletes
-	// the spooled file exactly once and is a no-op if the Handler already
-	// transferred ownership with `web.upload_persist` (the spool is then Terminal)
-	// or if the body was never spooled (nil). The reason is advisory — `cancel`
-	// cleans up regardless — so "the request ended without persisting" is spelled
-	// with the closest neutral terminal.
-	if ctx.private.upload != nil {
-		ingest.cancel((^ingest.Spool)(ctx.private.upload), .Disconnected)
-	}
+	// Phase 7.5-C2: the owned upload's automatic cleanup (§4.2), through the
+	// transport boundary (the core does not name the ingest type). It deletes the
+	// spooled file exactly once and is a no-op if the Handler already transferred
+	// ownership with `web.upload_persist` or the body was never spooled (nil).
+	transport.upload_cancel(ctx.private.upload)
 	response_destroy(&ctx.private.response)
 	request_arena_destroy(ctx)
 }

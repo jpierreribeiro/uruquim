@@ -1,7 +1,7 @@
 package web
 // uruquim:file application
 
-import ingest "uruquim:web/internal/ingest"
+import transport "uruquim:web/internal/transport"
 
 // Phase 7.5-C2 — the public opt-in large-body upload API.
 //
@@ -75,8 +75,7 @@ upload :: proc(ctx: ^Context) -> (up: Upload, ok: bool) {
 	if sp == nil {
 		return {}, false
 	}
-	s := (^ingest.Spool)(sp)
-	return Upload{path = ingest.spool_path(s), size = ingest.spooled_bytes(s)}, true
+	return Upload{path = transport.upload_path(sp), size = transport.upload_size(sp)}, true
 }
 
 // upload_persist transfers THIS REQUEST's spooled body to `destination` (an
@@ -92,5 +91,5 @@ upload_persist :: proc(ctx: ^Context, destination: string) -> bool {
 	if sp == nil {
 		return false
 	}
-	return ingest.persist((^ingest.Spool)(sp), destination)
+	return transport.upload_persist(sp, destination)
 }
