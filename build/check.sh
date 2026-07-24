@@ -82,6 +82,7 @@ bash -n "$URUQUIM_ROOT/build/check_c01_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
 bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c04_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c05_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c08_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
@@ -1162,6 +1163,14 @@ timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
 # must survive, and the corpus is NEGATIVE — each case pins a deliberate
 # difference from httprouter, so losing one silently permits a regression toward
 # semantics this project refused on security grounds.
+# C-05 (Closure) — combined saturation. It runs in the gate because the lab is
+# what caught F-C05-1: an unbounded wait inside handler_lane_enter that wedged
+# shutdown in 4 runs out of 6, past every deadline. A lab that only ran on
+# demand would have let the regression back in.
+echo "--- C-05 combined saturation: which queue binds first, and does stop still return ---"
+timeout 240 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c05_controls.sh"
+
 echo "--- C-08 httprouter negative corpus: precedence, no path correction, no catch-all ---"
 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
   bash "$URUQUIM_ROOT/build/check_c08_controls.sh"

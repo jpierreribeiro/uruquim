@@ -162,7 +162,27 @@ the sweep — is what actually ends a drain held by a non-reading client.
 
 ### F-C01-3 — `handler_lane_enter` spins without a bound
 
-**CLASSIFICATION: acceptable operational limitation.** Carried to C-02.
+**CLASSIFICATION: ~~acceptable operational limitation~~ → PRODUCTION-BLOCKING
+ABSENCE. Reclassified and fixed by C-05 (vendored patch 27) — see F-C05-1.**
+
+> **THIS ENTRY WAS WRONG, AND THE WAY IT WAS WRONG IS THE MOST INSTRUCTIVE
+> THING IN THIS FILE.** C-01 classified the unbounded spin as acceptable on the
+> strength of an ARGUMENT — that `io_uring` always delivers a completion for a
+> cancelled submission, so the loop must terminate. The argument is plausible,
+> it is the kind of thing a careful reader accepts, and **the measurement
+> refuted it.** C-05's saturation lab wedges here in **four runs out of six**,
+> and the wedge is total: `web.stop` did not return in sixty seconds against a
+> three-second `max_drain_time`.
+>
+> The inventory's ten questions found the operation and asked the right
+> question of it — question 9, "is there a maximum deadline?", answered "no".
+> What failed was the step after: accepting a reason instead of demanding a
+> test. Question 10 exists precisely to stop that, and this cell answered it
+> "n/a — it is not an operation". **The lesson for anyone amending this file: a
+> cell whose safety rests on reasoning rather than on a test is not answered,
+> it is deferred.**
+
+The original entry, kept as written so the correction is legible:
 
 ```odin
 for target.accept.client == 0 && target.accept.err == nil {
@@ -173,11 +193,20 @@ for target.accept.client == 0 && target.accept.err == nil {
 The loop waits for the cancelled `accept`'s completion to be observed, because
 `nbio.remove` is asynchronous and starting a blocking handler before that
 completion can let a connected client vanish without a callback. It has **no
-iteration cap and no deadline**. It terminates because `io_uring` always
+iteration cap and no deadline**. ~~It terminates because `io_uring` always
 delivers a CQE for a cancelled submission (either the accept won, or
 `-ECANCELED`), and it ticks the loop itself so it cannot deadlock against its
-own completion. It is nonetheless a framework-owned wait with no declared
+own completion.~~ It is nonetheless a framework-owned wait with no declared
 maximum, so it is named here and in the matrix rather than left implicit.
+
+**What the reasoning missed:** the spin runs on the LANE THREAD. A lane parked
+in it never returns to its event loop, never observes `s.closing`, and never
+calls `_server_thread_shutdown` — and `serve` waits on `threads_closed` for
+every lane. So one lane in here is a process that cannot be stopped, *past*
+`max_drain_time`, which bounds the drain and cannot bound a lane that never
+reaches the drain. Patch 27 caps the wait at 250 ms and abandons it on expiry
+without reattaching the operation record (reattaching a record whose completion
+may still arrive would trade a wedge for a use-after-free).
 
 ### F-C01-4 — a drain that expires with operations outstanding leaks connections
 
