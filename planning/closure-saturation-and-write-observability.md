@@ -67,6 +67,30 @@ path was reachable only through a narrow race window inside
 all: it is the common case, because with N lanes and more than N concurrent
 requests, arriving requests routinely land on a lane already inside a handler.
 
+### H-4 follow-ups (the operational corrections this measurement demanded)
+
+1. **The 503 now carries `Retry-After: 1`** (vendored change at the
+   `dispatch_exchange` refusal path). A refusal that does not say *when* to come
+   back invites an immediate retry onto the same contended pool, which collides
+   again — the refusal creates the retry storm it was trying to shed. One second
+   is the smallest honest hint (a synchronous handler's dwell is the thing being
+   waited out). The C-05 ramp asserts the property over real 503s:
+   `Lane_Refused_No_Retry` must be zero and `Lane_Refused` must be non-zero.
+
+2. **The lane pool has no queue and no work-stealing, deliberately, and this is
+   RECORDED AS A REFUSAL rather than a gap.** A request that lands on a busy lane
+   is refused, not queued and not moved to an idle lane. Queueing is the obvious
+   improvement and it is exactly what F-002 was: the `next_tick` deferral of a
+   dispatch, which was a use-after-free because everything the dispatch names —
+   `req`/`res` into `conn.loop`, the inbound views, the `Exchange` itself — lives
+   in the connection's temp arena, which `clean_request_loop` frees. **A queue is
+   sound only after that ownership changes** (the `Exchange` and its views would
+   have to outlive the connection teardown, refcounted or copied out). That is a
+   dedicated concurrency-architecture study, requested separately by the owner;
+   this WP only pins the current refusal and its reason so the `next_tick` UAF
+   cannot be reintroduced as a throughput "fix". Matrix row 4 carries the same
+   note.
+
 ---
 
 ## 2. F-C05-1 — the unbounded accept-cancel spin wedges shutdown

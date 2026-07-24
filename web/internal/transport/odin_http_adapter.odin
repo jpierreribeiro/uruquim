@@ -532,6 +532,18 @@ dispatch_exchange :: proc(exchange: ^Exchange) {
 		// is still valid, exactly as a load-shedding proxy would, and let the
 		// client retry.
 		http.headers_set_close(&res.headers)
+		// Closure H-4 — a 503 without `Retry-After` invites an immediate retry,
+		// and an immediate retry onto a contended lane pool collides again: the
+		// refusal that told the client "not now" said nothing about "when", so
+		// "when" becomes "right now", which is exactly the moment the lane is
+		// still busy. RFC 7231 §7.1.3 defines the header for precisely this
+		// load-shed case. One second is the smallest honest hint — the dwell of
+		// a synchronous handler is the thing being waited out, and a client that
+		// backs off a whole second is a client that stops adding to the
+		// collision it just met. It is a hint, not a contract: `web.stop` and a
+		// real overload may both outlast it, and the client is free to apply its
+		// own backoff on top.
+		http.headers_set(&res.headers, "Retry-After", "1")
 		res.status = http.Status.Service_Unavailable
 		http.respond(res)
 		return

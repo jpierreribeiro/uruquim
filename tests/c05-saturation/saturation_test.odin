@@ -39,6 +39,7 @@
 package test_c05_saturation
 
 import "core:fmt"
+import "core:strings"
 import "core:net"
 import "core:sync"
 import "core:testing"
@@ -63,7 +64,8 @@ CLIENT_PATIENCE :: 3 * time.Second
 
 Outcome :: enum {
 	Served, // 200
-	Lane_Refused, // 503 — the Handler lane said no
+	Lane_Refused, // 503 — the Handler lane said no, AND told the client when to retry
+	Lane_Refused_No_Retry, // 503 with no Retry-After — an H-4 defect (immediate retry, re-collision)
 	Admission_Refused, // connected, then closed with nothing written
 	Connect_Failed, // the backlog or the fd table said no
 	Timed_Out, // slow, not refused
@@ -101,15 +103,23 @@ serve_thread :: proc() {
 	sync.post(&s.done)
 }
 
+base_limits :: proc() -> web.Limits {
+	l := web.DEFAULT_LIMITS
+	l.max_connections = MAX_CONNECTIONS
+	l.reserved_conns = RESERVED_CONNS
+	l.max_drain_time = i64(3 * time.Second)
+	return l
+}
+
 start_server :: proc(s: ^Server) -> bool {
+	return start_server_with(s, base_limits())
+}
+
+start_server_with :: proc(s: ^Server, limits: web.Limits) -> bool {
 	g_server = s
 	for candidate in CANDIDATE_PORTS {
 		s.app = web.app()
-		l := web.DEFAULT_LIMITS
-		l.max_connections = MAX_CONNECTIONS
-		l.reserved_conns = RESERVED_CONNS
-		l.max_drain_time = i64(3 * time.Second)
-		web.limits(&s.app, l)
+		web.limits(&s.app, limits)
 		web.get(&s.app, "/work", work_handler)
 		s.port = candidate
 		s.thread = thread.create_and_start(serve_thread)
@@ -124,6 +134,23 @@ start_server :: proc(s: ^Server) -> bool {
 		web.destroy(&s.app)
 	}
 	return false
+}
+
+stop_server :: proc(s: ^Server) -> bool {
+	if s.thread == nil {
+		g_server = nil
+		return true
+	}
+	web.stop(&s.app)
+	returned := sync.sema_wait_with_timeout(&s.done, 15 * time.Second)
+	if returned {
+		thread.join(s.thread)
+		thread.destroy(s.thread)
+		s.thread = nil
+		web.destroy(&s.app)
+	}
+	g_server = nil
+	return returned
 }
 
 wait_until_accepting :: proc(port: int) -> bool {
@@ -190,7 +217,15 @@ one_request :: proc(port: int) -> Outcome {
 	case 200:
 		return .Served
 	case 503:
-		return .Lane_Refused
+		// H-4 — a lane refusal must carry Retry-After. The 503 header block fits
+		// in the first recv (it is tiny and Connection: close), so a
+		// case-insensitive search of what we read is sufficient; a 503 without
+		// the header is its own outcome, not a plain Lane_Refused.
+		lower := strings.to_lower(head, context.temp_allocator)
+		if strings.contains(lower, "retry-after:") {
+			return .Lane_Refused
+		}
+		return .Lane_Refused_No_Retry
 	}
 	return .Malformed
 }
@@ -249,30 +284,38 @@ c05_the_binding_constraint_under_combined_saturation_is_named :: proc(t: ^testin
 	)
 
 	total_malformed := 0
+	total_lane_503 := 0
+	total_lane_503_no_retry := 0
 	first_refusal_kind := Outcome.Served
 	first_refusal_level := 0
 
 	for clients in LEVELS {
 		tally := run_level(server.port, clients)
 		fmt.printf(
-			"[c05] clients=%d served=%d lane_503=%d admission=%d connect_fail=%d timeout=%d malformed=%d\n",
+			"[c05] clients=%d served=%d lane_503=%d no_retry=%d admission=%d connect_fail=%d timeout=%d malformed=%d\n",
 			clients,
 			tally[.Served],
 			tally[.Lane_Refused],
+			tally[.Lane_Refused_No_Retry],
 			tally[.Admission_Refused],
 			tally[.Connect_Failed],
 			tally[.Timed_Out],
 			tally[.Malformed],
 		)
 		total_malformed += tally[.Malformed]
+		total_lane_503 += tally[.Lane_Refused] + tally[.Lane_Refused_No_Retry]
+		total_lane_503_no_retry += tally[.Lane_Refused_No_Retry]
 
 		// The FIRST level at which anything is refused names the binding
-		// constraint — that is the measurement this suite exists to take.
+		// constraint. A lane refusal counts whether or not it carried Retry-After
+		// — the header is an H-4 quality check on the refusal, not a fifth
+		// resource.
+		lane_refused := tally[.Lane_Refused] + tally[.Lane_Refused_No_Retry]
 		if first_refusal_kind == .Served {
 			if tally[.Admission_Refused] > 0 {
 				first_refusal_kind = .Admission_Refused
 				first_refusal_level = clients
-			} else if tally[.Lane_Refused] > 0 {
+			} else if lane_refused > 0 {
 				first_refusal_kind = .Lane_Refused
 				first_refusal_level = clients
 			} else if tally[.Connect_Failed] > 0 {
@@ -329,5 +372,26 @@ c05_the_binding_constraint_under_combined_saturation_is_named :: proc(t: ^testin
 		after == .Served,
 		"the server did not serve a normal request after the ramp (got %v); saturation must be transient",
 		after,
+	)
+	// H-4 — every lane refusal must carry Retry-After. The ramp reliably produces
+	// 503s (the binding constraint), so this asserts a property over real
+	// refusals rather than forcing one: a 503 without the header tells the client
+	// nothing about when to come back, so it retries at once onto the same
+	// contended pool and collides again.
+	fmt.printf(
+		"[c05] lane 503s: %d total, %d without Retry-After\n",
+		total_lane_503,
+		total_lane_503_no_retry,
+	)
+	testing.expectf(
+		t,
+		total_lane_503 > 0,
+		"the ramp produced no lane 503 at all; the Retry-After assertion would then be vacuous (is max_handlers or the dwell wrong?)",
+	)
+	testing.expectf(
+		t,
+		total_lane_503_no_retry == 0,
+		"%d lane 503s arrived without a Retry-After header; a refusal that does not say when to retry invites an immediate re-collision (H-4)",
+		total_lane_503_no_retry,
 	)
 }

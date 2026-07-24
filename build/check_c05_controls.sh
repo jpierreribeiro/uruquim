@@ -55,6 +55,14 @@ grep -q 'FIRST BINDING CONSTRAINT' "$URUQUIM_SUITE" ||
 grep -q 'total_malformed == 0' "$URUQUIM_SUITE" ||
   fail "the malformed-reply assertion is gone; under saturation every outcome must be one the design NAMES, and that assertion is the only thing checking it"
 
+# --- 1b. H-4: every lane 503 carries Retry-After -----------------------------
+grep -q 'total_lane_503_no_retry == 0' "$URUQUIM_SUITE" ||
+  fail "the Retry-After assertion is gone. A 503 lane refusal that does not tell the client when to come back invites an immediate retry onto the same contended pool, which collides again. The ramp reliably produces 503s, so the property is checked over real refusals."
+grep -q 'total_lane_503 > 0' "$URUQUIM_SUITE" ||
+  fail "the assertion that the ramp actually produces a lane 503 is gone; without it the Retry-After check is vacuous"
+grep -q 'Retry-After' "$URUQUIM_ROOT/web/internal/transport/odin_http_adapter.odin" ||
+  fail "the lane-refusal 503 no longer sets Retry-After (H-4). The refusal path at dispatch_exchange must add the header before respond()."
+
 # --- 2. The F-C05-1 fix ------------------------------------------------------
 grep -q 'HANDLER_ACCEPT_CANCEL_WAIT' "$URUQUIM_SERVER" || fail "$(cat <<'EOF'
 the accept-cancel wait in handler_lane_enter is unbounded again (vendored patch

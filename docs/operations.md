@@ -378,11 +378,35 @@ the topology those limitations make mandatory:
   panic (ADR-020) — and a handler blocked in foreign code cannot be preempted,
   so the supervisor's kill is the outer bound on shutdown. Keep
   `max_drain_time` (default 10 s) well inside `TimeoutStopSec`.
-* **Run under a memory cgroup.** The core caps a request body (`max_body`) but
-  not a response, so total process memory is delegated. Matrix rows 5, 8 and 12.
+* **Run under a memory cgroup, sized by a measured rule.** The core caps a
+  request body (`max_body`) but not a response, so total process memory is
+  delegated. C-04 measured the shape: a connection retains **~1.0× the largest
+  response it ever served**, held for the connection's life, and there is no
+  per-request leak. So size the cgroup for
+
+  > `max_connections × (largest response your handlers can build) + baseline`
+
+  which is **1024 ×** your largest response at the defaults. `max_connections` is
+  the only setting that moves that product. Two levers reduce it further:
+  - **`max_idle_time` is a memory control, not only a slot economy.** Closing an
+    idle keep-alive connection **destroys its arena**, returning the retained
+    response memory; a connection you keep alive keeps its peak footprint.
+  - **`web.stream` does not pay the retention at all.** Streamed chunks leave
+    through the registry's ring, not the connection arena, so a large streamed
+    response costs a window, not its length. Prefer it for big payloads — the
+    win is memory, not only latency. Matrix rows 5, 8 and 12.
 * **Enable `max_write_time` and `max_idle_time`**, sized to your slowest
   legitimate client. They ship OFF because a framework-chosen number would reset
   real clients on upgrade; OFF is not a recommendation. Matrix row 5.
+* **Size `max_handlers` above your expected concurrency, and treat 503 as
+  backpressure.** C-05 measured that the Handler lane is the **first** resource
+  to bind — a synchronous handler holds its lane for its whole duration, and
+  refusals come from **collision on the lane pool, not from the pool being
+  full**: a 503 can arrive with most lanes idle, because there is no queue and no
+  work-stealing between lanes. Capacity is roughly `lanes ÷ handler-dwell`. So a
+  503 is normal load-shedding, it carries `Retry-After: 1`, and the knob for it
+  is `max_handlers` — **not** `max_connections`, which only decides how many
+  clients get to wait. Matrix row 4.
 * **Tune the accept backlog** (`somaxconn`) — it is the kernel's, and the only
   place a connection can queue. Matrix row 11.
 * **One server per process**, and install your own `SIGTERM`/`SIGINT` handler
