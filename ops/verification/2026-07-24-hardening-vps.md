@@ -93,6 +93,23 @@ file:
 
 Running any of them appends a dated result block to this file.
 
+### VPS run, 2026-07-24 (bounded)
+
+- **Soak (bounded).** `tests/c04-response-size` looped with `ulimit -l
+  unlimited`, sampling memory: iterations completed **OK with FLAT RSS** —
+  `used_mb` held at **375–376 MiB** across the samples (no monotonic growth).
+  The leak-shape result C-04 proves in 2 s on the dev box holds on real
+  hardware. The *hours-long* run remains owed (this was a bounded sample).
+- **`g76 scale=500` OVERLOADED this box, which is itself a finding.** 500
+  concurrent real-socket streams on 1.6 GiB RAM drove it into swap hard enough
+  that `sshd` could not complete a handshake; the run was killed and the box
+  recovered to 1352 MiB free once my processes were reaped. This is consistent
+  with H-2's diagnosis — this host is memory- and memlock-constrained — and it
+  is why the full 500+/3,000 rounds belong on a **dedicated** box. The wire-path
+  proof itself is green at 100 and 300 on the dev box (above). Nothing of the
+  host's own CI/Caddy was touched; only `/opt/uruquim-verify` processes were
+  killed during cleanup.
+
 ## Real-socket streaming — `tests/g76-scale-sockets` (the wire path at scale)
 
 Written and run this session. It opens N real client connections to a detached-
