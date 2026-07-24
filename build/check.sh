@@ -82,6 +82,7 @@ bash -n "$URUQUIM_ROOT/build/check_c01_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
 bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c04_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_security_backlog.sh"
 bash -n "$URUQUIM_ROOT/build/check_c05_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c06_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c07_controls.sh"
@@ -1129,6 +1130,12 @@ env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_wp68_co
 # an `nbio` operation is added without a row stating its owner, cancellation and
 # deadline. That absence is what let the orphaned recv and the missing write
 # deadline survive; a ledger nobody re-derives is a ledger that stops being true.
+# H-1 (Hardening) — the security-backlog reconciliation. It runs in the gate so
+# that a fix for any of the 14 scan findings going red is impossible to miss: the
+# gate fails if a finding loses the named test that pins it.
+echo "--- H-1 security backlog: 14 findings reconciled, each fix pinned by a test ---"
+bash "$URUQUIM_ROOT/build/check_security_backlog.sh"
+
 echo "--- C-01 async-operation inventory: census, ten questions, interruption phases ---"
 timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
   bash "$URUQUIM_ROOT/build/check_c01_controls.sh"

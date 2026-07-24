@@ -229,6 +229,49 @@ wp61_traversal_is_refused :: proc(t: ^testing.T) {
 	expect_refused(t, &app, "/assets/..", "a bare .. must be refused")
 }
 
+// SECURITY BACKLOG F7 — a symlink at an INTERMEDIATE path segment is refused,
+// not only a symlink at the final component. `web/static.odin` walks each
+// intermediate segment with `os.lstat` and refuses any `.Symlink` before the
+// final check; without this test that loop was unpinned (the whole static suite
+// exercised only the final-component check and textual traversal). Reached
+// through the ordinary request path, so a regression that removed the loop would
+// serve a file the mount was never supposed to reach.
+@(test)
+wp61_a_symlink_in_an_intermediate_segment_is_refused :: proc(t: ^testing.T) {
+	if !make_fixture() {
+		testing.expect(t, false, "fixture")
+		return
+	}
+	// A target that lives OUTSIDE the mount, reachable only by following a link.
+	TARGET_DIR :: ROOT + "/linktarget"
+	_ = os.make_directory(TARGET_DIR)
+	_ = os.write_entire_file(TARGET_DIR + "/loot.txt", transmute([]u8)string("do not serve me"))
+
+	// An intermediate symlink INSIDE the mount pointing at that outside dir.
+	// `os.symlink` may report EEXIST from a prior run; the request result is what
+	// the assertion turns on, so a pre-existing correct link is fine.
+	_ = os.symlink(TARGET_DIR, PUBLIC + "/vialink")
+	// And a final-component symlink to a file inside the mount, for the twin case.
+	_ = os.symlink(PUBLIC + "/app.js", PUBLIC + "/app_link.js")
+
+	app: web.App
+	mounted_app(&app)
+	defer web.destroy(&app)
+
+	// The intermediate segment `vialink` is a symlink: the lstat loop must refuse
+	// the whole request before it ever reaches `loot.txt`.
+	expect_refused(
+		t,
+		&app,
+		"/assets/vialink/loot.txt",
+		"a symlink at an intermediate segment must be refused, whatever it points at",
+	)
+	// The final-component symlink is refused too — even though it points INSIDE
+	// the mount, because the policy refuses all links rather than resolving them.
+	res := web.test_request(&app, .GET, "/assets/app_link.js")
+	testing.expect_value(t, res.status, web.Status.Not_Found)
+}
+
 // Percent encoding is refused outright, because the framework never decodes the
 // path (WP31a) — so `%2e%2e` would pass a textual `..` check untouched.
 @(test)

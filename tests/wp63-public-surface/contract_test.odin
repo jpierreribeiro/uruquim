@@ -298,3 +298,43 @@ wp63_the_form_and_the_body_share_one_capability :: proc(t: ^testing.T) {
 		"web.body after a form reader must fail: one body, one consumer (ADR-012)",
 	)
 }
+
+// SECURITY BACKLOG F13 — a decoy `boundary=` inside a quoted parameter value
+// must not be mistaken for the real boundary parameter. A bare
+// `strings.index(content_type, "boundary=")` would find the decoy `evil` inside
+// `name="x; boundary=evil"` and split the body on it, while an RFC-strict
+// intermediary (a WAF or scanning proxy) splits on the real `good` — the two
+// disagree on where parts begin, which is a content-inspection bypass. The body
+// below is framed with the REAL boundary, so a parser that used the decoy would
+// see no parts at all; one that reads the true MIME parameter parses normally.
+@(test)
+wp63_a_decoy_boundary_in_a_quoted_parameter_is_not_used :: proc(t: ^testing.T) {
+	quiet: Quiet
+	context.logger = quiet_logger(&quiet)
+
+	app: web.App
+	form_app(&app)
+	defer web.destroy(&app)
+
+	// The crafted header: a decoy inside a quoted value, then the real parameter.
+	CRAFTED :: "Content-Type: multipart/form-data; name=\"x; boundary=evil\"; boundary=" + BOUNDARY
+	headers := [?]string{CRAFTED}
+
+	captured_ok = false
+	captured_file_ok = false
+	captured_title = ""
+	_ = web.test_request(&app, .POST, "/upload", body = GOOD_BODY, headers = headers[:])
+
+	// The body is framed with the real BOUNDARY, so correct extraction parses it.
+	// A substring parser that latched onto `evil` would find no parts.
+	testing.expect(
+		t,
+		captured_ok && captured_title == "a report",
+		"the real `boundary` parameter must be used, not a decoy inside a quoted value (F13)",
+	)
+	testing.expect(
+		t,
+		captured_file_ok,
+		"the file part must parse under the real boundary, proving the decoy was ignored",
+	)
+}
