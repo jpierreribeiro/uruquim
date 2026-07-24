@@ -2131,3 +2131,40 @@ Crystal over this surface (WP97), not a core concept.
 **Rollback.** These are frozen ledger once shipped; the mechanism they cover
 is removable with the WP90 adapter code, but the names are a public contract
 from the Phase-7 freeze onward.
+
+## Amendment 31 — Closure H-3: `stats` and `Server_Stats`
+
+**Date: 2026-07-24. Authority: the Production Readiness Closure (C-05 named the
+write-observability gap; H-3 closes it) under the ADR-029 delegation. Freezes at
+the Closure freeze.** **Ledger effect: application 73 → 75.** 75 application +
+2 test-support = 77. Two symbols — the fewest that expose the send side:
+
+```
+application	proc	stats :: proc() -> Server_Stats
+application	type	Server_Stats :: struct {refused_connections: int, responses_sent: int, response_bytes: i64, send_errors: int, write_deadline_aborts: int, stream_refused_full: int, stream_refused_budget: int, stream_aborted_slow: int}
+```
+
+**WHAT THEY DO.** `stats` returns eight running totals for the life of the
+server (a scraper differences them), or the zero value when no server runs — the
+same rule as `refused_connections`. `Server_Stats` joins the backend's four
+buffered-send counters (vendored patch 28: responses sent, bytes on the wire,
+send errors, write-deadline aborts) with the stream registry's three counters
+(WP92, previously maintained and reachable from no public API). It is the same
+argument `refused_connections` made for admission, applied to the send side that
+was invisible.
+
+**REDACTION HOLDS BY CONSTRUCTION.** Every field is an integer, so no
+request-derived byte can reach an observer through it — the §3.1 property that
+admits `refused_connections`, and `build/check_public_api.sh` pins that no field
+is a string. It is not a metrics API: eight integers an application reads and
+hands to whatever it already runs, the smallest thing that discharges the WP50
+§3.5 observability obligation.
+
+| Symbol | Ledger | WP | Signature evidence | Behaviour evidence | Doc | Notes |
+|---|---|---|---|---|---|---|
+| `stats` | A | Closure-H3 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/h3-server-stats/server_stats_test.odin::h3_stats_count_real_responses_and_are_zero_without_a_server` | `docs/ai-context.md::web.stats` | eight running totals; zero when no server runs; reads under one lock so the snapshot is coherent |
+| `Server_Stats` | A | Closure-H3 | `build/phase1-public-signatures.txt` (the frozen row) | `tests/h3-server-stats/server_stats_test.odin::h3_stats_count_real_responses_and_are_zero_without_a_server` | `docs/ai-context.md::Server_Stats` | a struct of eight integers; redaction by construction (no string field); joins buffered-send and stream counters |
+
+**Rollback.** Frozen ledger once shipped; the backend counters they read are
+removable with the WP90 adapter code (vendored patch 28), but the names are a
+public contract from the Closure freeze onward.

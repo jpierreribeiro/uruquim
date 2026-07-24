@@ -1,7 +1,8 @@
 # C-05 — Combined saturation, and the write-observability gap
 
 **Status: PERIMETER 6 DONE (measured, and it found a wedge). PERIMETER 7
-SPECIFIED, NOT IMPLEMENTED (Closure, WP C-05).** Answers §4's perimeters 6 and
+SPECIFIED here, then SHIPPED by Hardening H-3 (`web.stats()`/`web.Server_Stats`,
+ledger 73→75).** Answers §4's perimeters 6 and
 7 of `planning/production-readiness-closure.md`.
 
 ---
@@ -157,10 +158,18 @@ deferred.*
 
 ---
 
-## 3. Perimeter 7 — write observability: specified, not implemented
+## 3. Perimeter 7 — write observability: specified here, SHIPPED by H-3
 
-**The gap, unchanged and now precisely stated.** The core's entire public
-observability surface is **one counter**, `web.refused_connections()`, plus the
+> **SHIPPED.** The specification below was the C-05 deliverable; Hardening H-3
+> implemented it verbatim as `web.stats()` returning `web.Server_Stats` (ledger
+> 73→75, vendored patch 28 for the four backend counters, the three stream
+> counters joined through the transport). `tests/h3-server-stats` proves each
+> counter moves on real traffic; `build/check_h3_controls.sh` pins the wiring
+> and the no-string-field redaction rule. The rest of this section is the
+> original specification, kept as the record of what was asked and why.
+
+**The gap, as it stood.** The core's entire public
+observability surface was **one counter**, `web.refused_connections()`, plus the
 typed `Framework_Event` observer, which reports per-request framework *errors*
 and carries no counters. Consequently an operator **cannot see**:
 

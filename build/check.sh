@@ -83,6 +83,7 @@ bash -n "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
 bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c04_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_security_backlog.sh"
+bash -n "$URUQUIM_ROOT/build/check_h3_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c05_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c06_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c07_controls.sh"
@@ -1145,6 +1146,13 @@ timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
 # here because the eleven parallel lists it replaced had already drifted into
 # asserting that shipped features did not exist. A list that is not gated is a
 # list that tells an operator to work around a solved problem.
+# H-3 (Hardening) — web.Server_Stats / web.stats(). It runs in the gate because a
+# counter that is not exercised silently stops moving, and the whole point of
+# H-3 is that the send side stops being invisible.
+echo "--- H-3 write observability: Server_Stats counters wired and proven ---"
+timeout 120 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_h3_controls.sh"
+
 echo "--- C-02 readiness matrix: every resource x limit/deadline/cancel/saturation/metric/shutdown ---"
 bash "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
 

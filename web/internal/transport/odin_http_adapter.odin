@@ -283,6 +283,33 @@ _refused_connections :: proc() -> int {
 	return sync.atomic_load(&server.refused_total)
 }
 
+// _server_stats reads every write-side counter under the one lock, so the eight
+// numbers are a coherent snapshot rather than eight independently-timed reads.
+// Through `g_server`, like `_refused_connections`, and zero when no server runs.
+@(private)
+_server_stats :: proc() -> Server_Stats {
+	sync.lock(&g_server.mutex)
+	defer sync.unlock(&g_server.mutex)
+	server := g_server.server
+	if server == nil {
+		return Server_Stats{}
+	}
+	out := Server_Stats {
+		refused_connections   = sync.atomic_load(&server.refused_total),
+		responses_sent        = sync.atomic_load(&server.responses_sent),
+		response_bytes        = sync.atomic_load(&server.response_bytes),
+		send_errors           = sync.atomic_load(&server.send_errors),
+		write_deadline_aborts = sync.atomic_load(&server.write_deadline_aborts),
+	}
+	if g_server.streams != nil {
+		c := stream.counters(g_server.streams)
+		out.stream_refused_full = c.refused_stream_full
+		out.stream_refused_budget = c.refused_budget_full
+		out.stream_aborted_slow = c.aborted_slow
+	}
+	return out
+}
+
 // request_stop asks the running server to stop. Idempotent and thread-safe: the
 // backend's shutdown is an atomic flag plus an event-loop wake-up, and calling
 // it when no server is running is a no-op.

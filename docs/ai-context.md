@@ -58,7 +58,7 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **73** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **75** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
 `logger` and `request_id` from Phase 2, and `route`, `app_with_state`,
@@ -66,9 +66,9 @@ Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `trust_proxies`, `secure_headers`, `refused_connections` from Phases 3-4, `is_draining`,
 `cors`/`Cors_Options`, `static`/`Static_Options`, `form_field`/`form_file`/`Uploaded_File`
 from Phases 5-6, `stream`/`Stream`/`stream_send`/`Stream_Send`/`stream_close` from
-Phase 7, and `enable_upload`/`upload`/`upload_persist`/`Upload`/`Upload_Config` from
-Phase 7.5).
-The test-support API is a separate ledger of exactly **2**. Union: **75**. Do not
+Phase 7, `enable_upload`/`upload`/`upload_persist`/`Upload`/`Upload_Config` from
+Phase 7.5, and `stats`/`Server_Stats` from the Closure).
+The test-support API is a separate ledger of exactly **2**. Union: **77**. Do not
 fold them together and do not invent a third form.
 
 ## Application
@@ -151,6 +151,7 @@ there by design.
 
 ```text
 refused_connections() -> int    connections refused for admission, running total
+stats() -> Server_Stats         the write-side counters (Closure H-3)
 ```
 
 `web.refused_connections()` returns zero when no server is running and zero
@@ -159,6 +160,15 @@ exists at all: **the framework records the route pattern, the method, the
 status, the request ID and its own counts, and never a path, header, body or
 parameter.** Key your metrics on `web.route(ctx)`, never on
 `ctx.request.path`.
+
+`web.stats()` returns a `Server_Stats` — eight running totals for the send
+side, which `refused_connections` did not cover: `responses_sent`,
+`response_bytes` (on the wire), `send_errors`, `write_deadline_aborts`, and the
+three detached-stream counters `stream_refused_full`, `stream_refused_budget`,
+`stream_aborted_slow` (previously reachable from no public API, so a
+slow-consumer abort was counted and then unseeable). Every field is an integer,
+so redaction holds by construction. Zero when no server runs, like
+`refused_connections`.
 
 ### Security headers
 

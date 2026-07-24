@@ -78,7 +78,9 @@ work regardless of who wrote the fix.
 
 | 27 | The wait for a cancelled `accept`'s completion inside `handler_lane_enter` is BOUNDED (250 ms); on expiry the wait is abandoned and the operation record stays detached rather than being returned to the pool (Closure C-05 / F-C05-1) | **No** — upstream has no `handler_lane_enter`; the spin arrived with Uruquim's own patch 13 (suspend a lane's accept while its synchronous Handler runs), so this is Uruquim fixing Uruquim | **CARRY AS BRIDGE.** Deletable with patch 13 when `core:net/http` lands. Measured: the unbounded form wedges **4 runs in 6** under the C-05 saturation ramp, and the wedge is total — `web.stop` did not return in 60 s against a 3 s `max_drain_time`, because a lane parked in the spin never reaches `_server_thread_shutdown` and `serve` waits for every lane |
 
-**Fifteen of twenty-seven are or contain upstream bugs; the rest are deliberate divergences.** WP70's
+| 28 | Write-side counters on the backend `Server` — responses sent, bytes on the wire, send errors, write-deadline aborts — incremented in `on_response_sent` and the sweep's abort branch, read by the adapter for `web.Server_Stats` (Closure H-3) | **No** — upstream has no such accounting; observability of the send side is Uruquim's operational contract, the twin of patch 12's `refused_total` on the admission side | **CARRY AS BRIDGE.** Deletable with the vendored backend when `core:net/http` lands; the official adapter must expose an equivalent, or `web.stats` loses its source |
+
+**Sixteen of twenty-eight are or contain upstream bugs; the rest are deliberate divergences.** WP70's
 multi-lane lifecycle correction joins the upstream group; WP59's absolute drain
 deadline joins the policy group. The bridge label changes expected lifetime,
 not the evidence or upstream-offer obligation.

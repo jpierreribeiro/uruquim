@@ -182,6 +182,18 @@ Server :: struct {
 	// this server started. Written by every lane and read by the adapter, so the
 	// total is atomic; the lane-local transition counter below needs no sharing.
 	refused_total:  int,
+	// URUQUIM PATCH 28 (Closure H-3) — BRIDGE. The write-side counters behind
+	// `web.Server_Stats`. Server-wide, written by every lane through
+	// `sync.atomic_add` and read by the adapter without a request in hand — the
+	// same discipline as `refused_total`. Each is a running total for the life of
+	// the server (WP50's counter shape: a scraper differences it), carries no
+	// request-derived byte, and exists because an operator cannot size or trust a
+	// deployment whose only visible number is refused connections. Deletable with
+	// the vendored backend when `core:net/http` lands.
+	responses_sent:       int, // buffered responses whose send completed without error
+	response_bytes:       i64, // bytes handed to the socket for those responses
+	send_errors:          int, // buffered-response sends that completed with an error
+	write_deadline_aborts:int, // connections aborted by the sweep's write-deadline branch
 	// Once the server starts closing/shutdown this is set to true, all threads will check it
 	// and start their thread local shutdown procedure.
 	//
@@ -1297,6 +1309,10 @@ server_deadline_sweep :: proc(_: ^nbio.Operation, s: ^Server) {
 			if effective_write > 0 && conn.send_started != (time.Time{}) &&
 			   time.diff(conn.send_started, now) > effective_write {
 				log.infof("uruquim: response write deadline exceeded; aborting connection %i", conn.socket)
+				// URUQUIM PATCH 28 (Closure H-3) — a write-deadline abort is the
+				// one send outcome an operator most needs to see: a slow reader
+				// being cut off. Counted here, on the owning lane.
+				_ = sync.atomic_add(&s.write_deadline_aborts, 1)
 				// Abort, not close: a graceful close would flush kernel
 				// buffers to the slow reader first — see `connection_abort`.
 				connection_abort(conn)

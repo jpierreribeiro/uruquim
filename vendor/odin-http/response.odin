@@ -7,6 +7,7 @@ import "core:mem/virtual"
 import "core:nbio"
 import "core:slice"
 import "core:strconv"
+import "core:sync"
 // URUQUIM PATCH 19/20 (WP90 / ADR-039) — deadline stamps on the send and
 // keep-alive paths.
 import "core:time"
@@ -352,9 +353,16 @@ on_response_sent :: proc(op: ^nbio.Operation, conn: ^Connection) {
 	conn.pending_send = nil
 	conn.send_started = {}
 
+	// URUQUIM PATCH 28 (Closure H-3) — the write-side counters, stamped where the
+	// send actually ends. `op.send.sent` is the byte count the backend reports on
+	// the completion, so `response_bytes` is bytes-on-the-wire, not bytes-queued.
 	if op.send.err != nil {
+		_ = sync.atomic_add(&conn.server.send_errors, 1)
 		log.errorf("could not send response: %v", op.send.err)
 		if !connection_set_state(conn, .Will_Close) { return }
+	} else {
+		_ = sync.atomic_add(&conn.server.responses_sent, 1)
+		_ = sync.atomic_add(&conn.server.response_bytes, i64(op.send.sent))
 	}
 
 	clean_request_loop(conn)
