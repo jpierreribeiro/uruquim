@@ -81,6 +81,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp94_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c01_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
 bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c04_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp71_controls.sh"
@@ -1145,6 +1146,15 @@ bash "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
 echo "--- C-03 fault campaign: RST flood, lane contention, disconnects, coincident deadlines ---"
 timeout 300 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
   bash "$URUQUIM_ROOT/build/check_c03_controls.sh"
+
+# C-04 (Closure) — response size and memory retention. It runs in the gate
+# because the core DELEGATES total memory to a cgroup, and a delegation is
+# acceptable only while the operator is told what to size it to. The number that
+# rule rests on (a connection retains ~1x the largest response it ever served)
+# is a measurement, and a measurement nobody re-takes is a claim.
+echo "--- C-04 response size and memory retention: the two-phase soak ---"
+timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c04_controls.sh"
 
 # WP51 — the vendor maintenance policy. It runs in the gate because it is the
 # PRECONDITION for WP46: a patch that predates the policy governing patches is
