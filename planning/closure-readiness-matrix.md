@@ -70,7 +70,7 @@ Classification vocabulary (§3 of `production-readiness-closure.md`):
 | 10 | Periodic lane timers (Date cache 1 s, deadline sweep 250 ms) | two per lane, fixed | their own period | **none — the handles are dropped**; they self-terminate by not rescheduling once `closing` is set | n/a | none | the final drain waits up to one period for the outstanding timeout — **measured at 991 ms** (C-01 P1) | LIMITATION — bounded by the period, declared in the C-01 inventory |
 | 11 | Accept backlog | the kernel's (`listen` backlog, `somaxconn`) | kernel | kernel | SYN drop | external (`ss -lnt` Recv-Q) | the listening socket is closed by `serve` after every lane returns | LIMITATION — **delegated to the kernel**, mandatory topology: tune `somaxconn` |
 | 12 | Total process memory | **none** — the core sets no aggregate cap | n/a | n/a | the OOM killer | external | n/a | LIMITATION — **delegated to a cgroup / supervisor**, mandatory and tested by C-06 |
-| 13 | TLS termination | n/a | n/a | n/a | n/a | external | n/a | LIMITATION — **delegated to the reverse proxy** by decision; the contract is C-06's |
+| 13 | TLS termination | n/a | n/a | n/a | n/a | external | n/a | LIMITATION — **delegated to the reverse proxy** by decision; the topology is now **TESTED** (C-06): `proxy_buffering off` proven mandatory (a buffering proxy withholds a stream entirely — nothing in 1.23 s against 150 ms direct) and the forwarded client address proven believed only from a trusted hop |
 
 ---
 

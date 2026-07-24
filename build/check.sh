@@ -83,6 +83,7 @@ bash -n "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
 bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c04_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c05_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c06_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c08_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
@@ -1170,6 +1171,14 @@ timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
 echo "--- C-05 combined saturation: which queue binds first, and does stop still return ---"
 timeout 240 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
   bash "$URUQUIM_ROOT/build/check_c05_controls.sh"
+
+# C-06 (Closure) — the reverse-proxy contract. It runs in the gate because the
+# matrix DELEGATES TLS and total memory to this topology, and the project's own
+# classification rule says a delegation is acceptable only if the topology is
+# mandatory, documented AND TESTED. The third word is this gate.
+echo "--- C-06 reverse-proxy contract: buffering off, and the trusted-hop client address ---"
+timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c06_controls.sh"
 
 echo "--- C-08 httprouter negative corpus: precedence, no path correction, no catch-all ---"
 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
