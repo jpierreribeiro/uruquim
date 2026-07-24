@@ -84,6 +84,7 @@ bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c04_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c05_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c06_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c07_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c08_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
@@ -1179,6 +1180,14 @@ timeout 240 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
 echo "--- C-06 reverse-proxy contract: buffering off, and the trusted-hop client address ---"
 timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
   bash "$URUQUIM_ROOT/build/check_c06_controls.sh"
+
+# C-07 (Closure) — the record and the verdict. It runs LAST of the Closure gates
+# and it checks the verdict's own evidence: every artifact it cites still exists
+# and is still wired into this gate, the exit condition is quoted verbatim rather
+# than paraphrased, the one open defect is still named, and every deferral still
+# carries a trigger. A verdict that outlives its evidence is a claim.
+echo "--- C-07 Closure record and verdict: the evidence behind the verdict still stands ---"
+bash "$URUQUIM_ROOT/build/check_c07_controls.sh"
 
 echo "--- C-08 httprouter negative corpus: precedence, no path correction, no catch-all ---"
 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
