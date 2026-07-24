@@ -80,6 +80,7 @@ bash -n "$URUQUIM_ROOT/build/check_wp88_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp94_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c01_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
+bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp71_controls.sh"
@@ -1134,6 +1135,16 @@ timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
 # list that tells an operator to work around a solved problem.
 echo "--- C-02 readiness matrix: every resource x limit/deadline/cancel/saturation/metric/shutdown ---"
 bash "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
+
+# C-03 (Closure) — the closed fault-injection campaign. It runs in the gate
+# because both defects it fixed are ones a green build would otherwise hide: an
+# RST flood that starves admission, and a drain loop that ignored .Will_Close
+# and so never ended for a `Connection: close` client. Neither showed up in any
+# earlier suite, because both are STATES nobody drove rather than scenarios
+# anybody thought of.
+echo "--- C-03 fault campaign: RST flood, lane contention, disconnects, coincident deadlines ---"
+timeout 300 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c03_controls.sh"
 
 # WP51 — the vendor maintenance policy. It runs in the gate because it is the
 # PRECONDITION for WP46: a patch that predates the policy governing patches is

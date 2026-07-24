@@ -123,11 +123,153 @@ probe in `tests/c03-fault-campaign/rst_flood_test.odin` records the failure
 *kind*: (a) predicts connect-succeeds-then-closed-with-no-reply; (b) predicts
 connect itself failing while the backlog is full.
 
-### The measurement
+### The measurement — and the verdict
 
 <!-- c03-rst-verdict:start -->
-*(recorded below by the run; see §2.1)*
+Four flood threads against a 64-slot server (60 admissible), a healthy client
+probing every 50 ms throughout, on the development box:
+
+| Tree | before flood | **during flood** | after flood | flood rate |
+|---|---|---|---|---|
+| pristine `origin/main` (dbbd522) | 10/10 | **1 / 59** — `connect_fail=0`, `refused=32`, `read_fail=26` | 20/20 | ~37,800 conn/s |
+| with vendored patch 25 | 10/10 | **56 / 56** | 20/20 | ~1,350 conn/s |
+
+**The mechanism is (a), and (b) is ruled out by the data.** `connect_fail = 0`
+across the whole flood: the listener never stopped accepting, and the backlog
+never filled. What a healthy client met was the **admission refusal** —
+connect succeeded, then the server closed with nothing written.
+
+So the F-002 report's wording was close but not exact, and the difference is
+the fix. The server does not "stop accepting"; it **stops admitting**, because
+`active_connections` is decremented in `connection_teardown` at the *end* of the
+close chain, and `Conn_Close_Delay` sits in the middle of that chain. Every
+RST'd connection therefore holds one of `max_connections - reserved_connections`
+slots for 500 ms. The budget is exhausted at `budget / 500 ms` — 120 conn/s
+against 60 slots — and the measured flood ran three hundred times faster than
+that.
+
+**The fix** (vendored patch 25) skips the linger for a connection whose peer has
+already gone, and only when no response send was in flight. The delay is RFC
+7230 6.6 courtesy to a client still draining a response, and a peer that sent
+RST or FIN is not one. It was never what flushed the response either: a plain
+`close` returns at once and the kernel keeps sending what is buffered — which is
+why this is a scheduling change, not a wire change, and why it is deliberately
+not the `connection_abort` path, whose SO_LINGER {1,0} exists to *discard* the
+tail.
+
+**Read the flood rate honestly.** It fell from ~37,800/s to ~1,350/s *because of
+the fix*, not despite it: refusing a connection is nearly free, so the unpatched
+server could churn the flood fast while serving nobody. The patched server does
+the real work of accepting, reading, and tearing down each connection, which
+throttles the flood — and serves every healthy client while doing it. Degrading
+in throughput rather than refusing everyone is the intended shape.
+
+Stability: 100% probe success across four runs, including one at twelve flood
+threads (which produced a *lower* rate, ~1,170/s — contention, not headroom
+loss). The suite is RED on pristine `origin/main` and green here, which is the
+evidence that it tests something.
 <!-- c03-rst-verdict:end -->
+
+---
+
+## 2b. F-C03-1 — `max_drain_time` bounded nothing for a `Connection: close` client
+
+**CLASSIFICATION: production-blocking absence.** *Fixed in-phase (vendored patch
+26). Pre-existing: reproduces identically on `origin/main` (dbbd522).*
+
+Cell D8 was written to check that two teardown paths racing for one connection —
+the sweep's abort and the drain's close — do not double-free. It found something
+else, which is the ordinary way a grid earns its cost.
+
+**The defect.** `_server_thread_shutdown`'s drain loop switches on
+`conn.state` with a `#partial switch` naming six of the seven
+`Connection_State` members. The omitted one is **`.Will_Close`** — the state a
+connection enters the moment the server decides to retire it after the current
+response. `response_must_close` sets it for **every request carrying
+`Connection: close`**, every HTTP/1.0 request, and every failed body read.
+
+An omitted case in a `#partial switch` is silence, not a compile error. Such a
+connection was neither closed nor logged; it stayed in `td.conns`, so
+`len(td.conns)` never reached zero and **the loop never broke — past every
+deadline**, because the force-close was reachable only through the `.Active`
+arm.
+
+**The measurement**, and it is a one-line reproduction:
+
+| Request | `max_write_time` | `max_drain_time` | `web.stop` returns |
+|---|---|---|---|
+| `GET /big` **with** `Connection: close`, client never reads | 500 ms | 500 ms | **never** (8 s, 10 s — any bound the test waited) |
+| same | **off (0)** | 500 ms | **never** |
+| same | 500 ms | **2 s** | **never** |
+| `GET /big` **without** `Connection: close`, client never reads | 500 ms | 500 ms | **1.107 s** |
+| with `Connection: close`, **after patch 26** | 500 ms | 500 ms | **1.132 s** |
+
+The write deadline is irrelevant (it hangs with the deadline off) and so is the
+drain deadline's value (500 ms and 2 s hang alike). The single variable is the
+header.
+
+**Why it is worse than it looks.** `max_drain_time` is documented as the
+*absolute* bound on shutdown — the vendored comment says it covers all three
+waits, and `docs/operations.md` tells operators to keep it inside their
+supervisor's `TimeoutStopSec`. That promise was false for the most ordinary
+client there is: `curl` on a large download interrupted at the terminal sends
+exactly this shape. The only remaining exit was the supervisor's SIGKILL, which
+is the failure mode a drain deadline exists to prevent.
+
+**Why the earlier suites missed it.** They all asked the question with the wrong
+header. `wp58-drain` drives `.Idle` and `.Active`; `c01-async-ops` P3 sends
+`GET /big HTTP/1.1` with no `Connection: close` and passes in 1.544 s. The state
+that was never exercised is the one that was never handled — which is exactly
+what a grid is for, and exactly why the campaign enumerates *states* rather than
+*scenarios someone thought of*.
+
+**The fix** treats `.Will_Close` exactly as `.Active`: it *is* an in-flight
+response — allowed to finish before the deadline, force-closed after it, the
+same trade the `.Active` arm already makes.
+
+---
+
+## 2c. F-C03-2 — the real-socket suites crash at a low rate under gate load — OPEN
+
+**CLASSIFICATION: defect, NOT closed by C-03.** Recorded with its reproduction
+rate so it stops being weather.
+
+The roadmap handoff records, as standing advice, that *"real-socket suites
+(wp41/wp58/wp67/wp8) segfault under shared-machine load; they pass in isolation
+— re-run rather than chase."* C-03 observed the same signature twice while
+building this campaign, and the campaign's own thesis says that advice is wrong:
+**a suite that crashes one run in N has a reproduction rate, and a reproduction
+rate is a finding.**
+
+**Observation 1.** The first invocation of `build/check_c01_controls.sh` died
+2.5 ms in, before any phase printed, with a leak report showing only route
+registration and `thread_unix.odin:_create` — i.e. inside the first
+`start_server`. Ten subsequent runs were green with timings identical to the
+millisecond.
+
+**Observation 2.** A full `build/check.sh` segfaulted in
+`wp90-deadlines` at `wp90_an_active_keepalive_is_not_idle`. That suite then
+passed **3/3 on this tree, 3/3 on pristine `origin/main`, and 4/4 under
+synthetic concurrent socket load** — fourteen green runs against one crash.
+
+**What is already ruled out.** Not a regression from the Closure's vendored
+patches: wp90 is green on pristine `origin/main` and on this tree alike. Not the
+port-fallback path: a stop after a failed bind was probed directly and is clean
+(now cell D10). Not load alone, at least not the load a `wp58-drain` loop
+produces alongside it.
+
+**Why it is not closed here.** The signature — a crash inside server startup,
+before the suite's own work begins — points at process-level state rather than
+at the request path this campaign enumerates, and chasing it needs an instrument
+this WP does not have: an ASan/debug gate build, or a core dump kept from a
+failing run. Both are cheap to add and neither is a fault-injection cell.
+
+**The next step, named so it is not lost again:** run the gate's socket suites
+under AddressSanitizer and keep the core dumps, exactly as the F-002
+investigation did (`/tmp/attacklab/uaf_rst.log` is what turned that report from
+a flake into a diagnosis). Until then the standing advice — re-run — is what
+operators of this gate should do, but it is a workaround with a ticket, not a
+verdict.
 
 ---
 

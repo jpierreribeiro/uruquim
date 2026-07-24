@@ -47,19 +47,21 @@ package test_c03_fault_campaign
 import "core:fmt"
 import "core:net"
 import "core:sync"
-import "core:sys/linux"
 import "core:testing"
 import "core:thread"
 import "core:time"
 import web "uruquim:web"
 
-CANDIDATE_PORTS :: [?]int{55027, 55353, 55621, 55897}
+// The flood's own constants. The harness (Server, start_server, dial,
+// set_linger, stop_server) lives in `harness.odin`, shared with the other
+// cells.
 
 // A SMALL admission budget on purpose. The wedge is a ratio — flood rate
 // against budget over the close delay — so shrinking the budget reaches it with
 // a flood a test machine can produce without becoming a load generator. With
 // 64 - 4 = 60 slots and a 500 ms close delay, mechanism (a) predicts saturation
-// above roughly 120 connections per second.
+// above roughly 120 connections per second; the measured flood ran three
+// hundred times faster than that.
 FLOOD_MAX_CONNECTIONS :: 64
 FLOOD_RESERVED_CONNS :: 4
 
@@ -72,79 +74,11 @@ FLOOD_THREADS :: 4
 PROBE_TIMEOUT :: 400 * time.Millisecond
 PROBE_INTERVAL :: 50 * time.Millisecond
 
-// SOL_SOCKET / SO_LINGER on Linux — the only gate-validated platform. Raw
-// setsockopt because the pinned `core:net` marshals `.Linger` as a `timeval`
-// where the kernel expects `struct linger` (the same reason
-// `connection_abort` does it by hand).
-SOL_SOCKET_ :: 1
-SO_LINGER_ :: 13
-
-Linger_Value :: struct {
-	l_onoff:  i32,
-	l_linger: i32,
-}
-
-// ---------------------------------------------------------------------------
-// Harness
-// ---------------------------------------------------------------------------
-
-Server :: struct {
-	app:    web.App,
-	port:   int,
-	thread: ^thread.Thread,
-	ready:  sync.Sema,
-	done:   sync.Sema,
-}
-
-g_server: ^Server
-
-ping_handler :: proc(ctx: ^web.Context) {
-	web.text(ctx, .OK, "pong")
-}
-
-serve_thread :: proc() {
-	s := g_server
-	sync.post(&s.ready)
-	web.serve(&s.app, s.port)
-	sync.post(&s.done)
-}
-
-start_server :: proc(s: ^Server) -> bool {
-	g_server = s
-	for candidate in CANDIDATE_PORTS {
-		s.app = web.app()
-		l := web.DEFAULT_LIMITS
-		l.max_connections = FLOOD_MAX_CONNECTIONS
-		l.reserved_conns = FLOOD_RESERVED_CONNS
-		l.max_drain_time = i64(2 * time.Second)
-		web.limits(&s.app, l)
-		web.get(&s.app, "/ping", ping_handler)
-		s.port = candidate
-		s.thread = thread.create_and_start(serve_thread)
-		sync.wait(&s.ready)
-		if wait_until_accepting(candidate) {
-			return true
-		}
-		web.stop(&s.app)
-		thread.join(s.thread)
-		thread.destroy(s.thread)
-		s.thread = nil
-		web.destroy(&s.app)
-	}
-	return false
-}
-
-wait_until_accepting :: proc(port: int) -> bool {
-	ep := net.Endpoint{address = net.IP4_Address{127, 0, 0, 1}, port = port}
-	for _ in 0 ..< 200 {
-		sock, err := net.dial_tcp(ep)
-		if err == nil {
-			net.close(sock)
-			return true
-		}
-		time.sleep(10 * time.Millisecond)
-	}
-	return false
+flood_limits :: proc() -> web.Limits {
+	l := base_limits()
+	l.max_connections = FLOOD_MAX_CONNECTIONS
+	l.reserved_conns = FLOOD_RESERVED_CONNS
+	return l
 }
 
 // ---------------------------------------------------------------------------
@@ -173,8 +107,7 @@ flood_thread :: proc() {
 			continue
 		}
 		sync.atomic_add(&f.opened, 1)
-		lv := Linger_Value{1, 0}
-		_ = linux.setsockopt_base(linux.Fd(i32(sock)), SOL_SOCKET_, SO_LINGER_, &lv)
+		_ = set_linger(sock, Linger_Value{1, 0})
 		net.close(sock)
 	}
 }
@@ -268,7 +201,7 @@ probe_for :: proc(port: int, window: time.Duration) -> Probe_Tally {
 @(test)
 c03_a_healthy_client_survives_an_rst_flood :: proc(t: ^testing.T) {
 	server: Server
-	if !start_server(&server) {
+	if !start_server(&server, flood_limits()) {
 		testing.expect(t, false, "no candidate port produced a working server")
 		return
 	}
@@ -329,18 +262,7 @@ c03_a_healthy_client_survives_an_rst_flood :: proc(t: ^testing.T) {
 		after.read,
 	)
 
-	returned := false
-	{
-		web.stop(&server.app)
-		returned = sync.sema_wait_with_timeout(&server.done, 5 * time.Second)
-	}
-	if returned {
-		thread.join(server.thread)
-		thread.destroy(server.thread)
-		server.thread = nil
-		web.destroy(&server.app)
-	}
-	g_server = nil
+	returned := stop_server(&server)
 
 	testing.expect(t, returned, "the server must still shut down after an RST flood")
 	testing.expectf(

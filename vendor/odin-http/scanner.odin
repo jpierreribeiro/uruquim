@@ -283,6 +283,10 @@ scanner_on_read :: proc(op: ^nbio.Operation, s: ^Scanner) {
 		#partial switch op.recv.err.(net.TCP_Recv_Error) {
 		case .Connection_Closed, .Invalid_Argument:
 			// EBADF (bad file descriptor) happens when OS closes socket.
+			// URUQUIM PATCH 25 (Closure C-03) — the peer is gone. Recorded on
+			// the connection so `connection_close` can skip a politeness delay
+			// owed to nobody; see the long note there.
+			s.connection.peer_gone = true
 			s._err = .EOF
 			return
 		}
@@ -293,6 +297,9 @@ scanner_on_read :: proc(op: ^nbio.Operation, s: ^Scanner) {
 
 	// When n == 0, connection is closed or buffer is of length 0.
 	if op.recv.received == 0 {
+		// URUQUIM PATCH 25 (Closure C-03) — an orderly FIN is equally final for
+		// the read side; no further byte can arrive.
+		s.connection.peer_gone = true
 		s._err = .EOF
 		return
 	}

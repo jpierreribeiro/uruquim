@@ -41,10 +41,10 @@ toolchain, `core/nbio/nbio.odin`):
 
 ## 1. The inventory
 
-**Twenty-two operation-creating call sites**, in nine kinds, across
+**Twenty-three operation-creating call sites**, in nine kinds, across
 `vendor/odin-http/` and `web/internal/transport/`. The count is machine-checked:
 
-<!-- c01-op-sites: 22 -->
+<!-- c01-op-sites: 23 -->
 
 `build/check_c01_controls.sh` counts `nbio.*_poly*(` call sites in the tree and
 compares them with the number on the marker line above. The number lives in
@@ -68,7 +68,7 @@ a defect.
 | 7 | `send` (buffered response) | `response_send_got_body` | `conn.pending_send` | owner lane | `Connection.pending_send` | `connection_close` / `connection_abort` | no | no — cleared first in `on_response_sent` | `on_response_sent` | `on_response_sent` → `Will_Close` | cancelled per connection | **sweep** (`response_write_timeout`) | ✅ wp90 |
 | 8 | `send` (stream heading / chunk / terminator) | adapter `stream_pump_run` ×3 | `conn.pending_send` | owner lane | `Connection.pending_send` | same | no | no — cleared first in all three completions | `on_stream_*_sent` | `stream_teardown_error` → abort | cancelled per connection | **sweep**, override 30 s default | ✅ wp92, wp95 |
 | 9 | `timeout` 500 ms → `close` | `connection_close` | **dropped** L | owner lane | nowhere | nobody | n/a | no — `c` is freed only downstream of it, and `.Closing` makes the arming site single-shot | fires once → `close_poly` | — | **not cancellable**; adds ≤500 ms to drain, and leaks `c` if the drain deadline expires first | 500 ms | ✅ wp58, C-01 test |
-| 10 | `close` | close-delay timeout, `connection_abort` | **dropped** L | owner lane | nowhere | nobody | n/a | no — `connection_teardown` is the single free path, reached once | frees `c` | frees `c` | outstanding at release if the drain deadline expired | none | ✅ wp58, wp90 |
+| 10 | `close` | close-delay timeout, `connection_abort`, **`connection_close` peer-gone fast path (patch 25)** | **dropped** L | owner lane | nowhere | nobody | n/a | no — `connection_teardown` is the single free path, reached once | frees `c` | frees `c` | outstanding at release if the drain deadline expired | none | ✅ wp58, wp90 |
 | 11 | `timeout` 250 ms — deadline sweep | `server_date_start`, self-rescheduling | **dropped** L | lane init | nowhere | nobody | n/a | no (`^Server` outlives lanes) | reschedules | — | **self-terminating**: returns without rescheduling once `s.closing` ⚠ **F-C01-2** | 250 ms | ✅ C-01 test |
 | 12 | `timeout` 1 s — Date cache | `server_date_start`, self-rescheduling | **dropped** L | lane init | nowhere | nobody | n/a | no | reschedules | — | self-terminating; adds ≤1 s to drain | 1 s | ✅ C-01 test |
 | 13 | `next_tick` — stream pump | `stream_pump_arm` (ANY thread) | **dropped** L | any producer thread | nowhere | nobody | n/a | no — `link.terminated` is checked **before** `link.conn`, and the link address is the registry slot address, so a reused slot yields a spurious-but-correct pump | `stream_pump` clears `pump_armed` | — | runs on the next tick; `web.serve` clears the runtime pointer under the same lock | next tick | ✅ wp92, wp95 |
@@ -76,6 +76,16 @@ a defect.
 | 15 | `open` | `respond_file` | **dropped** T | — | nowhere | nobody | n/a | **yes, if ever reached** ⚠ **F-C01-6** | `on_open` chains to `stat` | `respond_with_status` | **not cancellable** | none | n/a — unreachable |
 | 16 | `stat` | `respond_file` `on_open` | **dropped** T | — | nowhere | nobody | n/a | **yes, if ever reached** | `on_stat` chains to `read` | `nbio.close` + 404 | **not cancellable** | none | n/a — unreachable |
 | 17 | `read` (`all=true`) | `respond_file` `on_stat` | **dropped** T | — | nowhere | nobody | n/a | **yes, if ever reached** | `on_read` → `respond` | `nbio.close` + 500 | **not cancellable** | none | n/a — unreachable |
+
+**The census caught its first change the moment it was written.** Closure C-03
+added the peer-gone fast close (vendored patch 25), which is a third
+`nbio.close_poly` call site, and the full gate failed with *"the tree has 23
+nbio operation-creating call sites but the inventory declares 22"* — before the
+change could be committed. That is the whole mechanism working on the very next
+patch, and it is worth recording rather than quietly editing the number: the
+gap this file exists to close is the one where an operation is added and nobody
+states its owner, cancellation and deadline. Row 10's answers are unchanged;
+the new site shares them, and skips the delay rather than the teardown.
 
 Sites 15–17 are the vendored file-serving chain. They are listed because they
 **exist**, not because they run: see **F-C01-6**. The two `nbio.close(handle)`

@@ -58,7 +58,7 @@ Classification vocabulary (§3 of `production-readiness-closure.md`):
 
 | # | Resource | Limit | Deadline | Cancellation | Saturation policy | Metric | Shutdown | Class |
 |---|---|---|---|---|---|---|---|---|
-| 1 | Connection (accepted socket) | `max_connections`, default **1024** | none as a connection; `max_idle_time` bounds the gap between requests, **default OFF** | `connection_close` (shutdown(Send) + 500 ms + close) or `connection_abort` (SO_LINGER 0 → RST) | refuse: the accepted socket is closed at once above `max_connections - reserved_conns` (default 1008); never queued | `web.refused_connections()` — **the only public counter in the core** | drained: `.New`/`.Idle`/`.Pending` closed immediately, `.Active` force-closed once `max_drain_time` expires | OK |
+| 1 | Connection (accepted socket) | `max_connections`, default **1024** | none as a connection; `max_idle_time` bounds the gap between requests, **default OFF** | `connection_close` (shutdown(Send) + 500 ms + close; **immediate when the peer has already gone and no send was in flight** — patch 25) or `connection_abort` (SO_LINGER 0 → RST) | refuse: the accepted socket is closed at once above `max_connections - reserved_conns` (default 1008); never queued. **The slot is released at teardown, so the close path's duration is part of the admission budget** — C-03 §2 | `web.refused_connections()` — **the only public counter in the core** | drained: `.New`/`.Idle`/`.Pending` closed immediately, `.Active` **and `.Will_Close`** force-closed once `max_drain_time` expires (patch 26 / F-C03-1 — `.Will_Close` was omitted, and the drain then never ended) | OK |
 | 2 | Listening socket / `accept` | one outstanding accept per lane (WP71); the backlog itself is the kernel's | none — it blocks until a client arrives, by design | `nbio.remove(td.accept)` at shutdown | kernel backlog; `.Insufficient_Resources` re-arms after 1 s (guarded, vendored patch 24 / F-C01-1) | none exposed; consecutive failures are counted per lane and **128 in a row is fatal** rather than a silent outage | cancelled at shutdown | OK |
 | 3 | Request read (request line, headers, buffered body) | `max_request_line` **8000**, `max_headers` **8000**, `max_body` **4 MiB** | `max_request_time` **30 s, ON by default** | `nbio.remove(scanner.pending_recv)` | close the connection | none exposed; the resulting status reaches the typed `Framework_Event` observer | cancelled per connection; **the deadline itself stops being enforced once `closing` is set — F-C01-2** | OK |
 | 4 | Handler execution (one lane) | `max_handlers`, default 0 = automatic (adapter resolves to [4, 32] by core count; explicit values bounded at 256) | **none — the application's own** | **not preemptible.** Odin has no recoverable panic and no preemption; a handler runs to return | lane contention answers **503 and the client retries** (F-002 fix); admission for that lane is suspended while it runs | none exposed | a running handler is not interrupted; `max_drain_time` bounds the *transport*, not the handler. **The supervisor's kill is the outer bound** | LIMITATION — mandatory topology: a supervisor with a kill timeout |
@@ -90,7 +90,12 @@ owns it.
 3. **Deadlines are request-scoped, not shutdown-scoped.** Between `web.stop`
    and the drain deadline, the sweep no longer runs; `max_drain_time`
    (default 10 s) is the only bound that survives. Setting it to 0 is valid
-   and removes that bound too. *Owner: declared — F-C01-2.*
+   and removes that bound too. *Owner: declared — F-C01-2.* **C-03 found that
+   this bound was not merely the only one but, for a `Connection: close`
+   client, not a bound at all** — the drain loop ignored `.Will_Close`, so
+   `web.stop` never returned. Fixed (patch 26 / F-C03-1) and now gated; the
+   entry stands as written because the *scope* limitation is real even with the
+   bound restored.
 4. **There is no write-side observability.** No response-byte counter, no
    send-outcome counter, and the stream registry's three counters are not
    reachable from the public API. An operator cannot currently see slow-consumer

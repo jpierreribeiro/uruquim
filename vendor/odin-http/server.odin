@@ -431,7 +431,43 @@ _server_thread_shutdown :: proc(s: ^Server, loc := #caller_location) {
 
 		for sock, conn in td.conns {
 			#partial switch conn.state {
-			case .Active:
+			// URUQUIM PATCH 26 (Closure C-03 / F-C03-1) — `.Will_Close` BELONGS
+			// HERE, and its absence made `max_drain_time` bound nothing.
+			//
+			// THE DEFECT. This `#partial switch` named six of the seven
+			// `Connection_State` members. The one it omitted, `.Will_Close`, is
+			// the state a connection enters the moment the server decides to
+			// retire it after the current response — which `response_must_close`
+			// does for every request carrying `Connection: close`, for every
+			// HTTP/1.0 request, and after a failed body read. An omitted case in
+			// a `#partial switch` is silence, not a compile error: such a
+			// connection was neither closed nor logged, it simply stayed in
+			// `td.conns`. `len(td.conns)` therefore never reached zero and the
+			// loop below never broke — FOREVER, past every deadline, because the
+			// force-close was reachable only through the `.Active` arm.
+			//
+			// MEASURED (C-03 cell D8, and it is a one-line reproduction): one
+			// client sends `GET /big HTTP/1.1` with `Connection: close`, does not
+			// read the 8 MiB response, and `web.stop` never returns — 8 s, 10 s,
+			// any bound the test cared to wait. Remove the `Connection: close`
+			// header and the identical scenario shuts down in 1.1 s. The write
+			// deadline was irrelevant (it fails with the deadline off too) and so
+			// was the drain deadline's value (500 ms and 2 s fail alike).
+			//
+			// WHY IT MATTERS MORE THAN IT LOOKS. `max_drain_time` is documented
+			// as the ABSOLUTE bound on shutdown — the comment forty lines above
+			// says it covers all three waits, and `docs/operations.md` tells
+			// operators to keep it inside their supervisor's `TimeoutStopSec`.
+			// This made that promise false for the most ordinary client there
+			// is: `curl` on a large download interrupted at the terminal sends
+			// exactly this shape. The only remaining exit was the supervisor's
+			// SIGKILL, which is the failure mode a drain deadline exists to
+			// prevent.
+			//
+			// `.Will_Close` is treated exactly as `.Active` because it IS an
+			// in-flight response: allowed to finish before the deadline, force-
+			// closed after it. That is the same trade the `.Active` arm makes.
+			case .Active, .Will_Close:
 				// PAST THE DEADLINE, "still active" stops being a reason to
 				// wait. Before it, this is upstream's behaviour unchanged: an
 				// in-flight request is allowed to finish, which is the whole
@@ -612,6 +648,12 @@ Connection :: struct {
 	// in flight. Stamped in `clean_request_loop` on the keep-alive path,
 	// cleared when the next request's bytes arrive (`on_rline1`).
 	idle_since:      time.Time,
+	// URUQUIM PATCH 25 (Closure C-03) — the peer has already gone: the last
+	// `recv` reported an orderly FIN (`received == 0`) or a reset
+	// (`Connection_Closed`). Set by `scanner_on_read`, read by
+	// `connection_close` to skip a politeness delay owed to nobody. See the
+	// note there for what it fixes and why it is safe.
+	peer_gone:       bool,
 }
 
 // Loop/request cycle state.
@@ -634,6 +676,11 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 	log.debugf("closing connection: %i", c.socket)
 
 	c.state = .Closing
+
+	// URUQUIM PATCH 25 (Closure C-03) — captured BEFORE the cancels below null
+	// it, because whether a response was in flight decides how this connection
+	// may end.
+	had_send_in_flight := c.pending_send != nil
 
 	// URUQUIM PATCH 10 (WP59) — BRIDGE. Cancel the outstanding `recv` before
 	// anything below frees the connection it points at.
@@ -665,6 +712,48 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 	if c.pending_send != nil {
 		nbio.remove(c.pending_send)
 		c.pending_send = nil
+	}
+
+	// URUQUIM PATCH 25 (Closure C-03) — THE LINGER IS A COURTESY, AND A PEER
+	// THAT IS ALREADY GONE IS OWED NONE.
+	//
+	// THE DEFECT IT FIXES. `docs/reports/2026-07-23-security-f001-f002.md`
+	// recorded, as out of scope, that "under a SUSTAINED RST flood the server
+	// stops accepting (all threads alive, listen backlog fills, no crash)".
+	// C-03 reproduced it and the measurement named the mechanism, which is not
+	// the accept path at all: a healthy client's `connect` kept succeeding
+	// throughout (`connect_fail=0`), and what it met was the ADMISSION
+	// REFUSAL — 1 probe served out of 59.
+	//
+	// The cause is here. `active_connections` is decremented in
+	// `connection_teardown`, at the END of this chain, so a connection whose
+	// peer has already sent RST still occupies one of
+	// `max_connections - reserved_connections` slots for the whole
+	// `Conn_Close_Delay`. At 500 ms a flood only has to open connections faster
+	// than `budget / 500 ms` — 120/s against the lab's 60 slots — to make every
+	// later client meet the refusal. The measured flood ran at ~39,900/s, which
+	// is a 300-fold oversubscription of the budget by connections that are
+	// waiting out a politeness delay owed to a peer that has gone.
+	//
+	// WHY SKIPPING IT IS SAFE, and the two conditions are both necessary:
+	//
+	//   * `peer_gone` means the last `recv` reported an orderly FIN or a reset.
+	//     No further byte can arrive, and nothing this server writes can be
+	//     read. RFC 7230 6.6's advice — close the read side, pause, then close
+	//     — protects a client still draining a response; there is no such
+	//     client here.
+	//   * `!had_send_in_flight` keeps the courteous path for the case that
+	//     actually needs it. If a response was outstanding when this close
+	//     began, the connection ends the way it always did.
+	//
+	// Note that the delay was never what flushed the response: a plain `close`
+	// (no SO_LINGER) returns at once and the kernel keeps sending what is
+	// buffered. That is why this is a scheduling fix and not a wire change —
+	// and why it is deliberately NOT the `connection_abort` path, which sets
+	// SO_LINGER {1,0} to DISCARD the tail. Nothing is discarded here.
+	if c.peer_gone && !had_send_in_flight {
+		nbio.close_poly(c.socket, c, connection_teardown)
+		return
 	}
 
 	// RFC 7230 6.6.
