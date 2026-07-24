@@ -178,32 +178,30 @@ The full set is `bad_request`, `unauthorized`, `forbidden`, `not_found` and
 
 ## Current limitations
 
-Honest limits, so nothing surprises you later. These are what the shipped core
-does **not** do today — verified against the current build, not a past phase.
+**The canonical list lives in one place: `planning/closure-readiness-matrix.md`.**
+Every framework-owned resource has a row there — limit, deadline, cancellation,
+saturation policy, metric, shutdown behaviour — and a gate fails the build when
+a cell goes missing. This page used to keep its own copy of that list; it
+drifted into claiming that shipped features did not exist, which is exactly what
+a list maintained in eleven places does.
 
-- **A fault in a handler aborts the process.** A panic, a failed assertion or
-  an out-of-bounds index takes the server down; the client sees an empty reply.
+The four that will surprise you first, so nothing does:
+
+- **A fault in a handler aborts the process.** A panic, a failed assertion or an
+  out-of-bounds index takes the server down; the client sees an empty reply.
   There is no recovery middleware and there never will be — Odin has no
   recoverable panic (ADR-020). Run under a supervisor with `Restart=always`.
   What Uruquim *does* guarantee is the other half: a handler that returns
   without responding gets the standardized 500. See `docs/errors.md`.
 - **The write and idle timeouts are OFF by default.** `Limits.max_request_time`
-  bounds request *arrival* (a slowloris defense); `Limits.max_write_time`
+  bounds request *arrival* (a slowloris defence) and is on. `Limits.max_write_time`
   bounds a slow-reading client stalling a response write (the connection is
-  reset at the deadline), and `Limits.max_idle_time` reclaims idle keep-alive
-  slots. Both default to `0` = off — enable them in production, sized to your
+  reset at the deadline) and `Limits.max_idle_time` reclaims idle keep-alive
+  slots — both default to `0` = off. Enable them in production, sized to your
   slowest legitimate client, or keep a reverse proxy's timeouts in front.
-- **A blocked handler is not cancellable.** A handler stuck in blocking foreign
-  code (a C library, a synchronous call) holds its lane past the drain deadline;
-  the supervisor's kill timeout is the outer bound. Multiple lanes bound the
-  blast radius, not the individual stuck call.
-- **No outbound HTTP client, no metrics/tracing backend, no TLS in the core.**
-  Calling other services, exporting Prometheus metrics, propagating trace
-  context and terminating TLS are the application's, a Crystal's, or the reverse
-  proxy's job — not the core's. See `docs/operations.md`.
-- **Uploads are buffered whole, bounded by `Limits.max_body`.** There is no
-  disk spool; a body over the limit is refused with 413. Large-file ingestion is
-  planned (streaming/spool) but not shipped.
+- **A response has no size limit.** `max_body` caps what a client may send;
+  nothing caps what your handler may build, and the response is buffered whole
+  (ADR-014). Run under a memory cgroup.
 - **Graceful shutdown is not wired to a signal for you.** `web.stop(&app)` is
   thread- and signal-safe and drains within `Limits.max_drain_time`, but the
   core installs no `SIGTERM`/`SIGINT` handler — your `main` must install one and

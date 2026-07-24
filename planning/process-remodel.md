@@ -94,27 +94,38 @@ are evidence someone may re-read.)*
 
 ---
 
-## 3. docs/ — the limitations scatter collapses onto the matrix
+## 3. docs/ — the limitations scatter collapses onto the matrix — ✅ DONE (Closure C-02)
 
-After the Closure ships its resource × property matrix (C-02) and closure record
-(C-07), **that matrix is the single canonical list of current framework
-limitations.** Then:
+**Closed 2026-07-24 by Closure WP C-02.** `planning/closure-readiness-matrix.md`
+is now the single canonical list of current framework limitations — thirteen
+framework-owned resources, each with a limit, deadline, cancellation, saturation
+policy, metric and shutdown behaviour, and no unanswered cell.
+`build/check_readiness_matrix.sh` enforces it in the gate.
 
-- `docs/operations.md` §10, `docs/quick-start.md` "Current limitations",
-  `docs/canonical-patterns.md`: keep a **one-line pointer** to the matrix
-  instead of each restating the list. The prose that explains a *specific*
-  behaviour stays; the *enumeration* lives in one place.
-- **Phase freezes keep their own non-deliveries** — that is a freeze's job (the
-  record of what *that phase* did not deliver, as history). They are not the
-  *current* limitations list; the matrix is.
-- `docs/standards-registry.md`, `docs/transport-conformance.md`: unchanged
-  (they document contracts, not limitations).
+What actually happened, because it is stronger evidence for this step than the
+argument that motivated it: **the parallel lists had already drifted into being
+wrong.** `docs/operations.md` §10 asserted that large-body upload had "no public
+API yet" and that "the framework will not spool to disk" — both false since
+Phase 7.5-C2 — and declared streaming "out of core by decision" four bullets
+after saying response streaming and SSE cover server push. `docs/quick-start.md`
+carried two of the three. The prediction was drift; the finding was a document
+telling operators to build a workaround for a solved problem.
 
-Net: the "what doesn't this bound?" answer stops being maintained in 11 places
-and drifting; it is maintained once, gate-checked by `check_readiness_matrix.sh`
-(C-02).
+Done:
 
----
+- `docs/operations.md` §10 → a pointer to the matrix, keeping only the
+  *operational* residue: the mandatory topology (reverse proxy, supervisor with
+  a kill timeout, memory cgroup, enable the two OFF-by-default deadlines, tune
+  `somaxconn`, one server per process, install your own signal handler).
+- `docs/quick-start.md` "Current limitations" → a pointer plus the four a new
+  reader meets first, none of them an enumeration of the rest.
+- Phase freezes keep their own non-deliveries: a freeze records what *that
+  phase* did not deliver, which is history, not current state.
+- `docs/standards-registry.md`, `docs/transport-conformance.md`: unchanged, as
+  planned — they document contracts, not limitations.
+- The gate additionally refuses to let the three drifted claims be **asserted**
+  again anywhere in `docs/` (they may only appear where they are refuted). A
+  pointer is worth something only if the list it replaced cannot quietly regrow.
 
 ## 4. build/ — gate consolidation (careful, staged)
 

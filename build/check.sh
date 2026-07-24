@@ -78,6 +78,16 @@ bash -n "$URUQUIM_ROOT/build/check_phase7_freeze.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp87_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp88_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp94_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c01_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
+bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c04_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_security_backlog.sh"
+bash -n "$URUQUIM_ROOT/build/check_h3_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c05_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c06_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c07_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c08_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp71_controls.sh"
@@ -1115,6 +1125,88 @@ env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_wp94_co
 # identical on the memory and real-socket transports.
 echo "--- WP67 JSON failure anatomy and RED controls ---"
 env URUQUIM_COMPILER="$URUQUIM_COMPILER" bash "$URUQUIM_ROOT/build/check_wp68_controls.sh"
+
+# C-01 (Closure) — the async-operation inventory. It runs in the gate because
+# its whole value is being unable to go stale: the census fails the build when
+# an `nbio` operation is added without a row stating its owner, cancellation and
+# deadline. That absence is what let the orphaned recv and the missing write
+# deadline survive; a ledger nobody re-derives is a ledger that stops being true.
+# H-1 (Hardening) — the security-backlog reconciliation. It runs in the gate so
+# that a fix for any of the 14 scan findings going red is impossible to miss: the
+# gate fails if a finding loses the named test that pins it.
+echo "--- H-1 security backlog: 14 findings reconciled, each fix pinned by a test ---"
+bash "$URUQUIM_ROOT/build/check_security_backlog.sh"
+
+echo "--- C-01 async-operation inventory: census, ten questions, interruption phases ---"
+timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c01_controls.sh"
+
+# C-02 (Closure) — the resource x property matrix as a LIVING GATE. It is the
+# single canonical list of what this core does and does not bound, and it runs
+# here because the eleven parallel lists it replaced had already drifted into
+# asserting that shipped features did not exist. A list that is not gated is a
+# list that tells an operator to work around a solved problem.
+# H-3 (Hardening) — web.Server_Stats / web.stats(). It runs in the gate because a
+# counter that is not exercised silently stops moving, and the whole point of
+# H-3 is that the send side stops being invisible.
+echo "--- H-3 write observability: Server_Stats counters wired and proven ---"
+timeout 120 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_h3_controls.sh"
+
+echo "--- C-02 readiness matrix: every resource x limit/deadline/cancel/saturation/metric/shutdown ---"
+bash "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
+
+# C-03 (Closure) — the closed fault-injection campaign. It runs in the gate
+# because both defects it fixed are ones a green build would otherwise hide: an
+# RST flood that starves admission, and a drain loop that ignored .Will_Close
+# and so never ended for a `Connection: close` client. Neither showed up in any
+# earlier suite, because both are STATES nobody drove rather than scenarios
+# anybody thought of.
+echo "--- C-03 fault campaign: RST flood, lane contention, disconnects, coincident deadlines ---"
+timeout 300 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c03_controls.sh"
+
+# C-04 (Closure) — response size and memory retention. It runs in the gate
+# because the core DELEGATES total memory to a cgroup, and a delegation is
+# acceptable only while the operator is told what to size it to. The number that
+# rule rests on (a connection retains ~1x the largest response it ever served)
+# is a measurement, and a measurement nobody re-takes is a claim.
+echo "--- C-04 response size and memory retention: the two-phase soak ---"
+timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c04_controls.sh"
+
+# C-08 (Closure) — the httprouter comparative corpus. It runs in the gate for
+# two reasons that have nothing to do with performance: the BSD-3 attribution
+# must survive, and the corpus is NEGATIVE — each case pins a deliberate
+# difference from httprouter, so losing one silently permits a regression toward
+# semantics this project refused on security grounds.
+# C-05 (Closure) — combined saturation. It runs in the gate because the lab is
+# what caught F-C05-1: an unbounded wait inside handler_lane_enter that wedged
+# shutdown in 4 runs out of 6, past every deadline. A lab that only ran on
+# demand would have let the regression back in.
+echo "--- C-05 combined saturation: which queue binds first, and does stop still return ---"
+timeout 240 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c05_controls.sh"
+
+# C-06 (Closure) — the reverse-proxy contract. It runs in the gate because the
+# matrix DELEGATES TLS and total memory to this topology, and the project's own
+# classification rule says a delegation is acceptable only if the topology is
+# mandatory, documented AND TESTED. The third word is this gate.
+echo "--- C-06 reverse-proxy contract: buffering off, and the trusted-hop client address ---"
+timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c06_controls.sh"
+
+# C-07 (Closure) — the record and the verdict. It runs LAST of the Closure gates
+# and it checks the verdict's own evidence: every artifact it cites still exists
+# and is still wired into this gate, the exit condition is quoted verbatim rather
+# than paraphrased, the one open defect is still named, and every deferral still
+# carries a trigger. A verdict that outlives its evidence is a claim.
+echo "--- C-07 Closure record and verdict: the evidence behind the verdict still stands ---"
+bash "$URUQUIM_ROOT/build/check_c07_controls.sh"
+
+echo "--- C-08 httprouter negative corpus: precedence, no path correction, no catch-all ---"
+env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c08_controls.sh"
 
 # WP51 — the vendor maintenance policy. It runs in the gate because it is the
 # PRECONDITION for WP46: a patch that predates the policy governing patches is

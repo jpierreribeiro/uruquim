@@ -156,6 +156,29 @@ refused_connections :: proc() -> int {
 	return _refused_connections()
 }
 
+// Server_Stats is the neutral write-side accounting the public `web.Server_Stats`
+// is built from (Closure H-3). Every field is a plain integer running total, so
+// it carries no request-derived byte — the same §3.1 property that admits
+// `refused_connections`. It joins the backend's four send counters (patch 28)
+// with the stream registry's three (WP92), so an operator sees buffered writes
+// and streamed writes in one read.
+Server_Stats :: struct {
+	refused_connections:   int,
+	responses_sent:        int,
+	response_bytes:        i64,
+	send_errors:           int,
+	write_deadline_aborts: int,
+	stream_refused_full:   int,
+	stream_refused_budget: int,
+	stream_aborted_slow:   int,
+}
+
+// server_stats reads the running server's write-side counters, or the zero
+// value when no server is running — the same rule as `refused_connections`.
+server_stats :: proc() -> Server_Stats {
+	return _server_stats()
+}
+
 // Serve_Error is the neutral outcome of a serve attempt.
 Serve_Error :: enum {
 	None,

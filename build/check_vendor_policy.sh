@@ -40,12 +40,38 @@ grep -qF '112c49b' "$URUQUIM_POLICY" ||
   fail "the vendor policy no longer names the commit it governs"
 
 # --- 2. The patch ledger is exact in both directions -------------------------
-# Twenty-three patches ship (WP7.5-C1 added the streaming inbound body, patch 23).
-# The policy's disposition table and the vendor record must agree on the count, or
-# one of them has drifted and nobody can tell which.
-URUQUIM_POLICY_ROWS="$(grep -cE '^\| [0-9]+ \| .* \| .* \| \*\*(OFFER UPSTREAM|CARRY|APPEARS FIXED UPSTREAM)' "$URUQUIM_POLICY" || true)"
-test "$URUQUIM_POLICY_ROWS" -eq 23 ||
-  fail "the vendor policy lists $URUQUIM_POLICY_ROWS patch dispositions, not the 23 patches that ship. A patch with no recorded disposition is one nobody knows whether to re-apply."
+# The policy's disposition table and the vendored sources must agree, or one of
+# them has drifted and nobody can tell which.
+#
+# DERIVED, NOT PINNED (Closure C-01). This test used to assert a literal count,
+# which meant every new patch edited the gate to say a bigger number — a gate
+# rewritten by the change it is supposed to judge tests nothing. Two derived
+# invariants replace it, and neither needs touching when a patch is added:
+#
+#   a. the disposition table is a contiguous 1..N with no duplicate and no gap
+#      — a removed row cannot hide behind a renumbering;
+#   b. every NUMBERED marker in the vendored sources has a row in that table —
+#      a patch applied without a disposition is one nobody knows whether to
+#      re-apply. (Patches 1-5 predate numbered markers and carry the
+#      `URUQUIM PATCH (WP9 D…)` form, so the source side is checked as a
+#      subset, never as an equality.)
+URUQUIM_POLICY_NUMS="$(grep -oE '^\| [0-9]+ \| .* \| .* \| \*\*(OFFER UPSTREAM|CARRY|APPEARS FIXED UPSTREAM)' "$URUQUIM_POLICY" |
+  awk -F'|' '{gsub(/ /, "", $2); print $2}' | sort -n)"
+URUQUIM_POLICY_ROWS="$(printf '%s\n' "$URUQUIM_POLICY_NUMS" | grep -c . || true)"
+test "$URUQUIM_POLICY_ROWS" -gt 0 ||
+  fail "the vendor policy carries no patch dispositions at all"
+if ! diff <(printf '%s\n' "$URUQUIM_POLICY_NUMS") <(seq 1 "$URUQUIM_POLICY_ROWS") >/dev/null; then
+  fail "the vendor policy's patch numbers are not exactly 1..$URUQUIM_POLICY_ROWS (duplicate, gap or removed row)"
+fi
+
+URUQUIM_SRC_NUMS="$(grep -rhoE 'URUQUIM PATCH [0-9]+' "$URUQUIM_ROOT"/vendor/odin-http/*.odin |
+  awk '{print $3}' | sort -n -u)"
+test -n "$URUQUIM_SRC_NUMS" ||
+  fail "no numbered 'URUQUIM PATCH N' marker was found in the vendored sources; a divergence that is not marked at its site cannot be re-applied"
+for URUQUIM_N in $URUQUIM_SRC_NUMS; do
+  test "$URUQUIM_N" -le "$URUQUIM_POLICY_ROWS" ||
+    fail "the vendored sources mark patch $URUQUIM_N but the policy's disposition table stops at $URUQUIM_POLICY_ROWS. A patch with no recorded disposition is one nobody knows whether to re-apply."
+done
 
 URUQUIM_PATCH_MARKS="$(grep -rc 'URUQUIM PATCH' "$URUQUIM_ROOT"/vendor/odin-http/*.odin 2>/dev/null | awk -F: '{s+=$2} END {print s+0}')"
 test "$URUQUIM_PATCH_MARKS" -gt 0 ||

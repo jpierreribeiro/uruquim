@@ -257,13 +257,19 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	// The runtime travels WITH the handler through the backend's own
 	// `user_data`, rather than beside it in a package global.
 	handler := runtime_handler(&runtime)
-	http.serve(&s, handler)
+	// Closure H-2 follow-up (F-C03-2 / patch 30): a lane that could not acquire
+	// its io_uring event loop now unwinds and `serve` returns an error rather
+	// than the process terminating. Surface it as a clean serve failure.
+	serve_err := http.serve(&s, handler)
 
 	sync.lock(&g_server.mutex)
 	g_server.server = nil
 	g_server.streams = nil
 	g_server.admission = nil
 	sync.unlock(&g_server.mutex)
+	if serve_err != nil {
+		return .Listen_Failed
+	}
 	return .None
 }
 
@@ -281,6 +287,33 @@ _refused_connections :: proc() -> int {
 		return 0
 	}
 	return sync.atomic_load(&server.refused_total)
+}
+
+// _server_stats reads every write-side counter under the one lock, so the eight
+// numbers are a coherent snapshot rather than eight independently-timed reads.
+// Through `g_server`, like `_refused_connections`, and zero when no server runs.
+@(private)
+_server_stats :: proc() -> Server_Stats {
+	sync.lock(&g_server.mutex)
+	defer sync.unlock(&g_server.mutex)
+	server := g_server.server
+	if server == nil {
+		return Server_Stats{}
+	}
+	out := Server_Stats {
+		refused_connections   = sync.atomic_load(&server.refused_total),
+		responses_sent        = sync.atomic_load(&server.responses_sent),
+		response_bytes        = sync.atomic_load(&server.response_bytes),
+		send_errors           = sync.atomic_load(&server.send_errors),
+		write_deadline_aborts = sync.atomic_load(&server.write_deadline_aborts),
+	}
+	if g_server.streams != nil {
+		c := stream.counters(g_server.streams)
+		out.stream_refused_full = c.refused_stream_full
+		out.stream_refused_budget = c.refused_budget_full
+		out.stream_aborted_slow = c.aborted_slow
+	}
+	return out
 }
 
 // request_stop asks the running server to stop. Idempotent and thread-safe: the
@@ -532,6 +565,18 @@ dispatch_exchange :: proc(exchange: ^Exchange) {
 		// is still valid, exactly as a load-shedding proxy would, and let the
 		// client retry.
 		http.headers_set_close(&res.headers)
+		// Closure H-4 — a 503 without `Retry-After` invites an immediate retry,
+		// and an immediate retry onto a contended lane pool collides again: the
+		// refusal that told the client "not now" said nothing about "when", so
+		// "when" becomes "right now", which is exactly the moment the lane is
+		// still busy. RFC 7231 §7.1.3 defines the header for precisely this
+		// load-shed case. One second is the smallest honest hint — the dwell of
+		// a synchronous handler is the thing being waited out, and a client that
+		// backs off a whole second is a client that stops adding to the
+		// collision it just met. It is a hint, not a contract: `web.stop` and a
+		// real overload may both outlast it, and the client is free to apply its
+		// own backoff on top.
+		http.headers_set(&res.headers, "Retry-After", "1")
 		res.status = http.Status.Service_Unavailable
 		http.respond(res)
 		return

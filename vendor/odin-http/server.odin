@@ -182,12 +182,28 @@ Server :: struct {
 	// this server started. Written by every lane and read by the adapter, so the
 	// total is atomic; the lane-local transition counter below needs no sharing.
 	refused_total:  int,
+	// URUQUIM PATCH 28 (Closure H-3) — BRIDGE. The write-side counters behind
+	// `web.Server_Stats`. Server-wide, written by every lane through
+	// `sync.atomic_add` and read by the adapter without a request in hand — the
+	// same discipline as `refused_total`. Each is a running total for the life of
+	// the server (WP50's counter shape: a scraper differences it), carries no
+	// request-derived byte, and exists because an operator cannot size or trust a
+	// deployment whose only visible number is refused connections. Deletable with
+	// the vendored backend when `core:net/http` lands.
+	responses_sent:       int, // buffered responses whose send completed without error
+	response_bytes:       i64, // bytes handed to the socket for those responses
+	send_errors:          int, // buffered-response sends that completed with an error
+	write_deadline_aborts:int, // connections aborted by the sweep's write-deadline branch
 	// Once the server starts closing/shutdown this is set to true, all threads will check it
 	// and start their thread local shutdown procedure.
 	//
 	// URUQUIM PATCH 12 (WP70) — BRIDGE. The false-to-true transition also elects
 	// the single shutdown owner; repeated callers return before touching lanes.
 	closing:        Atomic(bool),
+	// URUQUIM PATCH 30 (Closure H-2 follow-up / F-C03-2) — set by a lane that
+	// could not acquire its io_uring event loop, so `serve` returns an error
+	// instead of the process terminating. See `_server_thread_init`.
+	init_failed:    Atomic(bool),
 	// Threads will decrement the wait group when they have fully closed/shutdown.
 	// The main thread waits on this to clean up global data and return.
 	threads_closed: sync.Wait_Group,
@@ -258,8 +274,31 @@ listen :: proc(
 	// max_free_blocks_queued = int(s.opts.max_free_blocks_queued)
 
 	acquire_err := nbio.acquire_thread_event_loop()
-	// TODO: error handling.
-	assert(acquire_err == nil)
+	// URUQUIM PATCH 29+30 (Closure H-2 / F-C03-2) — HANDLE the acquire failure
+	// gracefully; do not assert on it.
+	//
+	// WHAT THIS IS. `acquire_thread_event_loop` sets up the thread's `io_uring`
+	// rings, which PIN memory against `RLIMIT_MEMLOCK`. On the pinned `nbio` the
+	// failure is sticky per thread (`_tls_event_loop.err`), and upstream's
+	// `assert(err == nil)` — the "TODO: error handling" it never did — turned a
+	// resource failure into a bare assertion the test runner surfaced as a
+	// `Segmentation_Fault` at server startup. That is F-C03-2, reproduced under
+	// ASan on a host with `ulimit -l` = 8 MiB.
+	//
+	// PATCH 29 named the cause; PATCH 30 UNWINDS it: `listen` now returns a
+	// `net.Listen_Error` (the adapter maps any listen error to a clean
+	// `web.serve` failure a supervisor restarts), and logs the actionable
+	// remedy. The process no longer terminates on a resource shortfall at
+	// startup — the outcome an operator can handle instead of a crash.
+	if acquire_err != nil {
+		log.errorf(
+			"uruquim: could not acquire the io_uring event loop (%v). This is typically RLIMIT_MEMLOCK (ulimit -l) or memory exhaustion — one event loop is set up per Handler lane per server, so raise the locked-memory limit, lower max_handlers, or run fewer concurrent servers. (F-C03-2)",
+			acquire_err,
+		)
+		// Not enough space in internal tables/buffers to create a socket's
+		// event loop — the semantic Odin's own listen path uses for this class.
+		return net.Listen_Error.Insufficient_Resources
+	}
 
 	s.tcp_sock, err = nbio.listen_tcp(endpoint)
 	if err != nil {
@@ -296,6 +335,14 @@ serve :: proc(s: ^Server, h: Handler) -> (err: net.Network_Error) {
 	for t in s.threads[1:] { thread.destroy(t.thread) }
 	delete(s.threads)
 
+	// URUQUIM PATCH 30 (Closure H-2 follow-up / F-C03-2) — a lane that could not
+	// acquire its event loop unwound cleanly and flagged this; report it so
+	// `web.serve` fails with a supervisor-restartable error instead of the
+	// process having terminated.
+	if atomic_load(&s.init_failed) {
+		return net.Listen_Error.Insufficient_Resources
+	}
+
 	return nil
 }
 
@@ -317,8 +364,26 @@ _server_thread_init :: proc(s: ^Server, ttd: ^Server_Thread) {
 
 	if td != &s.threads[0] {
 		err := nbio.acquire_thread_event_loop()
-		// TODO: error handling.
-		assert(err == nil)
+		// URUQUIM PATCH 29+30 (Closure H-2 / F-C03-2) — the lane-thread twin of
+		// the graceful acquire handling in `listen`; same cause
+		// (RLIMIT_MEMLOCK / memory). Instead of asserting, this lane UNWINDS: it
+		// flags the failure so `serve` returns an error, elects the shutdown so
+		// the already-running lanes exit (the wake loop is nil-safe, so peers
+		// still racing through init are handled), releases what this init
+		// allocated, signals the wait group, and returns WITHOUT ever touching a
+		// loop it does not have.
+		if err != nil {
+			log.errorf(
+				"uruquim: a Handler lane could not acquire its io_uring event loop (%v). This is typically RLIMIT_MEMLOCK (ulimit -l) or memory exhaustion — raise the locked-memory limit or lower max_handlers. (F-C03-2)",
+				err,
+			)
+			atomic_store(&s.init_failed, true)
+			server_shutdown(s)
+			delete(td.conns)
+			td.state = .Closed
+			sync.wait_group_done(&s.threads_closed)
+			return
+		}
 	}
 
 	td.event_loop = nbio.current_thread_event_loop()
@@ -380,7 +445,16 @@ server_shutdown :: proc(s: ^Server) {
 		return
 	}
 	for t in s.threads {
-		nbio.wake_up(t.event_loop)
+		// URUQUIM PATCH 30 (Closure H-2 follow-up) — a lane that has not yet
+		// reached `td.event_loop = current_thread_event_loop()` (still
+		// initializing, or one that FAILED to acquire and returned) has a nil
+		// loop; waking nil crashes. Skip it: an uninitialized lane will observe
+		// `closing` when it reaches its own loop, and a failed lane is already
+		// gone. This makes `server_shutdown` safe to call from a lane whose peers
+		// are still racing through init — which the init-failure unwind does.
+		if t.event_loop != nil {
+			nbio.wake_up(t.event_loop)
+		}
 	}
 }
 
@@ -431,7 +505,43 @@ _server_thread_shutdown :: proc(s: ^Server, loc := #caller_location) {
 
 		for sock, conn in td.conns {
 			#partial switch conn.state {
-			case .Active:
+			// URUQUIM PATCH 26 (Closure C-03 / F-C03-1) — `.Will_Close` BELONGS
+			// HERE, and its absence made `max_drain_time` bound nothing.
+			//
+			// THE DEFECT. This `#partial switch` named six of the seven
+			// `Connection_State` members. The one it omitted, `.Will_Close`, is
+			// the state a connection enters the moment the server decides to
+			// retire it after the current response — which `response_must_close`
+			// does for every request carrying `Connection: close`, for every
+			// HTTP/1.0 request, and after a failed body read. An omitted case in
+			// a `#partial switch` is silence, not a compile error: such a
+			// connection was neither closed nor logged, it simply stayed in
+			// `td.conns`. `len(td.conns)` therefore never reached zero and the
+			// loop below never broke — FOREVER, past every deadline, because the
+			// force-close was reachable only through the `.Active` arm.
+			//
+			// MEASURED (C-03 cell D8, and it is a one-line reproduction): one
+			// client sends `GET /big HTTP/1.1` with `Connection: close`, does not
+			// read the 8 MiB response, and `web.stop` never returns — 8 s, 10 s,
+			// any bound the test cared to wait. Remove the `Connection: close`
+			// header and the identical scenario shuts down in 1.1 s. The write
+			// deadline was irrelevant (it fails with the deadline off too) and so
+			// was the drain deadline's value (500 ms and 2 s fail alike).
+			//
+			// WHY IT MATTERS MORE THAN IT LOOKS. `max_drain_time` is documented
+			// as the ABSOLUTE bound on shutdown — the comment forty lines above
+			// says it covers all three waits, and `docs/operations.md` tells
+			// operators to keep it inside their supervisor's `TimeoutStopSec`.
+			// This made that promise false for the most ordinary client there
+			// is: `curl` on a large download interrupted at the terminal sends
+			// exactly this shape. The only remaining exit was the supervisor's
+			// SIGKILL, which is the failure mode a drain deadline exists to
+			// prevent.
+			//
+			// `.Will_Close` is treated exactly as `.Active` because it IS an
+			// in-flight response: allowed to finish before the deadline, force-
+			// closed after it. That is the same trade the `.Active` arm makes.
+			case .Active, .Will_Close:
 				// PAST THE DEADLINE, "still active" stops being a reason to
 				// wait. Before it, this is upstream's behaviour unchanged: an
 				// in-flight request is allowed to finish, which is the whole
@@ -612,6 +722,12 @@ Connection :: struct {
 	// in flight. Stamped in `clean_request_loop` on the keep-alive path,
 	// cleared when the next request's bytes arrive (`on_rline1`).
 	idle_since:      time.Time,
+	// URUQUIM PATCH 25 (Closure C-03) — the peer has already gone: the last
+	// `recv` reported an orderly FIN (`received == 0`) or a reset
+	// (`Connection_Closed`). Set by `scanner_on_read`, read by
+	// `connection_close` to skip a politeness delay owed to nobody. See the
+	// note there for what it fixes and why it is safe.
+	peer_gone:       bool,
 }
 
 // Loop/request cycle state.
@@ -634,6 +750,11 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 	log.debugf("closing connection: %i", c.socket)
 
 	c.state = .Closing
+
+	// URUQUIM PATCH 25 (Closure C-03) — captured BEFORE the cancels below null
+	// it, because whether a response was in flight decides how this connection
+	// may end.
+	had_send_in_flight := c.pending_send != nil
 
 	// URUQUIM PATCH 10 (WP59) — BRIDGE. Cancel the outstanding `recv` before
 	// anything below frees the connection it points at.
@@ -665,6 +786,48 @@ connection_close :: proc(c: ^Connection, loc := #caller_location) {
 	if c.pending_send != nil {
 		nbio.remove(c.pending_send)
 		c.pending_send = nil
+	}
+
+	// URUQUIM PATCH 25 (Closure C-03) — THE LINGER IS A COURTESY, AND A PEER
+	// THAT IS ALREADY GONE IS OWED NONE.
+	//
+	// THE DEFECT IT FIXES. `docs/reports/2026-07-23-security-f001-f002.md`
+	// recorded, as out of scope, that "under a SUSTAINED RST flood the server
+	// stops accepting (all threads alive, listen backlog fills, no crash)".
+	// C-03 reproduced it and the measurement named the mechanism, which is not
+	// the accept path at all: a healthy client's `connect` kept succeeding
+	// throughout (`connect_fail=0`), and what it met was the ADMISSION
+	// REFUSAL — 1 probe served out of 59.
+	//
+	// The cause is here. `active_connections` is decremented in
+	// `connection_teardown`, at the END of this chain, so a connection whose
+	// peer has already sent RST still occupies one of
+	// `max_connections - reserved_connections` slots for the whole
+	// `Conn_Close_Delay`. At 500 ms a flood only has to open connections faster
+	// than `budget / 500 ms` — 120/s against the lab's 60 slots — to make every
+	// later client meet the refusal. The measured flood ran at ~39,900/s, which
+	// is a 300-fold oversubscription of the budget by connections that are
+	// waiting out a politeness delay owed to a peer that has gone.
+	//
+	// WHY SKIPPING IT IS SAFE, and the two conditions are both necessary:
+	//
+	//   * `peer_gone` means the last `recv` reported an orderly FIN or a reset.
+	//     No further byte can arrive, and nothing this server writes can be
+	//     read. RFC 7230 6.6's advice — close the read side, pause, then close
+	//     — protects a client still draining a response; there is no such
+	//     client here.
+	//   * `!had_send_in_flight` keeps the courteous path for the case that
+	//     actually needs it. If a response was outstanding when this close
+	//     began, the connection ends the way it always did.
+	//
+	// Note that the delay was never what flushed the response: a plain `close`
+	// (no SO_LINGER) returns at once and the kernel keeps sending what is
+	// buffered. That is why this is a scheduling fix and not a wire change —
+	// and why it is deliberately NOT the `connection_abort` path, which sets
+	// SO_LINGER {1,0} to DISCARD the tail. Nothing is discarded here.
+	if c.peer_gone && !had_send_in_flight {
+		nbio.close_poly(c.socket, c, connection_teardown)
+		return
 	}
 
 	// RFC 7230 6.6.
@@ -755,8 +918,20 @@ on_accept :: proc(op: ^nbio.Operation, server: ^Server) {
 		#partial switch op.accept.err {
 		case .Insufficient_Resources:
 			log.error("Connection limit reached, trying again in a bit")
+			// URUQUIM PATCH 24 (C-01 / F-C01-1) — the same guard the transient
+			// branch below carries, and for the same reason. `on_accept`
+			// cleared `td.accept` on entry, so within this second the lane can
+			// service a request it had already read and `handler_lane_leave`
+			// arms a NEW accept. An unguarded re-arm here overwrites that
+			// handle: the earlier operation becomes unreachable, survives
+			// `nbio.remove(td.accept)` at shutdown, and keeps `num_waiting()`
+			// above zero — the WP58/WP59 pending-`recv` hang, on the accept
+			// path, reached exactly when fds are exhausted and an operator is
+			// restarting the process.
 			nbio.timeout_poly(time.Second, server, proc(_: ^nbio.Operation, server: ^Server) {
-				td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+				if td.accept == nil && !td.handler_active {
+					td.accept = nbio.accept_poly(server.tcp_sock, server, on_accept)
+				}
 			})
 			return
 		}
@@ -877,16 +1052,61 @@ handler_lane_enter :: proc(res: ^Response, loc := #caller_location) -> bool {
 		nbio.detach(target)
 		nbio.remove(target)
 		td.accept = nil
+		// URUQUIM PATCH 27 (Closure C-05 / F-C05-1) — THIS WAIT IS BOUNDED NOW,
+		// and the bound is the difference between a slow shutdown and one that
+		// never happens.
+		//
+		// WHAT IT WAS. `for target.accept.client == 0 && target.accept.err == nil`
+		// with no cap and no deadline. C-01 inventoried it (F-C01-3) and
+		// classified it as an acceptable limitation on the reasoning that
+		// `io_uring` always delivers a completion for a cancelled submission, so
+		// the loop must terminate. **The measurement contradicted the
+		// reasoning.** C-05's saturation lab wedges here reproducibly — roughly
+		// one run in three at 48 concurrent clients against a synchronous
+		// handler — and the wedge is total: `web.stop` did not return in SIXTY
+		// seconds against a three-second `max_drain_time`.
+		//
+		// WHY A STUCK LANE STOPS THE WHOLE SERVER. This spin runs on the lane
+		// thread, so a lane parked in it never returns to its event loop, never
+		// observes `s.closing`, and never calls `_server_thread_shutdown`.
+		// `serve` waits on `threads_closed` for EVERY lane, so one lane in here
+		// is a process that cannot be stopped — past `max_drain_time`, which
+		// bounds the drain and cannot bound a lane that never reaches it.
+		//
+		// WHY GIVING UP IS SAFE, and why it does NOT reattach. `nbio.remove` has
+		// already guaranteed the callback will never run, so abandoning the wait
+		// cannot resurrect a request. What the wait was FOR is the narrow case
+		// where the accept won the race and holds a connected client that would
+		// otherwise vanish — worth waiting for, not worth waiting forever for.
+		// On expiry the operation record stays DETACHED rather than being
+		// returned to the pool: reattaching a record whose completion may still
+		// arrive would hand the pool an entry the kernel can still write to,
+		// which trades a wedge for a use-after-free. One leaked `Operation` per
+		// occurrence is the correct price.
+		HANDLER_ACCEPT_CANCEL_WAIT :: 250 * time.Millisecond
+		cancel_deadline := time.time_add(time.now(), HANDLER_ACCEPT_CANCEL_WAIT)
+		cancel_observed := true
 		for target.accept.client == 0 && target.accept.err == nil {
+			if time.since(cancel_deadline) >= 0 {
+				cancel_observed = false
+				break
+			}
 			_ = nbio.tick(time.Millisecond)
 		}
-		if target.accept.client != 0 {
-			// The accept won the cancellation race. Preserve it instead of silently
-			// dropping a connected client; `handler_active` keeps on_accept from
-			// rearming this lane.
-			on_accept(target, server)
+		if !cancel_observed {
+			log.warnf(
+				"uruquim: accept cancellation not observed within %v; abandoning the wait (the operation stays detached)",
+				HANDLER_ACCEPT_CANCEL_WAIT,
+			)
+		} else {
+			if target.accept.client != 0 {
+				// The accept won the cancellation race. Preserve it instead of
+				// silently dropping a connected client; `handler_active` keeps
+				// on_accept from rearming this lane.
+				on_accept(target, server)
+			}
+			nbio.reattach(target)
 		}
-		nbio.reattach(target)
 	}
 	return true
 }
@@ -1151,6 +1371,10 @@ server_deadline_sweep :: proc(_: ^nbio.Operation, s: ^Server) {
 			if effective_write > 0 && conn.send_started != (time.Time{}) &&
 			   time.diff(conn.send_started, now) > effective_write {
 				log.infof("uruquim: response write deadline exceeded; aborting connection %i", conn.socket)
+				// URUQUIM PATCH 28 (Closure H-3) — a write-deadline abort is the
+				// one send outcome an operator most needs to see: a slow reader
+				// being cut off. Counted here, on the owning lane.
+				_ = sync.atomic_add(&s.write_deadline_aborts, 1)
 				// Abort, not close: a graceful close would flush kernel
 				// buffers to the slow reader first — see `connection_abort`.
 				connection_abort(conn)
