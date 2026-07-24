@@ -229,10 +229,12 @@ same trade the `.Active` arm already makes.
 
 ---
 
-## 2c. F-C03-2 — the real-socket suites crash at a low rate under gate load — DIAGNOSED (Hardening H-2)
+## 2c. F-C03-2 — the real-socket suites crash at a low rate under gate load — RESOLVED (Hardening H-2)
 
-**CLASSIFICATION: defect. Not closed by C-03; DIAGNOSED by H-2 (vendored patch
-29), with the graceful-unwind fix specified as a follow-up.**
+**CLASSIFICATION: defect. Not closed by C-03; DIAGNOSED and FIXED by H-2
+(vendored patches 29 + 30). The graceful-unwind fix that was specified as a
+follow-up is done and verified — a failed event-loop acquire now makes
+`web.serve` fail cleanly instead of terminating the process.**
 
 > **UPDATE (Hardening H-2, 2026-07-24).** The instrument this section asked for —
 > an ASan build on a constrained host — reproduced it and named the cause. On a

@@ -72,7 +72,21 @@ Per §3 of the plan, a classified **acceptable operational limitation** does not
 block the verdict; an **unclassified cell** or a **blocking absence** does.
 There are none of the latter two. What remains:
 
-### 3.1 One DEFECT — DIAGNOSED by H-2, one half fixed and one half specified
+### 3.1 The one DEFECT — DIAGNOSED and FIXED by H-2 (patches 29 + 30)
+
+> **RESOLVED (Hardening H-2, 2026-07-24).** F-C03-2 is no longer open. Patch 29
+> diagnosed it (below); **patch 30 fixed it**: a server that cannot acquire its
+> io_uring event loop now UNWINDS — `web.serve` returns / reports
+> `Serve_Listen_Failed` instead of the process terminating. Verified on the VPS
+> under kernel 7.0 with a forced 16 KiB memlock — the exact condition that
+> aborted at the acquire assertion before the patch (`Allocation_Failed`,
+> `server.odin:360`) now returns cleanly and `tests/h2-graceful-acquire`
+> survives to its final assertion. What is left is **monitoring, not a defect**:
+> confirming the dev-box gate flake is gone across many runs, since the fix
+> addresses the diagnosed mechanism (the acquire) and the flake matched exactly
+> that signature. The record below is kept as the history of how it was found.
+
+**The original open-defect record:
 
 **F-C03-2 — the real-socket suites crash at a low rate under gate load.** At the
 Closure freeze this was unexplained: two observations against fourteen green
@@ -106,10 +120,11 @@ and it is specified as a follow-up rather than rushed:
 > deployment where a transient event-loop setup failure must not take the
 > process down.
 
-This remains the one item that would make a reader hesitate — the *crash* is
-diagnosed and made actionable, but the *graceful* handling is future work. It
-still does not violate the exit condition: no operation lacks an owner because
-of it.
+**This is no longer an open item.** The graceful handling that the box above
+called future work is patch 30, done and verified (see the RESOLVED note at the
+top of §3.1). The crash is diagnosed, made actionable, AND converted to a clean
+`web.serve` failure. What remains is monitoring — confirming the dev-box gate
+flake stays gone — not a defect.
 
 ### 3.2 Acceptable operational limitations, delegated with a mandatory topology
 
@@ -155,9 +170,13 @@ Deferred work here means *a specification handed forward*, not an open question.
 > lacks a declared owner, capacity, deadline or cancellation, and every
 > delegation names a topology that is mandatory, documented and now tested.
 >
-> **The one thing standing between this and an unqualified verdict is F-C03-2**,
-> an unexplained low-rate crash under gate load. It is a defect with a
-> reproduction rate and a named instrument, not an unknown.
+> **The one item that qualified this verdict — F-C03-2 — is now RESOLVED.** The
+> Hardening phase diagnosed it (an io_uring event-loop setup failure against
+> `RLIMIT_MEMLOCK`, patch 29) and fixed it (a graceful `web.serve` failure
+> instead of a process crash, patch 30), verified on the VPS where it reproduced.
+> What remains is monitoring the gate flake, not an open defect. The controlled-
+> pilot posture stands on its topology requirements (proxy, supervisor, cgroup,
+> the two enabled deadlines), not on an unexplained crash.
 
 **What changed the verdict from the 2026-07-23 audit's "controlled pilot" is not
 the label but its basis.** That audit reached the same words from a review of

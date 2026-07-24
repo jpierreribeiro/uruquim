@@ -60,6 +60,14 @@ memory. The crash is now actionable. The graceful serve-failure unwind (return
 an error from `web.serve` rather than terminate) is specified as a follow-up in
 `planning/closure-record-and-verdict.md` §3.1.
 
+**FIX VERIFIED (patch 30).** The graceful unwind — `web.serve` returning /
+reporting `Serve_Listen_Failed` instead of the process terminating — was proven
+on this host: `tests/h2-graceful-acquire` forces `RLIMIT_MEMLOCK` to 16 KiB (the
+condition that aborted at `server.odin:360` before the patch) and the test
+SURVIVES to its final assertion, which is only possible if `web.serve` returned
+rather than crashing. So F-C03-2 is not just diagnosed but fixed: a startup
+resource shortfall is now a supervisor-restartable error.
+
 **Operational consequence for THIS host:** raise memlock before running the
 socket suites or any many-lane workload —
 `bash -c 'ulimit -l unlimited; …'` (root can) or size `max_handlers` down.

@@ -54,11 +54,16 @@ grep -qi 'No framework-owned operation exists without an explicitly declared own
 grep -qi 'named, mandatory, documented and tested' <<<"$URUQUIM_FLAT" ||
   fail "the exit condition's second half — that an unbounded or external thing must have a topology that is named, mandatory, documented AND TESTED — is gone"
 
-# --- 3. The residual is still named ------------------------------------------
+# --- 3. F-C03-2 is still named, and its RESOLUTION is recorded ----------------
+# It began as the one open defect; Hardening H-2 (patches 29+30) diagnosed and
+# fixed it. The verdict must keep naming it AND record how it was closed — a
+# resolved defect quietly dropped is as misleading as an open one hidden.
 grep -q 'F-C03-2' "$URUQUIM_DOC" ||
-  fail "F-C03-2 is no longer named in the verdict. It is an OPEN defect — an unexplained low-rate crash under gate load — and a record that drops it turns a QUALIFIED verdict into a false one."
-grep -qi 'not closed' <<<"$URUQUIM_FLAT" ||
-  fail "the verdict no longer states that its one residual defect is unclosed"
+  fail "F-C03-2 is no longer named in the verdict. It was the one open defect and is now resolved by H-2 (patches 29+30); a record that drops it — open or closed — turns a verdict into a claim."
+grep -qi 'patch 30' <<<"$URUQUIM_FLAT" ||
+  fail "the verdict no longer records that F-C03-2 was FIXED by patch 30 (the graceful serve-failure unwind). Its diagnosis-and-fix is the phase's headline; dropping it loses the resolution."
+grep -qi 'graceful' <<<"$URUQUIM_FLAT" ||
+  fail "the verdict no longer describes the graceful unwind that closed F-C03-2"
 
 # --- 4. Every deferral carries a trigger -------------------------------------
 for URUQUIM_DEFERRAL in max_response_bytes Server_Stats 'real-proxy' 'hours-long' radix_compact; do
@@ -74,5 +79,5 @@ grep -qi 'rests on reasoning rather than on a test is not answered' <<<"$URUQUIM
 
 echo "c07: all 7 Closure artifacts exist, are cited, and are wired into the full gate"
 echo "c07: the exit condition is quoted verbatim and judged"
-echo "c07: the one open defect (F-C03-2) is still named; every deferral still carries a trigger"
+echo "c07: F-C03-2 is named and recorded RESOLVED (patches 29+30); every deferral still carries a trigger"
 echo "PASS: C-07 Closure record and verdict controls"
