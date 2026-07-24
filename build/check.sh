@@ -82,6 +82,7 @@ bash -n "$URUQUIM_ROOT/build/check_c01_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_readiness_matrix.sh"
 bash -n "$URUQUIM_ROOT/build/check_c03_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_c04_controls.sh"
+bash -n "$URUQUIM_ROOT/build/check_c08_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp68_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp70_controls.sh"
 bash -n "$URUQUIM_ROOT/build/check_wp71_controls.sh"
@@ -1155,6 +1156,15 @@ timeout 300 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
 echo "--- C-04 response size and memory retention: the two-phase soak ---"
 timeout 180 env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
   bash "$URUQUIM_ROOT/build/check_c04_controls.sh"
+
+# C-08 (Closure) — the httprouter comparative corpus. It runs in the gate for
+# two reasons that have nothing to do with performance: the BSD-3 attribution
+# must survive, and the corpus is NEGATIVE — each case pins a deliberate
+# difference from httprouter, so losing one silently permits a regression toward
+# semantics this project refused on security grounds.
+echo "--- C-08 httprouter negative corpus: precedence, no path correction, no catch-all ---"
+env URUQUIM_COMPILER="$URUQUIM_COMPILER" \
+  bash "$URUQUIM_ROOT/build/check_c08_controls.sh"
 
 # WP51 — the vendor maintenance policy. It runs in the gate because it is the
 # PRECONDITION for WP46: a patch that predates the policy governing patches is
