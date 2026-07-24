@@ -80,7 +80,9 @@ work regardless of who wrote the fix.
 
 | 28 | Write-side counters on the backend `Server` — responses sent, bytes on the wire, send errors, write-deadline aborts — incremented in `on_response_sent` and the sweep's abort branch, read by the adapter for `web.Server_Stats` (Closure H-3) | **No** — upstream has no such accounting; observability of the send side is Uruquim's operational contract, the twin of patch 12's `refused_total` on the admission side | **CARRY AS BRIDGE.** Deletable with the vendored backend when `core:net/http` lands; the official adapter must expose an equivalent, or `web.stats` loses its source |
 
-**Sixteen of twenty-eight are or contain upstream bugs; the rest are deliberate divergences.** WP70's
+| 29 | The two `acquire_thread_event_loop` sites (`listen`, `_server_thread_init`) DIAGNOSE a failed acquire — naming RLIMIT_MEMLOCK / memory exhaustion — instead of a bare `assert(err == nil)` with no message (Closure H-2 / F-C03-2) | **Yes** — upstream's own deferred-error-handling comment left the setup of the `io_uring` rings asserted, so a resource failure (the rings pin memory against `ulimit -l`) crashed the process at startup with a signal the test runner reported as `Segmentation_Fault`. Reproduced under ASan on a host with 8 MiB memlock and <1 GiB free | **OFFER UPSTREAM.** The graceful unwind — returning an error from `serve` rather than terminating — is the follow-up (a multi-threaded lifecycle change); this patch makes the failure ACTIONABLE, which is orthogonal to Uruquim policy |
+
+**Sixteen of twenty-nine are or contain upstream bugs; the rest are deliberate divergences.** WP70's
 multi-lane lifecycle correction joins the upstream group; WP59's absolute drain
 deadline joins the policy group. The bridge label changes expected lifetime,
 not the evidence or upstream-offer obligation.

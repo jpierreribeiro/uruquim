@@ -229,10 +229,32 @@ same trade the `.Active` arm already makes.
 
 ---
 
-## 2c. F-C03-2 — the real-socket suites crash at a low rate under gate load — OPEN
+## 2c. F-C03-2 — the real-socket suites crash at a low rate under gate load — DIAGNOSED (Hardening H-2)
 
-**CLASSIFICATION: defect, NOT closed by C-03.** Recorded with its reproduction
-rate so it stops being weather.
+**CLASSIFICATION: defect. Not closed by C-03; DIAGNOSED by H-2 (vendored patch
+29), with the graceful-unwind fix specified as a follow-up.**
+
+> **UPDATE (Hardening H-2, 2026-07-24).** The instrument this section asked for —
+> an ASan build on a constrained host — reproduced it and named the cause. On a
+> VPS with `ulimit -l` = 8 MiB and <1 GiB free, `tests/c05-saturation` under
+> `-sanitize:address` aborted with `server.odin:274 runtime assertion:
+> acquire_err == nil` at **server startup**, exactly the signature below. The
+> mechanism: `nbio.acquire_thread_event_loop()` sets up the thread's `io_uring`
+> rings, which **pin memory against `RLIMIT_MEMLOCK`**; one loop is created per
+> Handler lane per server, so under a low memlock budget or memory pressure the
+> setup fails, and upstream's bare `assert(err == nil)` — the deferred error
+> handling it never wrote — turned that resource failure into a startup crash the
+> test runner reports as `Segmentation_Fault`. It "looked random" only because
+> nothing named its cause; the rate tracks how close the host is to its
+> locked-memory limit. **Patch 29** replaces both asserts with a diagnostic that
+> names `RLIMIT_MEMLOCK` / memory and the remedy (raise `ulimit -l`, lower
+> `max_handlers`, or run fewer concurrent servers). **What remains open** is the
+> graceful unwind — returning an error from `web.serve` instead of terminating —
+> which is a multi-threaded lifecycle change across the lane workers and the
+> wait group, specified in `planning/closure-record-and-verdict.md` rather than
+> rushed at the end of the phase.
+
+The original record, kept because its reproduction-rate discipline is the point:
 
 The roadmap handoff records, as standing advice, that *"real-socket suites
 (wp41/wp58/wp67/wp8) segfault under shared-machine load; they pass in isolation

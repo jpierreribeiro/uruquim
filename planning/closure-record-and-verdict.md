@@ -72,20 +72,44 @@ Per §3 of the plan, a classified **acceptable operational limitation** does not
 block the verdict; an **unclassified cell** or a **blocking absence** does.
 There are none of the latter two. What remains:
 
-### 3.1 One open DEFECT — and it is named, not buried
+### 3.1 One DEFECT — DIAGNOSED by H-2, one half fixed and one half specified
 
-**F-C03-2 — the real-socket suites crash at a low rate under gate load.** Two
-observations this session against fourteen green runs; ruled out as a regression
-(green on pristine `origin/main` and on this tree alike); signature is a crash
-inside server *startup*, before a suite's own work begins. It is **not closed**,
-and the standing project advice — re-run — is a workaround with a ticket rather
-than a verdict. **The instrument it needs is named:** an ASan/debug gate build
-with kept core dumps, exactly as the F-002 investigation used.
+**F-C03-2 — the real-socket suites crash at a low rate under gate load.** At the
+Closure freeze this was unexplained: two observations against fourteen green
+runs, ruled out as a regression, signature a crash inside server *startup*. The
+verdict named the instrument it needed — an ASan build on a constrained host —
+and **Hardening H-2 ran it and got the diagnosis.**
 
-This is the one item that would make a reader hesitate, and it should. It does
-not violate the exit condition — no operation lacks an owner because of it — but
-it is an unexplained crash in a project that has just proven the value of not
-accepting explanations without tests.
+**The cause.** `nbio.acquire_thread_event_loop()` sets up the thread's `io_uring`
+rings, which pin memory against `RLIMIT_MEMLOCK`. One loop is created per Handler
+lane per server, so under a low memlock budget or memory pressure the setup
+fails — and the vendored server *asserted* on it (the deferred error handling
+upstream never wrote), turning a resource failure into a startup crash the runner
+reports as `Segmentation_Fault`. Reproduced deterministically on a VPS with
+`ulimit -l` = 8 MiB and <1 GiB free, under `-sanitize:address`. It looked random
+only because nothing named its cause; the rate tracks proximity to the
+locked-memory limit.
+
+**What is fixed, and what is still open.** Vendored **patch 29** replaces both
+bare asserts with a diagnostic naming `RLIMIT_MEMLOCK` / memory and the remedy —
+so the crash is now actionable rather than mysterious. **The graceful unwind is
+NOT closed:** returning an error from `web.serve` instead of terminating is a
+multi-threaded lifecycle change across the lane workers and `serve`'s wait group,
+and it is specified as a follow-up rather than rushed:
+
+> **Follow-up (specified, not done): graceful serve-failure on event-loop
+> acquisition.** On a failed `acquire_thread_event_loop`, `_server_thread_init`
+> should mark the server failed, signal `threads_closed` for its lane, and
+> return, so `serve`'s `sync.wait` completes and `web.serve` returns a
+> `Listen_Failed`-class error — a clean, supervisor-restartable outcome instead
+> of process termination. Trigger to promote it from follow-up to required: any
+> deployment where a transient event-loop setup failure must not take the
+> process down.
+
+This remains the one item that would make a reader hesitate — the *crash* is
+diagnosed and made actionable, but the *graceful* handling is future work. It
+still does not violate the exit condition: no operation lacks an owner because
+of it.
 
 ### 3.2 Acceptable operational limitations, delegated with a mandatory topology
 
