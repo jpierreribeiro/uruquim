@@ -257,13 +257,19 @@ serve :: proc(cfg: Config) -> Serve_Error {
 	// The runtime travels WITH the handler through the backend's own
 	// `user_data`, rather than beside it in a package global.
 	handler := runtime_handler(&runtime)
-	http.serve(&s, handler)
+	// Closure H-2 follow-up (F-C03-2 / patch 30): a lane that could not acquire
+	// its io_uring event loop now unwinds and `serve` returns an error rather
+	// than the process terminating. Surface it as a clean serve failure.
+	serve_err := http.serve(&s, handler)
 
 	sync.lock(&g_server.mutex)
 	g_server.server = nil
 	g_server.streams = nil
 	g_server.admission = nil
 	sync.unlock(&g_server.mutex)
+	if serve_err != nil {
+		return .Listen_Failed
+	}
 	return .None
 }
 

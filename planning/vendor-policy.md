@@ -82,7 +82,9 @@ work regardless of who wrote the fix.
 
 | 29 | The two `acquire_thread_event_loop` sites (`listen`, `_server_thread_init`) DIAGNOSE a failed acquire — naming RLIMIT_MEMLOCK / memory exhaustion — instead of a bare `assert(err == nil)` with no message (Closure H-2 / F-C03-2) | **Yes** — upstream's own deferred-error-handling comment left the setup of the `io_uring` rings asserted, so a resource failure (the rings pin memory against `ulimit -l`) crashed the process at startup with a signal the test runner reported as `Segmentation_Fault`. Reproduced under ASan on a host with 8 MiB memlock and <1 GiB free | **OFFER UPSTREAM.** The graceful unwind — returning an error from `serve` rather than terminating — is the follow-up (a multi-threaded lifecycle change); this patch makes the failure ACTIONABLE, which is orthogonal to Uruquim policy |
 
-**Sixteen of twenty-nine are or contain upstream bugs; the rest are deliberate divergences.** WP70's
+| 30 | A server that cannot acquire its io_uring event loop UNWINDS GRACEFULLY instead of terminating: `listen` returns `net.Listen_Error.Insufficient_Resources`, a failing lane flags `init_failed` + elects shutdown (the wake loop made nil-safe) + signals the wait group, and `serve` returns the error (Closure H-2 follow-up / F-C03-2) | **Yes** — the completion of patch 29. Upstream asserted the acquire; patch 29 diagnosed it; this returns a supervisor-restartable error from `web.serve` rather than aborting the process on a startup resource shortfall | **OFFER UPSTREAM.** General server-startup robustness — a resource failure at init should be a return value, not a crash — independent of Uruquim policy |
+
+**Sixteen of thirty are or contain upstream bugs; the rest are deliberate divergences.** WP70's
 multi-lane lifecycle correction joins the upstream group; WP59's absolute drain
 deadline joins the policy group. The bridge label changes expected lifetime,
 not the evidence or upstream-offer obligation.

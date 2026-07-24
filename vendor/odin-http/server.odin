@@ -200,6 +200,10 @@ Server :: struct {
 	// URUQUIM PATCH 12 (WP70) — BRIDGE. The false-to-true transition also elects
 	// the single shutdown owner; repeated callers return before touching lanes.
 	closing:        Atomic(bool),
+	// URUQUIM PATCH 30 (Closure H-2 follow-up / F-C03-2) — set by a lane that
+	// could not acquire its io_uring event loop, so `serve` returns an error
+	// instead of the process terminating. See `_server_thread_init`.
+	init_failed:    Atomic(bool),
 	// Threads will decrement the wait group when they have fully closed/shutdown.
 	// The main thread waits on this to clean up global data and return.
 	threads_closed: sync.Wait_Group,
@@ -270,33 +274,31 @@ listen :: proc(
 	// max_free_blocks_queued = int(s.opts.max_free_blocks_queued)
 
 	acquire_err := nbio.acquire_thread_event_loop()
-	// URUQUIM PATCH 29 (Closure H-2 / F-C03-2) — DIAGNOSE the acquire failure
-	// instead of asserting on it with no message.
+	// URUQUIM PATCH 29+30 (Closure H-2 / F-C03-2) — HANDLE the acquire failure
+	// gracefully; do not assert on it.
 	//
 	// WHAT THIS IS. `acquire_thread_event_loop` sets up the thread's `io_uring`
 	// rings, which PIN memory against `RLIMIT_MEMLOCK`. On the pinned `nbio` the
 	// failure is sticky per thread (`_tls_event_loop.err`), and upstream's
 	// `assert(err == nil)` — the "TODO: error handling" it never did — turned a
 	// resource failure into a bare assertion the test runner surfaced as a
-	// `Segmentation_Fault` at server startup. That is F-C03-2: the Closure
-	// recorded it as an unexplained low-rate crash under gate load. C-02's H-2
-	// reproduced it on a memory-constrained host (`ulimit -l` = 8 MiB, <1 GiB
-	// free) under AddressSanitizer, where creating one event loop per lane per
-	// server exhausts the locked-memory budget — so the "random" gate crash is a
-	// resource failure that only looks random because nothing named its cause.
+	// `Segmentation_Fault` at server startup. That is F-C03-2, reproduced under
+	// ASan on a host with `ulimit -l` = 8 MiB.
 	//
-	// WHAT THIS DOES, and what it deliberately does NOT. It replaces the silent
-	// assert with a message an operator can act on. It does NOT yet unwind the
-	// serve cleanly (return an error from `web.serve` instead of terminating) —
-	// that is a multi-threaded lifecycle change across `_server_thread_init`'s
-	// worker lanes and `serve`'s wait group, specified as the follow-up in
-	// `planning/closure-record-and-verdict.md` rather than rushed. The process
-	// still ends on failure; it now ends SAYING WHY.
-	fmt.assertf(
-		acquire_err == nil,
-		"uruquim: could not acquire the io_uring event loop (%v). This is typically RLIMIT_MEMLOCK (ulimit -l) or memory exhaustion — one event loop is set up per Handler lane per server, so raise the locked-memory limit, lower max_handlers, or run fewer concurrent servers. (F-C03-2)",
-		acquire_err,
-	)
+	// PATCH 29 named the cause; PATCH 30 UNWINDS it: `listen` now returns a
+	// `net.Listen_Error` (the adapter maps any listen error to a clean
+	// `web.serve` failure a supervisor restarts), and logs the actionable
+	// remedy. The process no longer terminates on a resource shortfall at
+	// startup — the outcome an operator can handle instead of a crash.
+	if acquire_err != nil {
+		log.errorf(
+			"uruquim: could not acquire the io_uring event loop (%v). This is typically RLIMIT_MEMLOCK (ulimit -l) or memory exhaustion — one event loop is set up per Handler lane per server, so raise the locked-memory limit, lower max_handlers, or run fewer concurrent servers. (F-C03-2)",
+			acquire_err,
+		)
+		// Not enough space in internal tables/buffers to create a socket's
+		// event loop — the semantic Odin's own listen path uses for this class.
+		return net.Listen_Error.Insufficient_Resources
+	}
 
 	s.tcp_sock, err = nbio.listen_tcp(endpoint)
 	if err != nil {
@@ -333,6 +335,14 @@ serve :: proc(s: ^Server, h: Handler) -> (err: net.Network_Error) {
 	for t in s.threads[1:] { thread.destroy(t.thread) }
 	delete(s.threads)
 
+	// URUQUIM PATCH 30 (Closure H-2 follow-up / F-C03-2) — a lane that could not
+	// acquire its event loop unwound cleanly and flagged this; report it so
+	// `web.serve` fails with a supervisor-restartable error instead of the
+	// process having terminated.
+	if atomic_load(&s.init_failed) {
+		return net.Listen_Error.Insufficient_Resources
+	}
+
 	return nil
 }
 
@@ -354,14 +364,26 @@ _server_thread_init :: proc(s: ^Server, ttd: ^Server_Thread) {
 
 	if td != &s.threads[0] {
 		err := nbio.acquire_thread_event_loop()
-		// URUQUIM PATCH 29 (Closure H-2 / F-C03-2) — the lane-thread twin of the
-		// diagnosed acquire in `listen`; same cause (RLIMIT_MEMLOCK / memory),
-		// same message. See the long note there.
-		fmt.assertf(
-			err == nil,
-			"uruquim: a Handler lane could not acquire its io_uring event loop (%v). This is typically RLIMIT_MEMLOCK (ulimit -l) or memory exhaustion — raise the locked-memory limit or lower max_handlers. (F-C03-2)",
-			err,
-		)
+		// URUQUIM PATCH 29+30 (Closure H-2 / F-C03-2) — the lane-thread twin of
+		// the graceful acquire handling in `listen`; same cause
+		// (RLIMIT_MEMLOCK / memory). Instead of asserting, this lane UNWINDS: it
+		// flags the failure so `serve` returns an error, elects the shutdown so
+		// the already-running lanes exit (the wake loop is nil-safe, so peers
+		// still racing through init are handled), releases what this init
+		// allocated, signals the wait group, and returns WITHOUT ever touching a
+		// loop it does not have.
+		if err != nil {
+			log.errorf(
+				"uruquim: a Handler lane could not acquire its io_uring event loop (%v). This is typically RLIMIT_MEMLOCK (ulimit -l) or memory exhaustion — raise the locked-memory limit or lower max_handlers. (F-C03-2)",
+				err,
+			)
+			atomic_store(&s.init_failed, true)
+			server_shutdown(s)
+			delete(td.conns)
+			td.state = .Closed
+			sync.wait_group_done(&s.threads_closed)
+			return
+		}
 	}
 
 	td.event_loop = nbio.current_thread_event_loop()
@@ -423,7 +445,16 @@ server_shutdown :: proc(s: ^Server) {
 		return
 	}
 	for t in s.threads {
-		nbio.wake_up(t.event_loop)
+		// URUQUIM PATCH 30 (Closure H-2 follow-up) — a lane that has not yet
+		// reached `td.event_loop = current_thread_event_loop()` (still
+		// initializing, or one that FAILED to acquire and returned) has a nil
+		// loop; waking nil crashes. Skip it: an uninitialized lane will observe
+		// `closing` when it reaches its own loop, and a failed lane is already
+		// gone. This makes `server_shutdown` safe to call from a lane whose peers
+		// are still racing through init — which the init-failure unwind does.
+		if t.event_loop != nil {
+			nbio.wake_up(t.event_loop)
+		}
 	}
 }
 
