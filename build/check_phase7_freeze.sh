@@ -34,10 +34,17 @@ grep -qE '\| application \| 63 \| \+5 \| \*\*68\*\* \|' "$URUQUIM_P7" ||
 grep -qE '\| union \| 65 \| \+5 \| \*\*70\*\* \|' "$URUQUIM_P7" ||
   fail "the union row (65 -> 70) is missing or edited"
 
-# The live ledger must not have shrunk below what this phase froze. The
-# canonical count lives in check_public_api.sh (application = 68).
-grep -q 'exactly 68 symbols' "$URUQUIM_ROOT/build/check_public_api.sh" ||
-  fail "the live application ledger is not the 68 Phase 7 froze; a symbol was removed or the count drifted"
+# The live ledger must NOT HAVE SHRUNK below what this phase froze — it may grow
+# (WP7.5-C2 added the 5-symbol upload API, 68 -> 73). Pinning this to the literal
+# live count was the anti-pattern that broke check_phase2_freeze the moment a
+# later phase grew the ledger; the frozen total (68) is history, held by the doc
+# arithmetic above, and here we only require live >= 68. The canonical count
+# lives in check_public_api.sh ("application ledger is exactly N symbols").
+URUQUIM_P7_LIVE_LEDGER="$(grep -oE 'application ledger is exactly [0-9]+ symbols' "$URUQUIM_ROOT/build/check_public_api.sh" | grep -oE '[0-9]+' | head -1)"
+test -n "$URUQUIM_P7_LIVE_LEDGER" ||
+  fail "could not read the live application ledger count from check_public_api.sh"
+test "$URUQUIM_P7_LIVE_LEDGER" -ge 68 ||
+  fail "the live application ledger ($URUQUIM_P7_LIVE_LEDGER) is below the 68 Phase 7 froze; a symbol was removed"
 
 # Every one of the five new public symbols must be named in the freeze.
 for URUQUIM_SYM in Stream Stream_Send stream stream_send stream_close; do

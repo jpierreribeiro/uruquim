@@ -58,13 +58,17 @@ no recoverable panic (ADR-020). See the appendix.
 - Never emit `web.recovery`, a `recovery` middleware, or advice to "wrap the
   handler to catch the panic". None of it exists, and none of it can.
 
-**Two ledgers.** The application API is exactly **55** symbols (32 frozen in
+**Two ledgers.** The application API is exactly **73** symbols (32 frozen in
 Phase 1, plus `use`/`next`, `Router`/`router`/`mount`,
 `header`/`bearer_token`, `observe`/`Framework_Event`/`Framework_Error`,
 `logger` and `request_id` from Phase 2, and `route`, `app_with_state`,
 `state`, `Limits`, `DEFAULT_LIMITS`, `limits`, `stop`, `client_ip` and
-`trust_proxies`, `secure_headers`, `refused_connections` from Phases 3-4, and `is_draining`).
-The test-support API is a separate ledger of exactly **2**. Union: **57**. Do not
+`trust_proxies`, `secure_headers`, `refused_connections` from Phases 3-4, `is_draining`,
+`cors`/`Cors_Options`, `static`/`Static_Options`, `form_field`/`form_file`/`Uploaded_File`
+from Phases 5-6, `stream`/`Stream`/`stream_send`/`Stream_Send`/`stream_close` from
+Phase 7, and `enable_upload`/`upload`/`upload_persist`/`Upload`/`Upload_Config` from
+Phase 7.5).
+The test-support API is a separate ledger of exactly **2**. Union: **75**. Do not
 fold them together and do not invent a third form.
 
 ## Application
@@ -858,7 +862,7 @@ Installing an observer changes no response.
 ## Testing
 
 The test-support ledger is exactly **2** symbols, tracked separately from the
-68 application symbols.
+73 application symbols.
 
 ```text
 test_request(&app, method, path) -> Recorded_Response

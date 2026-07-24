@@ -147,6 +147,13 @@ Context_Internal :: struct {
 	// wire to the owner-lane pump instead of writing a body.
 	stream_detached: bool,
 
+	// Phase 7.5-C2 — the owned upload spool (`^ingest.Spool`) for this request,
+	// threaded from the neutral inbound, or nil when the body was not spooled.
+	// `web.upload` reads it; `driver_cleanup` cancels it (deleting the file)
+	// unless `web.upload_persist` transferred ownership. A rawptr for the same
+	// reason `stream_exchange` is one: the core names no owning transport type.
+	upload: rawptr,
+
 	// WP91 (F5/F6) — the mounts pointer the static terminal serves from,
 	// stamped by `dispatch` when a mount owns the path, in the same spirit as
 	// `miss_kind`: `dispatch` holds the App and decides; the terminal — an

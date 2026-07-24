@@ -10,6 +10,7 @@ package web
 // uruquim:file application
 
 import "core:mem"
+import ingest "uruquim:web/internal/ingest"
 import transport "uruquim:web/internal/transport"
 
 // serve runs the application's HTTP server on the given port and blocks until
@@ -62,6 +63,21 @@ serve :: proc(a: ^App, port: int) {
 		max_handlers     = a.private.limits.max_handlers,
 		dispatch         = serve_dispatch,
 		user             = a,
+	}
+	// Phase 7.5-C2: resolve the App's upload opt-in into transport primitives.
+	// max_concurrent defaults to handler-lanes − 1 (§4.2), floor 1, resolved here
+	// where the lane count is known; the adapter never sees a `web` config type.
+	if a.private.upload_enabled {
+		cfg.upload_enabled = true
+		cfg.upload_dir = a.private.upload.dir
+		cfg.upload_per_quota = a.private.upload.per_upload_quota
+		cfg.upload_proc_quota = a.private.upload.process_quota
+		cfg.upload_prefix_max = a.private.upload.memory_prefix_max
+		cfg.upload_max_conc = a.private.upload.max_concurrent
+		if cfg.upload_max_conc <= 0 {
+			lanes := a.private.limits.max_handlers
+			cfg.upload_max_conc = max(1, lanes - 1)
+		}
 	}
 	if err := transport.serve(cfg); err != .None {
 		framework_report(App, .Serve_Listen_Failed)
@@ -148,6 +164,11 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 	// in-memory transport, which has no connection to detach.
 	ctx.private.stream_exchange = inbound.exchange
 
+	// Phase 7.5-C2: the owned upload spool (an `^ingest.Spool`) travels the same
+	// way, so `web.upload` can hand the Handler its body-on-disk. Nil unless the
+	// adapter spooled a >max_body body; nil on the in-memory transport.
+	ctx.private.upload = inbound.upload
+
 	// WP37: the typed state travels the same way, and for the same reason —
 	// one copy on the shared pipeline, so both transports behave identically
 	// (R-10) and the Context still holds no `^App`.
@@ -213,6 +234,15 @@ driver_run :: proc(a: ^App, ctx: ^Context, inbound: transport.Inbound) {
 // AFTER it has captured or written the response.
 @(private)
 driver_cleanup :: proc(ctx: ^Context) {
+	// Phase 7.5-C2: the owned upload's automatic cleanup (§4.2). `cancel` deletes
+	// the spooled file exactly once and is a no-op if the Handler already
+	// transferred ownership with `web.upload_persist` (the spool is then Terminal)
+	// or if the body was never spooled (nil). The reason is advisory — `cancel`
+	// cleans up regardless — so "the request ended without persisting" is spelled
+	// with the closest neutral terminal.
+	if ctx.private.upload != nil {
+		ingest.cancel((^ingest.Spool)(ctx.private.upload), .Disconnected)
+	}
 	response_destroy(&ctx.private.response)
 	request_arena_destroy(ctx)
 }
